@@ -1,23 +1,43 @@
 {
   "schemaVersion": 1,
-  "id": "command-gui-server",
+  "id": "command-gui",
   "version": "${version}",
-  "name": "Command-GUI Server",
-  "description": "Server-side machine switch system for Command-GUI: configurable machines with per-bot timeline scripts, toggleable by players with the right permissions.",
+  "name": "Command-GUI",
+  "description": "A simple GUI mod for quickly executing commands. Supports custom commands with placeholders (player selection, text input, number input, coordinate input), preset command groups for Vanilla and Carpet Mod, and categorized command management.",
   "authors": [
     "Remrin"
   ],
+  "contact": {
+    "sources": "https://github.com/remrin/command-gui"
+  },
   "license": "GPL-3.0",
+  "icon": "assets/command-gui/icon.png",
   "environment": "*",
   "entrypoints": {
     "main": [
-      "com.remrin.server.MachineMod"
+      "com.remrin.CommandGUI"
+    ],
+    "client": [
+      "com.remrin.client.CommandGUIClient"
+    ],
+    "modmenu": [
+      "com.remrin.client.ModMenuIntegration"
     ]
   },
+  "mixins": [
+    "command-gui.mixins.json",
+    {
+      "config": "command-gui.client.mixins.json",
+      "environment": "client"
+    }
+  ],
   "depends": {
     "fabricloader": ">=0.19.3",
     "minecraft": "~26.2",
     "java": ">=25",
     "fabric-api": "*"
+  },
+  "suggests": {
+    "modmenu": "*"
   }
 }

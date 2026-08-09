@@ -88,6 +88,7 @@ public final class MachineManager {
             getString(action, "machineId"));
         case "clearCategory" -> clearCategory(player, server,
             getString(action, "categoryId"));
+        case "requestSync" -> syncTo(player);
         default -> MachineMod.LOGGER.warn("Unknown machine action '{}' from {}", type,
             player.getGameProfile().name());
       }
@@ -111,8 +112,8 @@ public final class MachineManager {
     int tick = server.getTickCount();
     int lockRemaining = MachineScheduler.switchLockRemaining(machine.id, tick);
     if (lockRemaining > 0) {
-      sendMessage(player, "机器「" + machine.name + "」开关间隔中（剩余 " + lockRemaining
-          + " tick），请稍后再试");
+      sendMessage(player, "机器「" + machine.name + "」开机/关机之后有（剩余 " + lockRemaining
+          + " tick）冷却时间，请稍后重试");
       MachineMod.LOGGER.info("Machine '{}' toggle rejected by {}: switch interval ({} left)",
           machine.id, player.getGameProfile().name(), lockRemaining);
       return;
@@ -312,8 +313,20 @@ public final class MachineManager {
    * Single changes are applied immediately. The lock window ({@code switchInterval}) blocks
    * toggling a mode that was just toggled.
    */
+  /**
+   * Applies the DESIRED set of active mode ids: every running mode that is not desired is shut
+   * down and every desired mode that is not running is booted — i.e. the machine's mode state
+   * converges to the given set. The client sends the final target set (the modes the player wants
+   * running), not a delta.
+   * <p>
+   * Shutdowns always happen BEFORE boots: the chain built here first stops the undesired modes
+   * (in the configured stop order with the configured interval), then starts the desired ones (in
+   * the configured start order with the configured interval). Single changes are applied
+   * immediately. The lock window ({@code switchInterval}) blocks toggling a mode that was just
+   * toggled.
+   */
   private static void setModes(ServerPlayer player, MinecraftServer server, String machineId,
-      List<String> toggleIds) {
+      List<String> desiredIds) {
     MachineData machine = MachineConfig.getMachine(machineId);
     if (machine == null) {
       sendMessage(player, "机器不存在: " + machineId);
@@ -323,34 +336,64 @@ public final class MachineManager {
       sendMessage(player, "你没有权限操作机器「" + machine.name + "」");
       return;
     }
+    // While any mode process (boot or shutdown timeline) is executing — or a sequenced chain is
+    // queued — further switches are rejected: the running process must finish (and then enter its
+    // switch cooldown) before the modes can be toggled again.
+    for (ModeData busy : machine.modes) {
+      if (MachineScheduler.isModeProcessRunning(machine.id, busy.id)) {
+        sendMessage(player, "机器「" + machine.name + "」模式正在执行开机/关机流程，请稍候再切换");
+        return;
+      }
+    }
+    if (MachineModeChain.isActive(machine.id)) {
+      sendMessage(player, "机器「" + machine.name + "」模式正在切换中，请稍候再操作");
+      return;
+    }
+    // The switch cooldown (switchInterval) starts when the last process COMPLETED; while any mode
+    // of the machine is still cooling down, further switches are rejected.
     int tick = server.getTickCount();
+    for (ModeData cooling : machine.modes) {
+      int remaining = MachineScheduler.modeLockRemaining(machine.id, cooling.id, tick);
+      if (remaining > 0) {
+        sendMessage(player, "机器「" + machine.name + "」模式切换冷却中（剩余 " + remaining
+            + " tick），请稍后重试");
+        return;
+      }
+    }
+    Set<String> desired = new HashSet<>(desiredIds);
     List<String> startIds = new ArrayList<>();
     List<String> stopIds = new ArrayList<>();
     int rejected = 0;
-    for (String modeId : toggleIds) {
-      ModeData mode = null;
-      for (ModeData candidate : machine.modes) {
-        if (candidate.id.equals(modeId)) {
-          mode = candidate;
-          break;
+    for (ModeData mode : machine.modes) {
+      boolean selected = desired.contains(mode.id); // the player clicked this mode
+      // The mode's switch state comes from its detection block (the block IS the switch): ON =
+      // running, OFF = off, ABNORMAL = locked. Read it live at click time.
+      MachineState state = MachineDetector.evaluateDetection(mode.detection, server, true).state();
+      MachineScheduler.updateDetectedModeState(machine.id, mode.id, state);
+      if (state == MachineState.ABNORMAL) {
+        if (selected) {
+          MachineDetector.DetectionResult abnormal =
+              MachineDetector.evaluateDetection(mode.detection, server, true);
+          sendMessage(player, "模式「" + mode.name + "」检测异常，无法开启："
+              + (abnormal.reason() != null ? abnormal.reason() : "检测方块异常"));
+          MachineMod.LOGGER.info("Mode '{}' of machine '{}' rejected by {}: detection abnormal",
+              mode.id, machine.id, player.getGameProfile().name());
+          rejected++;
         }
+        continue; // abnormal: neither bootable nor explicitly stopable by this click
       }
-      if (mode == null) {
-        continue;
-      }
-      int lockRemaining = MachineScheduler.modeLockRemaining(machine.id, mode.id, tick);
-      if (lockRemaining > 0) {
-        sendMessage(player, "模式「" + mode.name + "」开关间隔中（剩余 " + lockRemaining
-            + " tick），请稍后再试");
-        MachineMod.LOGGER.info("Mode '{}' of machine '{}' rejected by {}: switch interval ({} left)",
-            mode.id, machine.id, player.getGameProfile().name(), lockRemaining);
-        rejected++;
-        continue;
-      }
-      if (MachineScheduler.isModeRunning(machine.id, mode.id)) {
-        stopIds.add(mode.id);
-        MachineScheduler.recordModeSwitchTick(machine.id, mode.id, tick);
-      } else {
+      if (mode.singleSelect) {
+        // Single-select: target semantics — the clicked mode becomes the only selected one;
+        // running single-select modes outside the target are shut down.
+        boolean running = (state == MachineState.ON);
+        if (selected == running) {
+          continue; // already matches the target
+        }
+        if (!selected) {
+          stopIds.add(mode.id);
+          continue;
+        }
+        // selected && OFF: boot it
         if (!validModeStart(mode)) {
           sendMessage(player, "模式「" + mode.name + "」开启流程第一个指令必须是假人spawn指令");
           MachineMod.LOGGER.info("Mode '{}' of machine '{}' rejected by {}: invalid start",
@@ -358,29 +401,36 @@ public final class MachineManager {
           rejected++;
           continue;
         }
-        if (mode.detection != null && mode.detection.enabled) {
-          MachineDetector.DetectionResult detection =
-              MachineDetector.evaluateDetection(mode.detection, server, true);
-          if (detection.state() == MachineDetector.MachineState.ABNORMAL) {
-            sendMessage(player, "模式「" + mode.name + "」检测异常，无法开启："
-                + (detection.reason() != null ? detection.reason() : "检测方块异常"));
-            MachineMod.LOGGER.info("Mode '{}' of machine '{}' rejected by {}: {}",
-                mode.id, machine.id, player.getGameProfile().name(),
-                detection.reason() != null ? detection.reason() : "detection abnormal");
-            rejected++;
-            continue;
-          }
-        }
         startIds.add(mode.id);
-        MachineScheduler.recordModeSwitchTick(machine.id, mode.id, tick);
+      } else {
+        // Multi-select: toggle semantics — clicking a mode flips its state (ON -> stop,
+        // OFF -> start). Modes the player did NOT click are left untouched (single-select and
+        // multi-select do not interfere with each other).
+        if (!selected) {
+          continue;
+        }
+        if (state == MachineState.ON) {
+          stopIds.add(mode.id); // clicked a running mode -> shut it down
+          continue;
+        }
+        if (!validModeStart(mode)) {
+          sendMessage(player, "模式「" + mode.name + "」开启流程第一个指令必须是假人spawn指令");
+          MachineMod.LOGGER.info("Mode '{}' of machine '{}' rejected by {}: invalid start",
+              mode.id, machine.id, player.getGameProfile().name());
+          rejected++;
+          continue;
+        }
+        startIds.add(mode.id); // clicked an off mode -> boot it
       }
     }
     MachineMod.LOGGER.info("Machine '{}' setModes by {}: start={} stop={} rejected={}",
         machine.id, player.getGameProfile().name(), startIds, stopIds, rejected);
+    String triggerPlayer = player.getGameProfile().name();
     if (startIds.size() + stopIds.size() == 1) {
       // Single change: apply immediately (no sequencing needed)
       if (stopIds.size() == 1) {
-        MachineScheduler.stopModeWithShutdown(machine, findMode(machine, stopIds.get(0)));
+        MachineScheduler.stopModeWithShutdown(machine, findMode(machine, stopIds.get(0)),
+            triggerPlayer);
       } else {
         ModeData toStart = findMode(machine, startIds.get(0));
         // Single-select replacement: starting a single-select mode must stop any other RUNNING
@@ -404,20 +454,22 @@ public final class MachineManager {
               allStops.add(other.id);
             }
           }
-          MachineModeChain.buildChains(machine, startIds, allStops);
-          sendMessage(player, "机器「" + machine.name + "」模式已更新（替换运行中的单选模式）");
+          MachineModeChain.buildChains(machine, startIds, allStops, triggerPlayer);
           broadcastSync(server.getPlayerList());
           return;
         }
-        MachineScheduler.startMode(machine, toStart);
+        MachineScheduler.startMode(machine, toStart, triggerPlayer);
       }
     } else if (startIds.size() + stopIds.size() > 1) {
-      MachineModeChain.buildChains(machine, startIds, stopIds);
+      MachineModeChain.buildChains(machine, startIds, stopIds, triggerPlayer);
     }
-    sendMessage(player, startIds.size() + stopIds.size() > 0
-        ? "机器「" + machine.name + "」模式已更新"
-        : "机器「" + machine.name + "」没有需要变更的模式"
-        + (rejected > 0 ? "（" + rejected + " 个被拒绝）" : ""));
+    if (startIds.size() + stopIds.size() == 0) {
+      // Nothing to change: report (rejections were already reported per-mode).
+      sendMessage(player, "机器「" + machine.name + "」没有需要变更的模式"
+          + (rejected > 0 ? "（" + rejected + " 个被拒绝）" : ""));
+    }
+    // Otherwise the switch started; the "模式已切换" confirmation is sent when the processes
+    // COMPLETE (single change: MachineScheduler; sequenced chain: MachineModeChain).
     broadcastSync(server.getPlayerList());
   }
 
@@ -634,10 +686,18 @@ public final class MachineManager {
       }
       if (machine.modes != null) {
         for (ModeData mode : machine.modes) {
-          sb.append(MachineScheduler.isModeRunning(machine.id, mode.id));
+          // Refresh the cached detection state first, then include it in the signature. The block
+          // state IS the mode's switch state (isModeRunning reads this cache).
           if (mode.detection != null && mode.detection.enabled) {
-            sb.append(MachineDetector.evaluateDetection(mode.detection, server, true).state());
+            MachineState state =
+                MachineDetector.evaluateDetection(mode.detection, server, true).state();
+            MachineScheduler.updateDetectedModeState(machine.id, mode.id, state);
+            sb.append(state);
+          } else {
+            MachineScheduler.updateDetectedModeState(machine.id, mode.id, MachineState.DISABLED);
+            sb.append('D');
           }
+          sb.append(MachineScheduler.isModeRunning(machine.id, mode.id));
         }
       }
       sb.append(';');
@@ -656,6 +716,55 @@ public final class MachineManager {
     MinecraftServer server = MachineMod.getCurrentServer();
     if (server != null) {
       broadcastSync(server.getPlayerList());
+    }
+  }
+
+  /**
+   * Called when a mode switch process (a single change's timeline, or the whole sequenced chain)
+   * COMPLETED successfully: notifies the triggering player that the switch is done. Cooldown for
+   * the involved modes was already recorded by the scheduler at completion time.
+   */
+  public static void onModeSwitchFinished(MachineData machine, String triggerPlayer) {
+    MachineMod.LOGGER.info("Machine '{}' mode switch finished (by {})", machine.id, triggerPlayer);
+    if (triggerPlayer == null || triggerPlayer.isEmpty()) {
+      return;
+    }
+    MinecraftServer server = MachineMod.getCurrentServer();
+    if (server != null) {
+      ServerPlayer player = server.getPlayerList().getPlayerByName(triggerPlayer);
+      if (player != null) {
+        sendMessage(player, "机器「" + machine.name + "」模式已切换");
+      }
+    }
+  }
+
+  /**
+   * Called by the scheduler when a mode's process command fails (permission / invalid) mid-switch.
+   * The process is aborted immediately and the error is reported to the triggering player.
+   */
+  public static void onModeCommandFailed(MachineData machine, String modeId,
+      boolean isOffTimeline, String triggerPlayer, String command, String reason) {
+    String modeName = modeId;
+    for (ModeData mode : machine.modes) {
+      if (mode.id != null && mode.id.equals(modeId)) {
+        modeName = mode.name;
+        break;
+      }
+    }
+    String action = isOffTimeline ? "关闭" : "开启";
+    MachineMod.LOGGER.warn("Mode '{}' of machine '{}' {} failed: {} ({})", modeId, machine.id,
+        action, command, reason);
+    String message = "模式「" + modeName + "」" + action + "失败：" + reason + "（" + command + "）";
+    if (triggerPlayer == null || triggerPlayer.isEmpty()) {
+      broadcastSystem(message);
+      return;
+    }
+    MinecraftServer server = MachineMod.getCurrentServer();
+    if (server != null) {
+      ServerPlayer player = server.getPlayerList().getPlayerByName(triggerPlayer);
+      if (player != null) {
+        sendMessage(player, message);
+      }
     }
   }
 
@@ -733,20 +842,26 @@ public final class MachineManager {
           for (int i = 0; i < modes.size() && i < machine.modes.size(); i++) {
             JsonObject modeJson = modes.get(i).getAsJsonObject();
             ModeData mode = machine.modes.get(i);
-            modeJson.addProperty("running",
-                MachineScheduler.isModeRunning(machine.id, mode.id));
+            String detected = "";
             if (server != null && mode.detection != null && mode.detection.enabled) {
+              // The detection block is the mode's switch: evaluate it, refresh the scheduler's
+              // cache, and derive both the displayed state and the running flag from the same read.
               MachineState modeDetected = MachineDetector.evaluateDetection(
                   mode.detection, server, true).state();
-              modeJson.addProperty("detected", switch (modeDetected) {
+              MachineScheduler.updateDetectedModeState(machine.id, mode.id, modeDetected);
+              detected = switch (modeDetected) {
                 case ON -> "on";
                 case OFF -> "off";
                 case ABNORMAL -> "abnormal";
                 default -> "";
-              });
+              };
             } else {
-              modeJson.addProperty("detected", "");
+              MachineScheduler.updateDetectedModeState(machine.id, mode.id, MachineState.DISABLED);
             }
+            modeJson.addProperty("running", MachineScheduler.isModeRunning(machine.id, mode.id));
+            modeJson.addProperty("detected", detected);
+            modeJson.addProperty("processing",
+                MachineScheduler.isModeProcessRunning(machine.id, mode.id));
           }
         }
       }
@@ -898,11 +1013,14 @@ public final class MachineManager {
         if (offError != null) {
           return offError;
         }
-        if (mode.detection != null && mode.detection.enabled) {
-          String detectionError = validateDetection(mode.detection, "模式「" + mode.name + "」");
-          if (detectionError != null) {
-            return detectionError;
-          }
+        // Every mode MUST configure a detection block: the block state IS the mode's switch
+        // (ON = running, OFF = off, ABNORMAL = locked). A mode without detection cannot be saved.
+        if (mode.detection == null || !mode.detection.enabled) {
+          return "模式「" + mode.name + "」必须配置开关检测";
+        }
+        String detectionError = validateDetection(mode.detection, "模式「" + mode.name + "」");
+        if (detectionError != null) {
+          return detectionError;
         }
       }
     }

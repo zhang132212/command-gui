@@ -1,12 +1,14 @@
 package com.remrin.client.gui;
 
 import com.remrin.client.machine.MachineModels;
+import com.remrin.client.machine.MachineModels.MachineData;
 import com.remrin.client.machine.MachineModels.ModeData;
 import com.remrin.client.machine.MachineModels.Timeline;
 import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.Checkbox;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.network.chat.Component;
@@ -15,7 +17,8 @@ import org.lwjgl.glfw.GLFW;
 /**
  * Editor for a single machine mode: the mode name plus its boot process and an optional shutdown
  * process (both reusing {@link TimelineEditorScreen}). Edits a working copy; "保存" commits it back
- * to the mode list.
+ * to the mode list. A "沿用开机流程" checkbox imports the machine's boot timeline into the mode's
+ * boot process in one click.
  */
 public class ModeEditorScreen extends BaseParentedScreen<ModesEditorScreen> {
 
@@ -35,6 +38,7 @@ public class ModeEditorScreen extends BaseParentedScreen<ModesEditorScreen> {
   private Button onTimelineButton;
   private Button offTimelineButton;
   private Button detectionButton;
+  private Checkbox followBootCheckbox;
 
   public ModeEditorScreen(ModesEditorScreen parent, ModeData original, List<String> botNames,
       Runnable onChanged) {
@@ -88,6 +92,19 @@ public class ModeEditorScreen extends BaseParentedScreen<ModesEditorScreen> {
     ).bounds(fieldX + (processWidth + 8) * 2, 90, processWidth, 18).build();
     this.addRenderableWidget(detectionButton);
 
+    // "沿用开机流程": checking it imports the machine's boot timeline into this mode's boot
+    // process (one-shot copy — the mode stays editable afterwards).
+    followBootCheckbox = Checkbox.builder(
+        Component.translatable("screen.command-gui.machine.follow_boot"),
+        this.font
+    ).pos(fieldX, 114).selected(false)
+        .onValueChange((checkbox, selected) -> {
+          if (selected) {
+            importMachineBoot();
+          }
+        }).build();
+    this.addRenderableWidget(followBootCheckbox);
+
     int barY = this.height - 22;
     int barWidth = Math.min(70, FIELD_WIDTH / 3);
     int barStartX = fieldX + (FIELD_WIDTH - barWidth * 2 - 8) / 2;
@@ -119,6 +136,24 @@ public class ModeEditorScreen extends BaseParentedScreen<ModesEditorScreen> {
   private void openDetectionEditor() {
     this.minecraft.gui.setScreen(new DetectionScreen(this, working.detection,
         detection -> working.detection = detection));
+  }
+
+  /**
+   * Copies the machine's boot timeline (开关机流程-开机) into this mode's boot process. One-shot
+   * import: the mode keeps its own copy afterwards and stays fully editable.
+   */
+  private void importMachineBoot() {
+    MachineData machine = parent.getMachine();
+    if (machine == null || machine.onTimeline == null || machine.onTimeline.steps.isEmpty()) {
+      errorMessage = Component.translatable("screen.command-gui.machine.error_follow_boot_empty")
+          .getString();
+      return;
+    }
+    Timeline imported = new Timeline();
+    copyTimelineInto(machine.onTimeline, imported);
+    working.onTimeline = imported;
+    errorMessage = "";
+    updateProcessButtons();
   }
 
   private void updateProcessButtons() {
@@ -267,7 +302,7 @@ public class ModeEditorScreen extends BaseParentedScreen<ModesEditorScreen> {
         fieldX + FIELD_WIDTH - 72, 36, 0xFFAAAAAA);
 
     if (!errorMessage.isEmpty()) {
-      guiGraphics.text(this.font, Component.literal(errorMessage), fieldX, 118, 0xFFFF5555);
+      guiGraphics.text(this.font, Component.literal(errorMessage), fieldX, 140, 0xFFFF5555);
     }
   }
 }

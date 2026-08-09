@@ -421,6 +421,14 @@ public class ModesEditorScreen extends BaseParentedScreen<MachineEditorScreen> {
     return workingModeInterval;
   }
 
+  /**
+   * The machine being edited (parent editor's working copy), used by the mode editor's
+   * "follow machine boot" import.
+   */
+  MachineData getMachine() {
+    return parent.getMachine();
+  }
+
   List<String> getWorkingStopModeOrder() {
     return workingStopModeOrder;
   }

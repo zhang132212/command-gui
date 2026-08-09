@@ -192,6 +192,16 @@ public final class MachineNetworkManager {
   }
 
   /**
+   * Asks the server to push a fresh sync immediately (used when a screen opens so runtime states
+   * like mode running flags are not stale).
+   */
+  public static void sendRequestSync() {
+    JsonObject action = new JsonObject();
+    action.addProperty("type", "requestSync");
+    sendActionInternal(action.toString());
+  }
+
+  /**
    * Acquires or releases the hard edit lock for a machine.
    */
   public static void sendEditSession(String machineId, boolean open) {
@@ -203,15 +213,16 @@ public final class MachineNetworkManager {
   }
 
   /**
-   * Sends the list of mode ids to FLIP (delta): each listed mode is toggled — stopped modes are
-   * started, running modes are stopped. Concurrent toggles from different players compose.
+   * Sends the DESIRED set of active mode ids: the machine's mode state converges to this set —
+   * running modes that are not in the set are shut down (in the configured stop order) before the
+   * missing ones are booted (in the configured start order).
    */
-  public static void sendSetModes(String machineId, List<String> toggleIds) {
+  public static void sendSetModes(String machineId, List<String> targetIds) {
     JsonObject action = new JsonObject();
     action.addProperty("type", "setModes");
     action.addProperty("machineId", machineId);
     JsonArray array = new JsonArray();
-    for (String modeId : toggleIds) {
+    for (String modeId : targetIds) {
       array.add(modeId);
     }
     action.add("modeIds", array);

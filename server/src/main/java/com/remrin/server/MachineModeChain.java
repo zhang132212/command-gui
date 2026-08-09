@@ -52,28 +52,62 @@ public final class MachineModeChain {
     String activeModeId = null;
     /** Set once the active mode's process has completed; the chain then waits and advances. */
     boolean activeCompleted = false;
+    /** Player who triggered the mode changes; every step's commands run with their permissions. */
+    final String triggerPlayer;
+
+    Chain(String triggerPlayer) {
+      this.triggerPlayer = triggerPlayer;
+    }
   }
 
   /**
    * Builds the chain for a 确定 action on a machine from the sets of mode ids to start and to
-   * stop. Any existing chain for the machine is replaced.
+   * stop. Any existing chain for the machine is replaced. The triggering player is carried into
+   * the chain so every step's commands run with that player's permissions.
+   * <p>
+   * Step order: the SINGLE-select logic runs entirely first (its stops then its starts, in the
+   * configured stop/start order with the configured intervals), then the MULTI-select logic (its
+   * stops then its starts). This guarantees the configured sequence/timing is respected exactly.
    */
   public static void buildChains(MachineData machine, List<String> startIds,
-      List<String> stopIds) {
+      List<String> stopIds, String triggerPlayer) {
     int startInterval = Math.max(0, machine.modeInterval);
     int stopInterval = machine.stopFollowsStart ? startInterval
         : Math.max(0, machine.stopModeInterval);
 
-    List<String> stopOrder = orderedIds(machine, stopIds, machine.stopFollowsStart);
-    List<String> startOrder = orderedIds(machine, startIds, false);
+    // Split the affected modes into single-select and multi-select groups.
+    List<String> singleStop = new ArrayList<>();
+    List<String> singleStart = new ArrayList<>();
+    List<String> multiStop = new ArrayList<>();
+    List<String> multiStart = new ArrayList<>();
+    for (String id : stopIds) {
+      ModeData mode = findMode(machine, id);
+      if (mode != null && mode.singleSelect) {
+        singleStop.add(id);
+      } else {
+        multiStop.add(id);
+      }
+    }
+    for (String id : startIds) {
+      ModeData mode = findMode(machine, id);
+      if (mode != null && mode.singleSelect) {
+        singleStart.add(id);
+      } else {
+        multiStart.add(id);
+      }
+    }
+    List<String> singleStopOrder = orderedIds(machine, singleStop, machine.stopFollowsStart);
+    List<String> singleStartOrder = orderedIds(machine, singleStart, false);
+    List<String> multiStopOrder = orderedIds(machine, multiStop, machine.stopFollowsStart);
+    List<String> multiStartOrder = orderedIds(machine, multiStart, false);
 
-    Chain chain = new Chain();
+    Chain chain = new Chain(triggerPlayer);
 
     // Single-select replacement: a running single-select mode not being stopped gets shut down
     // before the first selected single-select mode starts.
     Map<String, String> replacementOf = new HashMap<>();
     String firstStartingSingle = null;
-    for (String modeId : startOrder) {
+    for (String modeId : singleStartOrder) {
       ModeData mode = findMode(machine, modeId);
       if (mode != null && mode.singleSelect) {
         firstStartingSingle = modeId;
@@ -84,8 +118,8 @@ public final class MachineModeChain {
       for (ModeData mode : machine.modes) {
         if (mode.singleSelect && !startIds.contains(mode.id) && !stopIds.contains(mode.id)
             && MachineScheduler.isModeRunning(machine.id, mode.id)) {
-          if (!stopOrder.contains(mode.id)) {
-            stopOrder.add(0, mode.id);
+          if (!singleStopOrder.contains(mode.id)) {
+            singleStopOrder.add(0, mode.id);
           }
           replacementOf.put(firstStartingSingle, mode.id);
         }
@@ -93,16 +127,28 @@ public final class MachineModeChain {
     }
 
     boolean first = true;
-    for (String modeId : stopOrder) {
+    // 1) single-select stops
+    for (String modeId : singleStopOrder) {
       chain.steps.add(new Step(modeId, Action.STOP, first ? 0 : stopInterval));
       first = false;
     }
-    for (String modeId : startOrder) {
+    // 2) single-select starts
+    for (String modeId : singleStartOrder) {
       int wait = first ? 0 : startInterval;
       if (replacementOf.containsKey(modeId)) {
         wait = startInterval + stopInterval;
       }
       chain.steps.add(new Step(modeId, Action.START, wait));
+      first = false;
+    }
+    // 3) multi-select stops (all shutdowns before any multi-select boot)
+    for (String modeId : multiStopOrder) {
+      chain.steps.add(new Step(modeId, Action.STOP, first ? 0 : stopInterval));
+      first = false;
+    }
+    // 4) multi-select starts
+    for (String modeId : multiStartOrder) {
+      chain.steps.add(new Step(modeId, Action.START, first ? 0 : startInterval));
       first = false;
     }
 
@@ -175,7 +221,9 @@ public final class MachineModeChain {
         chain.activeCompleted = false;
         Step next = chain.steps.peek();
         if (next == null) {
+          // The whole sequenced switch finished: notify the triggering player.
           it.remove();
+          MachineManager.onModeSwitchFinished(machine, chain.triggerPlayer);
           continue;
         }
         chain.waitTicks = next.waitAfterPrevious;
@@ -186,7 +234,9 @@ public final class MachineModeChain {
       }
       Step step = chain.steps.poll();
       if (step == null) {
+        // The whole sequenced switch finished: notify the triggering player.
         it.remove();
+        MachineManager.onModeSwitchFinished(machine, chain.triggerPlayer);
         continue;
       }
       ModeData mode = findMode(machine, step.modeId);
@@ -196,13 +246,16 @@ public final class MachineModeChain {
         continue; // deleted mode: skip, chain advances next tick
       }
       if (step.action == Action.STOP) {
-        MachineScheduler.stopModeWithShutdown(machine, mode);
+        MachineScheduler.stopModeWithShutdown(machine, mode, chain.triggerPlayer);
         MachineMod.LOGGER.info("Chain: stopping mode '{}' of machine '{}'",
             step.modeId, machineId);
-      } else if (!launchStart(server, machine, mode)) {
+      } else if (!launchStart(server, machine, mode, chain.triggerPlayer)) {
         continue; // rejected mode: skip, chain advances next tick
       }
-      if (MachineScheduler.isModeRunning(machine.id, mode.id)) {
+      // The chain advances when the mode's PROCESS completes (boot or shutdown runtime finished).
+      // The persistent ON flag (isModeRunning) is not used here: it stays set after the on-timeline
+      // finishes, which would otherwise block the chain forever.
+      if (MachineScheduler.isModeProcessRunning(machine.id, mode.id)) {
         chain.activeModeId = mode.id;
         chain.activeCompleted = false;
       } else {
@@ -214,10 +267,12 @@ public final class MachineModeChain {
   }
 
   /**
-   * Launches a mode's boot process after validating its detection and start config. Returns false
-   * when the mode cannot be started (a message is broadcast).
+   * Launches a mode's boot process after validating its detection, start config and the
+   * triggering player's permission for the first command. Returns false when the mode cannot be
+   * started (a message is broadcast).
    */
-  private static boolean launchStart(MinecraftServer server, MachineData machine, ModeData mode) {
+  private static boolean launchStart(MinecraftServer server, MachineData machine, ModeData mode,
+      String triggerPlayer) {
     if (mode.detection != null && mode.detection.enabled) {
       MachineDetector.DetectionResult detection =
           MachineDetector.evaluateDetection(mode.detection, server, true);
@@ -232,7 +287,19 @@ public final class MachineModeChain {
           + "」开启流程第一个指令必须是假人spawn指令，已跳过启动");
       return false;
     }
-    MachineScheduler.startMode(machine, mode);
+    // Pre-check the first command against the TRIGGERING PLAYER's own permissions, mirroring the
+    // switch boot check: a mode whose first command would be rejected for the player must not
+    // silently run a broken process.
+    if (triggerPlayer != null && !triggerPlayer.isEmpty()) {
+      String firstCommand = mode.onTimeline.steps.get(0).commands.get(0);
+      String permissionError = MachineScheduler.checkCommandPermission(firstCommand, triggerPlayer);
+      if (permissionError != null) {
+        MachineManager.broadcastSystem("模式「" + mode.name + "」启动失败：无权限执行指令（"
+            + permissionError + "）");
+        return false;
+      }
+    }
+    MachineScheduler.startMode(machine, mode, triggerPlayer);
     return true;
   }
 
@@ -244,6 +311,14 @@ public final class MachineModeChain {
     if (chain != null && modeId.equals(chain.activeModeId)) {
       chain.activeCompleted = true;
     }
+  }
+
+  /**
+   * Whether a machine currently has a mode chain queued (i.e. a sequenced switch is in progress).
+   * Used to reject further mode switches while the chain is running.
+   */
+  public static boolean isActive(String machineId) {
+    return chains.containsKey(machineId);
   }
 
   /**

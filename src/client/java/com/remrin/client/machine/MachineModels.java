@@ -74,6 +74,8 @@ public final class MachineModels {
     public DetectionData detection;
     /** Detection state appended by the server ("on"/"off"/"abnormal"/""). */
     public String detected = "";
+    /** Whether the mode's boot/shutdown process is currently executing (appended by the server). */
+    public boolean processing = false;
     public boolean running = false;
   }
 

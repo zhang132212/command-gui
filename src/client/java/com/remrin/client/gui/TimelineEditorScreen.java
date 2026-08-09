@@ -179,6 +179,8 @@ public class TimelineEditorScreen extends BaseParentedScreen<Screen> {
     step.bot = Math.max(0, botNames.size() - 1);
     working.steps.add(step);
     scrollOffset = Math.max(0, working.steps.size() - 1);
+    com.remrin.client.machine.MachineDebug.log("[Timeline.addStep] stepHash="
+        + System.identityHashCode(step) + " steps=" + working.steps.size());
     rebuildStepButtons();
   }
 
@@ -200,6 +202,10 @@ public class TimelineEditorScreen extends BaseParentedScreen<Screen> {
 
   private void editStep(int index) {
     Step step = working.steps.get(index);
+    com.remrin.client.machine.MachineDebug.log("[Timeline.editStep] index=" + index
+        + " stepHash=" + System.identityHashCode(step) + " commands="
+        + com.remrin.client.machine.MachineDebug.commandsString(step.commands)
+        + " workingHash=" + System.identityHashCode(working));
     this.minecraft.gui.setScreen(new StepEditorScreen(
         this,
         step,
@@ -209,6 +215,12 @@ public class TimelineEditorScreen extends BaseParentedScreen<Screen> {
 
   private void saveAndClose() {
     parseLoopCount();
+    com.remrin.client.machine.MachineDebug.log("[Timeline.save] workingHash="
+        + System.identityHashCode(working) + " originalHash="
+        + System.identityHashCode(original) + " steps=" + working.steps.size()
+        + " firstCommands=" + (working.steps.isEmpty() ? "[]"
+            : com.remrin.client.machine.MachineDebug.commandsString(
+                working.steps.get(0).commands)));
     copyInto(working, original);
     if (onApply != null) {
       onApply.run();
@@ -315,14 +327,18 @@ public class TimelineEditorScreen extends BaseParentedScreen<Screen> {
       guiGraphics.text(this.font, status, listLeft, listBottom + 2, color);
     }
 
-    int loopLabelWidth = this.font.width(
-        Component.translatable("screen.command-gui.machine.loop_count")) + 6;
-    guiGraphics.text(this.font,
-        Component.translatable("screen.command-gui.machine.loop_count"),
-        listLeft, this.height - BOTTOM_BAR_Y_OFFSET + 2, 0xFFAAAAAA);
-    guiGraphics.text(this.font,
-        Component.translatable("screen.command-gui.machine.loop_count_hint"),
-        listLeft + loopLabelWidth + 46 + 4, this.height - BOTTOM_BAR_Y_OFFSET + 2, 0xFF777777);
+    // The loop-count label/hint only belongs to loopable timelines (machine boot/shutdown
+    // processes); mode timelines never loop, so the field AND its labels are hidden there.
+    if (allowLoop) {
+      int loopLabelWidth = this.font.width(
+          Component.translatable("screen.command-gui.machine.loop_count")) + 6;
+      guiGraphics.text(this.font,
+          Component.translatable("screen.command-gui.machine.loop_count"),
+          listLeft, this.height - BOTTOM_BAR_Y_OFFSET + 2, 0xFFAAAAAA);
+      guiGraphics.text(this.font,
+          Component.translatable("screen.command-gui.machine.loop_count_hint"),
+          listLeft + loopLabelWidth + 46 + 4, this.height - BOTTOM_BAR_Y_OFFSET + 2, 0xFF777777);
+    }
 
     // Right-edge scrollbar for the step list. Always drawn — when the list fits entirely the
     // handle renders as a full-height grey thumb (same convention as the main screen's scrollbar),

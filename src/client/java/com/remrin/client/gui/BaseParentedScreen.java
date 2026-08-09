@@ -65,12 +65,18 @@ public abstract class BaseParentedScreen<P extends Screen> extends Screen {
       return;
     }
     if (fbW[0] != window.getWidth() || fbH[0] != window.getHeight()) {
+      com.remrin.client.machine.MachineDebug.log("[Layout] syncWindowSize framebuffer lag: cached "
+          + window.getWidth() + "x" + window.getHeight() + " live " + fbW[0] + "x" + fbH[0]
+          + " screen " + this.width + "x" + this.height);
       window.setWidth(fbW[0]);
       window.setHeight(fbH[0]);
       this.minecraft.resizeGui();
       return;
     }
     if (this.width != window.getGuiScaledWidth() || this.height != window.getGuiScaledHeight()) {
+      com.remrin.client.machine.MachineDebug.log("[Layout] syncWindowSize logical lag: screen "
+          + this.width + "x" + this.height + " scaled " + window.getGuiScaledWidth() + "x"
+          + window.getGuiScaledHeight());
       this.minecraft.resizeGui();
     }
   }

@@ -57,6 +57,14 @@ public class MachineModesScreen extends BaseParentedScreen<CommandGUIScreen> {
   private double gridScrollbarGrabOffset = 0;
   /** Last seen machine sync version; used to reload modes when a sync arrives. */
   private int lastSyncVersion = -1;
+  /**
+   * Whether the server's fresh state has arrived. Until then the constructor snapshot may carry
+   * stale running flags, so every chip stays disabled (no interaction) to avoid acting on a wrong
+   * state.
+   */
+  private boolean synced = false;
+  /** True once the player clicked a chip; the sync refresh then never rewrites the selection. */
+  private boolean playerSelected = false;
 
   public MachineModesScreen(CommandGUIScreen parent, MachineData machine) {
     super(Component.translatable("screen.command-gui.machine.modes_select_title", machine.name),
@@ -64,12 +72,35 @@ public class MachineModesScreen extends BaseParentedScreen<CommandGUIScreen> {
     this.machineId = machine.id;
     if (machine.modes != null) {
       this.modes.addAll(machine.modes);
+      // Radio-selector semantics: the currently running single-select mode is pre-marked as the
+      // selected ("lit") chip — it stays highlighted and cannot be clicked off; switching only
+      // happens by clicking one of its mutually-exclusive peers.
+      for (ModeData mode : machine.modes) {
+        if (mode.singleSelect && "on".equals(mode.detected)) {
+          pending.add(mode.id);
+        }
+      }
+      StringBuilder diag = new StringBuilder("[Modes.open] " + machine.id + ":");
+      for (ModeData mode : machine.modes) {
+        diag.append(" ").append(mode.id).append("(single=").append(mode.singleSelect)
+            .append(",running=").append(mode.running).append(")");
+      }
+      com.remrin.client.machine.MachineDebug.log(diag.toString());
     }
   }
 
   @Override
   protected void init() {
     super.init();
+
+    // Ask the server for a fresh sync right away: the modes snapshot taken in the constructor may
+    // carry stale running flags (the server pushes state changes asynchronously), which would make
+    // running single-select chips look clickable. The arriving sync refreshes the chips below.
+    // Remember the version at open time so the FIRST arriving sync (which reflects the fresh
+    // state) is the one that unlocks the chips — not an already-cached old snapshot.
+    lastSyncVersion = MachineNetworkManager.getSyncVersion();
+    synced = false;
+    MachineNetworkManager.sendRequestSync();
 
     int listWidth = Math.min(340, this.width - 40);
     listLeft = (this.width - listWidth) / 2;
@@ -146,11 +177,26 @@ public class MachineModesScreen extends BaseParentedScreen<CommandGUIScreen> {
           b -> togglePending(mode));
       chip.setDarkSelected(() -> pending.contains(mode.id), 0xFFFFAA00);
       chip.setUnselectedTextColor(stateColor);
-      chip.setTooltip(Tooltip.create(Component.translatable(
-          "screen.command-gui.machine.chip_hint", mode.name)));
-      if (chipLocked || inCooldown(modeCooldownUntil.get(mode.id))) {
+      // A currently RUNNING single-select mode cannot be toggled off by clicking it — switching
+      // only happens by selecting one of its mutually-exclusive peers. A mode whose boot/shutdown
+      // process is still executing is also locked (the server rejects switches mid-process).
+      boolean singleSelectRunning = mode.singleSelect && "on".equals(mode.detected);
+      if (singleSelectRunning) {
+        chip.setTooltip(Tooltip.create(Component.translatable(
+            "screen.command-gui.machine.chip_single_running", mode.name)));
+      } else {
+        chip.setTooltip(Tooltip.create(Component.translatable(
+            "screen.command-gui.machine.chip_hint", mode.name)));
+      }
+      if (chipLocked || singleSelectRunning || mode.processing
+          || inCooldown(modeCooldownUntil.get(mode.id)) || !synced) {
         chip.active = false;
       }
+      com.remrin.client.machine.MachineDebug.log("[Modes.chip] " + machineId + " " + mode.id
+          + " single=" + mode.singleSelect + " running=" + mode.running
+          + " processing=" + mode.processing
+          + " locked=" + chipLocked + " cooldown=" + inCooldown(modeCooldownUntil.get(mode.id))
+          + " synced=" + synced + " active=" + chip.active);
       chipButtons.add(chip);
       this.addRenderableWidget(chip);
     }
@@ -198,15 +244,27 @@ public class MachineModesScreen extends BaseParentedScreen<CommandGUIScreen> {
   @Override
   public void tick() {
     super.tick();
-    // When the server's sync arrives (refresh detection pushed a fresh machine list), reload the
-    // modes and rebuild the chips so the ⏸/▶/⚠ detection states are current.
+    // When the server's sync arrives (opened via requestSync, or refresh detection pushed a fresh
+    // machine list), reload the modes and rebuild the chips so the ⏸/▶/⚠ detection states and the
+    // running single-select lock are current.
     int current = MachineNetworkManager.getSyncVersion();
     if (lastSyncVersion >= 0 && current != lastSyncVersion) {
       lastSyncVersion = current;
+      synced = true;
       MachineData fresh = MachineNetworkManager.getMachine(machineId);
       if (fresh != null && fresh.modes != null) {
         modes.clear();
         modes.addAll(fresh.modes);
+        // Re-mark the currently running single-select mode as the "lit" selection — unless the
+        // player already started their own selection (their clicks must not be overwritten).
+        if (!playerSelected) {
+          pending.clear();
+          for (ModeData mode : modes) {
+            if (mode.singleSelect && "on".equals(mode.detected)) {
+              pending.add(mode.id);
+            }
+          }
+        }
         rebuildChips();
       }
     }
@@ -217,6 +275,14 @@ public class MachineModesScreen extends BaseParentedScreen<CommandGUIScreen> {
   }
 
   private void togglePending(ModeData clicked) {
+    // Radio-selector semantics: a RUNNING single-select mode is never toggleable by clicking it —
+    // the selection can only move to a mutually-exclusive peer. This guard runs even if the chip
+    // somehow is not visually disabled (e.g. a stale sync running flag). Modes whose boot/shutdown
+    // process is still executing are locked too (the server rejects switches mid-process).
+    if ((clicked.singleSelect && "on".equals(clicked.detected)) || clicked.processing) {
+      return;
+    }
+    playerSelected = true;
     // Single-select modes are mutually exclusive: clicking one clears any other pending
     // single-select mode (multi-select modes are unaffected).
     if (clicked.singleSelect) {
@@ -250,21 +316,14 @@ public class MachineModesScreen extends BaseParentedScreen<CommandGUIScreen> {
         break;
       }
     }
-    Set<String> desired = new HashSet<>();
-    if (machine.modes != null) {
-      for (ModeData mode : machine.modes) {
-        if (mode.running) {
-          desired.add(mode.id);
-        }
-      }
-    }
+    // The pending set IS the desired target state: every mode the player selected (amber chips)
+    // should run after the apply, everything else is shut down. The server converges the machine
+    // to this set — stopping the unselected running modes first (in the configured stop order),
+    // then starting the selected ones (in the configured start order).
     for (String modeId : pending) {
-      if (!desired.remove(modeId)) {
-        desired.add(modeId);
-      }
       modeCooldownUntil.put(modeId, now + interval * TICK_MS);
     }
-    MachineNetworkManager.sendSetModes(machineId, new ArrayList<>(desired));
+    MachineNetworkManager.sendSetModes(machineId, new ArrayList<>(pending));
     pending.clear();
     this.minecraft.gui.setScreen(parent);
   }

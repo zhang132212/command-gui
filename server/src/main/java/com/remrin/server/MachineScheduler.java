@@ -1,5 +1,6 @@
 package com.remrin.server;
 
+import com.remrin.server.MachineDetector.MachineState;
 import com.remrin.server.config.MachineConfig;
 import com.remrin.server.config.MachineConfig.MachineData;
 import com.remrin.server.config.MachineConfig.ModeData;
@@ -41,16 +42,53 @@ public final class MachineScheduler {
   /** Main switch runtimes: machine id -> runtime. Mode runtimes are keyed {@code id#modeId}. */
   private static final Map<String, Runtime> runtimes = new HashMap<>();
   /**
+   * Built-in grace period (ticks) after a step that spawned a fake player, before the next step
+   * may run. Spawning a fresh bot can take a while (the entity has to appear and register), so
+   * follow-up commands must wait — otherwise look/use/attack fire before the bot exists.
+   */
+  private static final int SPAWN_GRACE_TICKS = 60;
+  /**
+   * Absolute timeout (ticks) for waiting on a spawned bot to come online. After the fixed
+   * {@link #SPAWN_GRACE_TICKS} the scheduler additionally waits until the bot is actually present
+   * in the player list — the very first spawn after a server restart can take several seconds
+   * (cold chunk / fake-player system), far longer than the grace period, so a fixed delay alone
+   * lets the follow-up commands fire before the bot exists (carpet then no-ops them). This timeout
+   * just prevents the timeline from hanging forever when a spawn silently fails.
+   */
+  private static final int AWAIT_SPAWN_TIMEOUT = 300;
+  /**
    * Per-machine per-bot gate: machine id -> (bot name -> last server tick that bot was used).
    * Shared by all timelines of a machine so the same bot never gets two commands in one tick.
    */
   private static final Map<String, Map<String, Integer>> botLastTick = new HashMap<>();
+  /**
+   * Last evaluated detection-block state of every detection-enabled mode
+   * (machine id#mode id -> MachineState). Refreshed once per second by
+   * {@code MachineManager.tickStates} and on every sync/build. A mode is considered "switched on"
+   * when its detection block is ON — the block IS the switch. The runtime map, by contrast, only
+   * exists while a boot/shutdown process is executing.
+   */
+  private static final Map<String, MachineState> detectedModeState = new HashMap<>();
 
   private MachineScheduler() {
   }
 
   private static String modeKey(String machineId, String modeId) {
     return machineId + "#" + modeId;
+  }
+
+  /**
+   * Records the latest detection result of a mode (called by the state ticker and the sync
+   * builder). {@code DISABLED} clears the entry (mode without detection never counts as ON).
+   */
+  public static void updateDetectedModeState(String machineId, String modeId,
+      MachineState state) {
+    String key = modeKey(machineId, modeId);
+    if (state == MachineState.DISABLED) {
+      detectedModeState.remove(key);
+    } else {
+      detectedModeState.put(key, state);
+    }
   }
 
   /**
@@ -83,8 +121,15 @@ public final class MachineScheduler {
           runtime.hadFailures = true;
           runtime.failureMessage = pending.command;
           runtime.failedReason = "无权限执行该指令";
-          MachineManager.onSwitchCommandFailed(runtime.machine, runtime.isOffTimeline,
-              runtime.triggerPlayer, pending.command, runtime.failedReason);
+          int hashIndex = runtime.key.indexOf('#');
+          if (hashIndex >= 0) {
+            MachineManager.onModeCommandFailed(runtime.machine,
+                runtime.key.substring(hashIndex + 1), runtime.isOffTimeline,
+                runtime.triggerPlayer, pending.command, runtime.failedReason);
+          } else {
+            MachineManager.onSwitchCommandFailed(runtime.machine, runtime.isOffTimeline,
+                runtime.triggerPlayer, pending.command, runtime.failedReason);
+          }
           // Stop the rest of the timeline: no point continuing a broken process.
           runtime.finished = true;
           runtime.pending.clear();
@@ -99,8 +144,18 @@ public final class MachineScheduler {
         cleanupIfEmpty(runtime.machine.id);
         int hashIndex = runtime.key.indexOf('#');
         if (hashIndex >= 0) {
-          MachineModeChain.onModeProcessFinished(
-              runtime.key.substring(0, hashIndex), runtime.key.substring(hashIndex + 1));
+          String machineId = runtime.key.substring(0, hashIndex);
+          String modeId = runtime.key.substring(hashIndex + 1);
+          // The mode's switch process finished: the mode now enters its switch cooldown (its
+          // switchInterval ticks, falling back to the machine's) BEFORE it can be toggled again.
+          // The lock window therefore starts when the process completes, not at click time.
+          MachineScheduler.recordModeSwitchTick(machineId, modeId, tick);
+          MachineModeChain.onModeProcessFinished(machineId, modeId);
+          // A single change (no active chain) that finished without failures: tell the player the
+          // switch is complete. Sequenced chains report once the whole chain finishes instead.
+          if (!runtime.hadFailures && !MachineModeChain.isActive(machineId)) {
+            MachineManager.onModeSwitchFinished(runtime.machine, runtime.triggerPlayer);
+          }
         } else {
           // Switch timeline (boot or shutdown) finished without failures: report success to the
           // manager so it can notify the triggering player AFTER the whole process completed.
@@ -114,6 +169,18 @@ public final class MachineScheduler {
       }
       if (runtime.waitTicks > 0) {
         runtime.waitTicks--;
+        continue;
+      }
+      // After the fixed grace period, wait until a just-spawned bot is actually online before the
+      // next step runs. Without this the very first spawn after a restart (cold chunk / fake-player
+      // system) can still be registering when look/use/attack fire — carpet then no-ops them and
+      // the action silently never happens.
+      if (runtime.awaitBot != null) {
+        if (server.getPlayerList().getPlayerByName(runtime.awaitBot) != null) {
+          runtime.awaitBot = null; // online: proceed
+        } else if (--runtime.awaitTimeout <= 0) {
+          runtime.awaitBot = null; // give up after the absolute timeout, don't hang forever
+        }
         continue;
       }
       scheduleStep(server, runtime);
@@ -135,6 +202,7 @@ public final class MachineScheduler {
     String botName = step.bot >= 0 && step.bot < runtime.machine.bots.size()
         ? runtime.machine.bots.get(step.bot)
         : "bot" + step.bot;
+    boolean stepHasSpawn = false;
     for (String command : step.commands) {
       if (command == null || command.isBlank()) {
         continue;
@@ -142,6 +210,9 @@ public final class MachineScheduler {
       String resolved = command
           .replace("{bot}", botName)
           .replace("{player}", runtime.triggerPlayer != null ? runtime.triggerPlayer : "");
+      if (isSpawnCommand(resolved)) {
+        stepHasSpawn = true;
+      }
       runtime.pending.add(new PendingCommand(ensureSpawnFacing(resolved), botName));
     }
     runtime.stepIndex++;
@@ -158,6 +229,16 @@ public final class MachineScheduler {
       runtime.waitTicks = Math.max(0, steps.get(0).delay);
     } else {
       runtime.waitTicks = Math.max(0, steps.get(runtime.stepIndex).delay);
+    }
+    // Fake player spawns can take a while to register (a fresh bot entity has to appear), so a
+    // step that spawned a bot always waits at least SPAWN_GRACE_TICKS before the next step runs.
+    // Afterwards it additionally waits until the bot is online (see tick()), so follow-up commands
+    // never fire before the bot exists — the fixed delay alone is not enough for the first spawn
+    // after a server restart.
+    if (stepHasSpawn) {
+      runtime.waitTicks = Math.max(runtime.waitTicks, SPAWN_GRACE_TICKS);
+      runtime.awaitBot = botName;
+      runtime.awaitTimeout = AWAIT_SPAWN_TIMEOUT;
     }
   }
 
@@ -178,9 +259,12 @@ public final class MachineScheduler {
 
   /**
    * Starts a machine mode's boot process. The mode runs independently from the switch and other
-   * modes; any existing run of the same mode is stopped first.
+   * modes; any existing run of the same mode is stopped first. The triggering player is carried
+   * into the runtime so the mode's commands run with THAT player's permissions (same model as the
+   * switch process) — without it the scripts would run with NO permissions and every command would
+   * be rejected.
    */
-  public static void startMode(MachineData machine, ModeData mode) {
+  public static void startMode(MachineData machine, ModeData mode, String triggerPlayer) {
     String key = modeKey(machine.id, mode.id);
     stopMode(machine.id, mode.id);
     if (mode.onTimeline == null || mode.onTimeline.steps.isEmpty()) {
@@ -188,7 +272,7 @@ public final class MachineScheduler {
           machine.id);
       return;
     }
-    Runtime runtime = new Runtime(key, machine, mode.onTimeline, null, false);
+    Runtime runtime = new Runtime(key, machine, mode.onTimeline, triggerPlayer, false);
     runtime.waitTicks = Math.max(0, mode.onTimeline.steps.get(0).delay);
     runtimes.put(key, runtime);
     MachineMod.LOGGER.info("startMode '{}' of machine '{}' (steps={})",
@@ -197,15 +281,16 @@ public final class MachineScheduler {
 
   /**
    * Stops a machine mode's boot process and starts its shutdown process instead (if configured).
-   * When the mode has no shutdown process, the mode is simply stopped.
+   * When the mode has no shutdown process, the mode is simply stopped. The triggering player is
+   * carried into the runtime (see {@link #startMode}).
    */
-  public static void stopModeWithShutdown(MachineData machine, ModeData mode) {
+  public static void stopModeWithShutdown(MachineData machine, ModeData mode, String triggerPlayer) {
     String key = modeKey(machine.id, mode.id);
     stopMode(machine.id, mode.id);
     if (mode.offTimeline == null || mode.offTimeline.steps.isEmpty()) {
       return;
     }
-    Runtime runtime = new Runtime(key, machine, mode.offTimeline, null, false);
+    Runtime runtime = new Runtime(key, machine, mode.offTimeline, triggerPlayer, false);
     runtime.waitTicks = Math.max(0, mode.offTimeline.steps.get(0).delay);
     runtimes.put(key, runtime);
   }
@@ -221,7 +306,8 @@ public final class MachineScheduler {
   }
 
   public static void stopMode(String machineId, String modeId) {
-    if (runtimes.remove(modeKey(machineId, modeId)) != null) {
+    String key = modeKey(machineId, modeId);
+    if (runtimes.remove(key) != null) {
       cleanupIfEmpty(machineId);
     }
   }
@@ -239,6 +325,9 @@ public final class MachineScheduler {
         changed = true;
       }
     }
+    if (detectedModeState.keySet().removeIf(k -> k.startsWith(machineId + "#"))) {
+      changed = true;
+    }
     if (changed) {
       cleanupIfEmpty(machineId);
     }
@@ -248,7 +337,21 @@ public final class MachineScheduler {
     return runtimes.containsKey(machineId);
   }
 
+  /**
+   * Whether a mode is currently switched ON — defined by its detection block state (ON = the
+   * block reports the configured on-values). The block is the switch; the runtime map only tracks
+   * an executing boot/shutdown process.
+   */
   public static boolean isModeRunning(String machineId, String modeId) {
+    return detectedModeState.getOrDefault(modeKey(machineId, modeId),
+        MachineState.DISABLED) == MachineState.ON;
+  }
+
+  /**
+   * Whether a mode's boot/shutdown PROCESS is currently executing (a runtime exists). Used by the
+   * mode chain to know when the active mode's process has completed.
+   */
+  public static boolean isModeProcessRunning(String machineId, String modeId) {
     return runtimes.containsKey(modeKey(machineId, modeId));
   }
 
@@ -455,6 +558,20 @@ public final class MachineScheduler {
   }
 
   /**
+   * Whether a command is a fake player spawn command ({@code /player <name> spawn ...}).
+   */
+  private static boolean isSpawnCommand(String command) {
+    if (command == null) {
+      return false;
+    }
+    String cmd = command.trim().toLowerCase();
+    if (cmd.startsWith("/")) {
+      cmd = cmd.substring(1);
+    }
+    return cmd.startsWith("player ") && cmd.contains(" spawn");
+  }
+
+  /**
    * Per-timeline runtime state: which timeline is running, the cursor position, the loop budget
    * and the pending command queue (drained one command per tick).
    */
@@ -474,6 +591,10 @@ public final class MachineScheduler {
     boolean hadFailures = false;
     String failureMessage = null;
     String failedReason = null;
+    /** Bot that a spawn step is waiting on to come online before the next step runs (null = none). */
+    String awaitBot = null;
+    /** Remaining ticks to wait for {@link #awaitBot} before giving up. */
+    int awaitTimeout = 0;
 
     Runtime(String key, MachineData machine, Timeline timeline, String triggerPlayer,
         boolean isOffTimeline) {

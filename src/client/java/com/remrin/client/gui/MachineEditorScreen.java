@@ -209,6 +209,13 @@ public class MachineEditorScreen extends BaseParentedScreen<CommandGUIScreen> {
   }
 
   private void openTimelineEditor(boolean onTimeline) {
+    com.remrin.client.machine.MachineDebug.log("[MachineEditor.openTimeline] on=" + onTimeline
+        + " machineHash=" + System.identityHashCode(machine)
+        + " onTimelineHash=" + System.identityHashCode(machine.onTimeline)
+        + " steps=" + machine.onTimeline.steps.size()
+        + " firstCommands=" + (machine.onTimeline.steps.isEmpty() ? "[]"
+            : com.remrin.client.machine.MachineDebug.commandsString(
+                machine.onTimeline.steps.get(0).commands)));
     this.minecraft.gui.setScreen(new TimelineEditorScreen(
         this,
         Component.translatable(onTimeline

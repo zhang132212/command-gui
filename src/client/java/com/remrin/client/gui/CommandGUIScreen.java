@@ -248,7 +248,13 @@ public class CommandGUIScreen extends Screen {
     settingsButton.active = false;
     this.addRenderableWidget(settingsButton);
 
-    this.tabNavigationBar.selectTab(lastSelectedTabIndex, false);
+    // Restore the last selected tab, clamped to the current tab count: the remembered index may
+    // exceed the tabs available right now (e.g. the machine tab only exists on a supported server,
+    // or preset tabs are disabled), which would crash TabNavigationBar.selectTab with an
+    // ArrayIndexOutOfBoundsException.
+    int tabCount = tabNavigationBar.getTabs().size();
+    int restoreIndex = Math.max(0, Math.min(lastSelectedTabIndex, tabCount - 1));
+    this.tabNavigationBar.selectTab(restoreIndex, false);
 
     int listTop = tabBarBottom + 4;
     // Tab area now extends to the footer (no separate search bar row)
@@ -318,6 +324,8 @@ public class CommandGUIScreen extends Screen {
       fakePlayerTab.getButtons().forEach(this::addTabButton);
       fakePlayerTab.getIntervalFields().forEach(this::addRenderableWidget);
     }
+    com.remrin.client.machine.MachineDebug.log("[Layout] addTabButtons " + tabName(tab)
+        + " -> screen has " + registeredTabButtons.size() + " tab buttons");
   }
 
   /**
@@ -331,6 +339,21 @@ public class CommandGUIScreen extends Screen {
       fakePlayerTab.getButtons().forEach(this::removeTabButton);
       fakePlayerTab.getIntervalFields().forEach(this::removeWidget);
     }
+    com.remrin.client.machine.MachineDebug.log("[Layout] removeTabButtons " + tabName(tab)
+        + " -> screen has " + registeredTabButtons.size() + " tab buttons");
+  }
+
+  private static String tabName(Tab tab) {
+    if (tab instanceof CustomCommandTab) {
+      return "custom";
+    }
+    if (tab instanceof MachineSwitchTab) {
+      return "machine";
+    }
+    if (tab instanceof FakePlayerTab) {
+      return "fakePlayer";
+    }
+    return "preset";
   }
 
   /**
@@ -379,6 +402,8 @@ public class CommandGUIScreen extends Screen {
    */
   @Override
   public void repositionElements() {
+    com.remrin.client.machine.MachineDebug.log("[Layout] repositionElements -> rebuildWidgets "
+        + this.width + "x" + this.height);
     this.rebuildWidgets();
   }
 
@@ -781,6 +806,8 @@ public class CommandGUIScreen extends Screen {
    */
   @Override
   public void resize(int width, int height) {
+    com.remrin.client.machine.MachineDebug.log("[Layout] CommandGUIScreen.resize called "
+        + width + "x" + height + " (current " + this.width + "x" + this.height + ")");
     super.resize(width, height);
   }
 
@@ -810,6 +837,9 @@ public class CommandGUIScreen extends Screen {
     }
     if (fbW[0] != window.getWidth() || fbH[0] != window.getHeight()) {
       // The framebuffer-resize callback never ran: update the cached size and re-run the pipeline
+      com.remrin.client.machine.MachineDebug.log("[Layout] syncWindowSize framebuffer lag: cached "
+          + window.getWidth() + "x" + window.getHeight() + " live " + fbW[0] + "x" + fbH[0]
+          + " screen " + this.width + "x" + this.height);
       window.setWidth(fbW[0]);
       window.setHeight(fbH[0]);
       this.minecraft.resizeGui();
@@ -817,6 +847,9 @@ public class CommandGUIScreen extends Screen {
     }
     if (this.width != window.getGuiScaledWidth() || this.height != window.getGuiScaledHeight()) {
       // The framebuffer is in sync but this screen never got the new logical size
+      com.remrin.client.machine.MachineDebug.log("[Layout] syncWindowSize logical lag: screen "
+          + this.width + "x" + this.height + " scaled " + window.getGuiScaledWidth() + "x"
+          + window.getGuiScaledHeight());
       this.minecraft.resizeGui();
     }
   }
