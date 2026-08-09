@@ -1,7 +1,7 @@
 package com.remrin.client.gui;
 
 import com.remrin.client.config.SettingsConfig;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.Checkbox;
 import net.minecraft.client.gui.screens.Screen;
@@ -67,7 +67,7 @@ public class SettingsScreen extends BaseParentedScreen<Screen> {
 
     this.addRenderableWidget(Button.builder(
         Component.translatable("screen.command-gui.back"),
-        btn -> this.minecraft.setScreen(parent)
+        btn -> this.minecraft.gui.setScreen(parent)
     ).bounds(centerX + 2, y, 100, 20).build());
   }
 
@@ -80,17 +80,17 @@ public class SettingsScreen extends BaseParentedScreen<Screen> {
     SettingsConfig.setBoolean("show_carpet_commands", showCarpetCheckbox.selected());
     SettingsConfig.setBoolean("show_fakeplayer_tab", showFakePlayerCheckbox.selected());
     SettingsConfig.save();
-    this.minecraft.setScreen(null);
-    this.minecraft.setScreen(new CommandGUIScreen());
+    this.minecraft.gui.setScreen(new CommandGUIScreen());
   }
 
   @Override
-  public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
-    super.render(guiGraphics, mouseX, mouseY, partialTick);
+  public void extractRenderState(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY,
+      float partialTick) {
+    super.extractRenderState(guiGraphics, mouseX, mouseY, partialTick);
 
     int centerX = this.width / 2;
     int centerY = this.height / 2;
 
-    guiGraphics.drawCenteredString(this.font, this.title, centerX, centerY - 80, 0xFFFFFFFF);
+    guiGraphics.centeredText(this.font, this.title, centerX, centerY - 80, 0xFFFFFFFF);
   }
 }

@@ -11,3 +11,5 @@ pluginManagement {
 
 // Should match your modid
 rootProject.name = 'command-gui'
+
+include 'server'

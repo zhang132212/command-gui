@@ -1,6 +1,6 @@
 package com.remrin.client.gui;
 
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
@@ -45,7 +45,6 @@ public class TimedKillSetupScreen extends BaseParentedScreen<Screen> {
         Component.literal("H"));
     hoursField.setMaxLength(5);
     hoursField.setValue(String.valueOf(hours));
-    hoursField.setFilter(s -> s.isEmpty() || s.matches("\\d+"));
     hoursField.setResponder(s -> {
       try {
         hours = Math.max(0, Integer.parseInt(s));
@@ -60,7 +59,6 @@ public class TimedKillSetupScreen extends BaseParentedScreen<Screen> {
         Component.literal("M"));
     minutesField.setMaxLength(5);
     minutesField.setValue(String.valueOf(minutes));
-    minutesField.setFilter(s -> s.isEmpty() || s.matches("\\d+"));
     minutesField.setResponder(s -> {
       try {
         minutes = Math.max(0, Integer.parseInt(s));
@@ -75,7 +73,6 @@ public class TimedKillSetupScreen extends BaseParentedScreen<Screen> {
         Component.literal("S"));
     secondsField.setMaxLength(5);
     secondsField.setValue(String.valueOf(seconds));
-    secondsField.setFilter(s -> s.isEmpty() || s.matches("\\d+"));
     secondsField.setResponder(s -> {
       try {
         seconds = Math.max(0, Integer.parseInt(s));
@@ -91,14 +88,14 @@ public class TimedKillSetupScreen extends BaseParentedScreen<Screen> {
         btn -> {
           if (hours > 0 || minutes > 0 || seconds > 0) {
             TimedTaskManager.addKillTask(playerName, hours, minutes, seconds);
-            this.minecraft.setScreen(parent);
+            this.minecraft.gui.setScreen(parent);
           }
         }
     ).bounds(centerX - 102, y, 100, 20).build());
 
     this.addRenderableWidget(Button.builder(
         Component.translatable("screen.command-gui.cancel"),
-        btn -> this.minecraft.setScreen(parent)
+        btn -> this.minecraft.gui.setScreen(parent)
     ).bounds(centerX + 2, y, 100, 20).build());
   }
 
@@ -107,43 +104,44 @@ public class TimedKillSetupScreen extends BaseParentedScreen<Screen> {
   }
 
   @Override
-  public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
-    super.render(guiGraphics, mouseX, mouseY, partialTick);
+  public void extractRenderState(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY,
+      float partialTick) {
+    super.extractRenderState(guiGraphics, mouseX, mouseY, partialTick);
 
     int centerX = this.width / 2;
     int centerY = this.height / 2;
 
-    guiGraphics.drawCenteredString(this.font, this.title, centerX, centerY - 78, 0xFFFFFFFF);
+    guiGraphics.centeredText(this.font, this.title, centerX, centerY - 78, 0xFFFFFFFF);
 
-    guiGraphics.drawCenteredString(this.font,
+    guiGraphics.centeredText(this.font,
         Component.literal(playerName),
         centerX, centerY - 62, 0xFF55FF55);
 
     int y = centerY - 25;
-    guiGraphics.drawCenteredString(this.font,
+    guiGraphics.centeredText(this.font,
         Component.translatable("screen.command-gui.fakeplayer.timed.time"),
         centerX, y - 24, 0xFFAAAAAA);
 
     int totalTimeWidth = TIME_FIELD_WIDTH * 3 + COLON_GAP * 2;
     int timeStartX = centerX - totalTimeWidth / 2;
 
-    guiGraphics.drawCenteredString(this.font, "H", timeStartX + TIME_FIELD_WIDTH / 2, y - 12,
+    guiGraphics.centeredText(this.font, "H", timeStartX + TIME_FIELD_WIDTH / 2, y - 12,
         0xFF888888);
-    guiGraphics.drawCenteredString(this.font, "M",
+    guiGraphics.centeredText(this.font, "M",
         timeStartX + TIME_FIELD_WIDTH + COLON_GAP + TIME_FIELD_WIDTH / 2, y - 12, 0xFF888888);
-    guiGraphics.drawCenteredString(this.font, "S",
+    guiGraphics.centeredText(this.font, "S",
         timeStartX + (TIME_FIELD_WIDTH + COLON_GAP) * 2 + TIME_FIELD_WIDTH / 2, y - 12, 0xFF888888);
 
     int colonY = y + 6;
-    guiGraphics.drawString(this.font, ":", timeStartX + TIME_FIELD_WIDTH + COLON_GAP / 2 - 2,
+    guiGraphics.text(this.font, ":", timeStartX + TIME_FIELD_WIDTH + COLON_GAP / 2 - 2,
         colonY, 0xFFCCCCCC);
-    guiGraphics.drawString(this.font, ":",
+    guiGraphics.text(this.font, ":",
         timeStartX + TIME_FIELD_WIDTH + COLON_GAP + TIME_FIELD_WIDTH + COLON_GAP / 2 - 2, colonY,
         0xFFCCCCCC);
 
     int totalSec = hours * 3600 + minutes * 60 + seconds;
     int previewColor = totalSec > 0 ? 0xFFFF7755 : 0xFF666666;
-    guiGraphics.drawCenteredString(this.font,
+    guiGraphics.centeredText(this.font,
         Component.literal(formatDuration(totalSec)),
         centerX, y + 28, previewColor);
   }

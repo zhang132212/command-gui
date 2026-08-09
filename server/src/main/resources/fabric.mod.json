@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "command-gui-server",
+  "version": "${version}",
+  "name": "Command-GUI Server",
+  "description": "Server-side machine switch system for Command-GUI: configurable machines with per-bot timeline scripts, toggleable by players with the right permissions.",
+  "authors": [
+    "Remrin"
+  ],
+  "license": "GPL-3.0",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "com.remrin.server.MachineMod"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.19.3",
+    "minecraft": "~26.2",
+    "java": ">=25",
+    "fabric-api": "*"
+  }
+}

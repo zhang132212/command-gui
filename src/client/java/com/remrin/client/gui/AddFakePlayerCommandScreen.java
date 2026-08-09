@@ -8,7 +8,7 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.input.KeyEvent;
@@ -47,7 +47,6 @@ public class AddFakePlayerCommandScreen extends BaseParentedScreen<CommandGUIScr
   private static final int INTERVAL_FIELD_WIDTH = 40;
   private static final int LABEL_COLOR = 0xFFAAAAAA;
   private static final int BORDER_COLOR = 0xFF555555;
-  private static final int SELECTED_OVERLAY_COLOR = 0x6600CC00;
   private static final int LABEL_HEIGHT = 12;
 
   private static final String[] DIMENSIONS = {
@@ -231,19 +230,16 @@ public class AddFakePlayerCommandScreen extends BaseParentedScreen<CommandGUIScr
     xField = new EditBox(this.font, leftColX, leftY, XYZ_FIELD_WIDTH, FIELD_HEIGHT,
         Component.literal("X"));
     xField.setMaxLength(12);
-    xField.setFilter(s -> s.isEmpty() || s.matches("-?\\d*\\.?\\d*"));
     this.addRenderableWidget(xField);
 
     yField = new EditBox(this.font, leftColX + XYZ_FIELD_WIDTH + COORD_GAP, leftY, XYZ_FIELD_WIDTH,
         FIELD_HEIGHT, Component.literal("Y"));
     yField.setMaxLength(12);
-    yField.setFilter(s -> s.isEmpty() || s.matches("-?\\d*\\.?\\d*"));
     this.addRenderableWidget(yField);
 
     zField = new EditBox(this.font, leftColX + (XYZ_FIELD_WIDTH + COORD_GAP) * 2, leftY,
         XYZ_FIELD_WIDTH, FIELD_HEIGHT, Component.literal("Z"));
     zField.setMaxLength(12);
-    zField.setFilter(s -> s.isEmpty() || s.matches("-?\\d*\\.?\\d*"));
     this.addRenderableWidget(zField);
 
 // Yaw / Pitch row (labels above each field)
@@ -251,13 +247,11 @@ public class AddFakePlayerCommandScreen extends BaseParentedScreen<CommandGUIScr
     yawField = new EditBox(this.font, leftColX, leftY, YAW_PITCH_FIELD_WIDTH, FIELD_HEIGHT,
         Component.literal("Yaw"));
     yawField.setMaxLength(10);
-    yawField.setFilter(s -> s.isEmpty() || s.matches("-?\\d*\\.?\\d*"));
     this.addRenderableWidget(yawField);
 
     pitchField = new EditBox(this.font, leftColX + YAW_PITCH_FIELD_WIDTH + ROT_GAP, leftY,
         YAW_PITCH_FIELD_WIDTH, FIELD_HEIGHT, Component.literal("Pitch"));
     pitchField.setMaxLength(10);
-    pitchField.setFilter(s -> s.isEmpty() || s.matches("-?\\d*\\.?\\d*"));
     this.addRenderableWidget(pitchField);
 
 // Dimension buttons (3 buttons in a row)
@@ -267,10 +261,9 @@ public class AddFakePlayerCommandScreen extends BaseParentedScreen<CommandGUIScr
     for (int i = 0; i < DIMENSIONS.length; i++) {
       final int idx = i;
       int btnX = leftColX + i * (dimensionBtnWidth + ACTION_BTN_GAP);
-      Button dimBtn = Button.builder(
-          Component.translatable(DIMENSION_NAMES[i]),
-          btn -> selectDimension(idx)
-      ).bounds(btnX, leftY, dimensionBtnWidth, FIELD_HEIGHT).build();
+      DarkSelectButton dimBtn = new DarkSelectButton(btnX, leftY, dimensionBtnWidth, FIELD_HEIGHT,
+          Component.translatable(DIMENSION_NAMES[i]), btn -> selectDimension(idx));
+      dimBtn.setDarkSelected(() -> dimensionIndex == idx, 0xFFFFFFFF);
       dimensionButtons.add(dimBtn);
       this.addRenderableWidget(dimBtn);
     }
@@ -282,10 +275,9 @@ public class AddFakePlayerCommandScreen extends BaseParentedScreen<CommandGUIScr
     for (int i = 0; i < GAMEMODES.length; i++) {
       final int idx = i;
       int btnX = leftColX + i * (gamemodeBtnWidth + ACTION_BTN_GAP);
-      Button gmBtn = Button.builder(
-          Component.translatable(GAMEMODE_NAMES[i]),
-          btn -> selectGamemode(idx)
-      ).bounds(btnX, leftY, gamemodeBtnWidth, FIELD_HEIGHT).build();
+      DarkSelectButton gmBtn = new DarkSelectButton(btnX, leftY, gamemodeBtnWidth, FIELD_HEIGHT,
+          Component.translatable(GAMEMODE_NAMES[i]), btn -> selectGamemode(idx));
+      gmBtn.setDarkSelected(() -> gamemodeIndex == idx, 0xFFFFFFFF);
       gamemodeButtons.add(gmBtn);
       this.addRenderableWidget(gmBtn);
     }
@@ -319,7 +311,7 @@ public class AddFakePlayerCommandScreen extends BaseParentedScreen<CommandGUIScr
 
     cancelButton = Button.builder(
         Component.translatable("screen.command-gui.cancel"),
-        btn -> this.minecraft.setScreen(parent)
+        btn -> this.minecraft.gui.setScreen(parent)
     ).bounds(contentCenterX + 2, this.height - 24, 100, 20).build();
     this.addRenderableWidget(cancelButton);
 
@@ -364,10 +356,10 @@ public class AddFakePlayerCommandScreen extends BaseParentedScreen<CommandGUIScr
       int btnX = startX + col * (ACTION_BTN_WIDTH + ACTION_BTN_GAP);
       int btnY = currentY + row * (ACTION_BTN_HEIGHT + ACTION_BTN_GAP);
       final int actionIdx = i;
-      Button actionBtn = Button.builder(
-          Component.translatable(ACTION_NAMES[i]),
-          btn -> toggleAction(actionIdx)
-      ).bounds(btnX, btnY, ACTION_BTN_WIDTH, ACTION_BTN_HEIGHT).build();
+      DarkSelectButton actionBtn = new DarkSelectButton(btnX, btnY, ACTION_BTN_WIDTH,
+          ACTION_BTN_HEIGHT,
+          Component.translatable(ACTION_NAMES[i]), btn -> toggleAction(actionIdx));
+      actionBtn.setDarkSelected(() -> selectedActions.contains(actionIdx), 0xFFFFFFFF);
       actionButtons.add(actionBtn);
       this.addRenderableWidget(actionBtn);
     }
@@ -376,10 +368,9 @@ public class AddFakePlayerCommandScreen extends BaseParentedScreen<CommandGUIScr
   private void buildActionWithMode(int startX, int y, int actionIdx) {
 // Action toggle button
     int actionBtnWidth = 50;
-    Button actionBtn = Button.builder(
-        Component.translatable(ACTION_NAMES[actionIdx]),
-        btn -> toggleAction(actionIdx)
-    ).bounds(startX, y, actionBtnWidth, ACTION_BTN_HEIGHT).build();
+    DarkSelectButton actionBtn = new DarkSelectButton(startX, y, actionBtnWidth, ACTION_BTN_HEIGHT,
+        Component.translatable(ACTION_NAMES[actionIdx]), btn -> toggleAction(actionIdx));
+    actionBtn.setDarkSelected(() -> selectedActions.contains(actionIdx), 0xFFFFFFFF);
     actionButtons.add(actionBtn);
     this.addRenderableWidget(actionBtn);
 
@@ -404,7 +395,6 @@ public class AddFakePlayerCommandScreen extends BaseParentedScreen<CommandGUIScr
     intervalField.setHint(Component.literal("ticks"));
     intervalField.setValue(
         actionIntervals[actionIdx] > 0 ? String.valueOf(actionIntervals[actionIdx]) : "");
-    intervalField.setFilter(s -> s.isEmpty() || s.matches("\\d*"));
     final int fieldIdx = actionIdx;
     intervalField.setResponder(s -> {
       try {
@@ -665,18 +655,32 @@ public class AddFakePlayerCommandScreen extends BaseParentedScreen<CommandGUIScr
     String yawStr = yawField.getValue().trim();
     String pitchStr = pitchField.getValue().trim();
 
-    if (!x.isEmpty() && !y.isEmpty() && !z.isEmpty()) {
-      spawnCmd.append(" at ").append(x).append(" ").append(y).append(" ").append(z);
+    // Carpet 26.2 spawn REQUIRES "at X Y Z" before "facing" — fall back to the player's current
+    // position when any coordinate was left blank, so the generated command always parses.
+    if (x.isEmpty() || y.isEmpty() || z.isEmpty()) {
+      Minecraft mc = Minecraft.getInstance();
+      if (mc.player != null) {
+        x = String.format("%.1f", Math.round(mc.player.getX() * 10.0) / 10.0);
+        y = String.format("%.1f", Math.round(mc.player.getY() * 10.0) / 10.0);
+        z = String.format("%.1f", Math.round(mc.player.getZ() * 10.0) / 10.0);
+      } else {
+        x = y = z = "0";
+      }
     }
-    if (!yawStr.isEmpty() && !pitchStr.isEmpty()) {
-      spawnCmd.append(" facing ").append(yawStr).append(" ").append(pitchStr);
-    } else if (!yawStr.isEmpty()) {
-      spawnCmd.append(" facing ").append(yawStr).append(" 0");
-    }
+    spawnCmd.append(" at ").append(x).append(" ").append(y).append(" ").append(z);
+    // Carpet 26.2 requires the facing argument whenever "in <dim>" is used: always emit it,
+    // defaulting to 0 0 when the player left it blank.
+    spawnCmd.append(" facing ")
+        .append(yawStr.isEmpty() ? "0" : yawStr)
+        .append(" ")
+        .append(pitchStr.isEmpty() ? "0" : pitchStr);
     spawnCmd.append(" in ").append(DIMENSIONS[dimensionIndex]);
-    spawnCmd.append(" in ").append(GAMEMODES[gamemodeIndex]);
 
     commands.add(spawnCmd.toString());
+
+    // Game mode is set separately with the VANILLA command (carpet's "in gamemode" is broken and
+    // "player <name> gamemode" does not exist in 26.2).
+    commands.add("/gamemode " + GAMEMODES[gamemodeIndex] + " " + fpName);
 
 // Action commands
     List<Integer> sortedActions = new ArrayList<>(selectedActions);
@@ -718,6 +722,10 @@ public class AddFakePlayerCommandScreen extends BaseParentedScreen<CommandGUIScr
     String description = descriptionField.getValue().trim();
     List<String> commands = buildCommands();
 
+    if (name.isEmpty()) {
+      name = com.remrin.client.config.CommandConfig.nextDefaultCommandName();
+      nameField.setValue(name);
+    }
     if (name.isEmpty() || commands.isEmpty()) {
       return;
     }
@@ -738,104 +746,78 @@ public class AddFakePlayerCommandScreen extends BaseParentedScreen<CommandGUIScr
     }
 
     parent.refresh();
-    this.minecraft.setScreen(parent);
+    this.minecraft.gui.setScreen(parent);
   }
 
   @Override
-  public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
-    super.render(guiGraphics, mouseX, mouseY, partialTick);
+  public void extractRenderState(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY,
+      float partialTick) {
+    super.extractRenderState(guiGraphics, mouseX, mouseY, partialTick);
 
 // Title
-    guiGraphics.drawCenteredString(this.font, this.title, this.width / 2, 8, 0xFFFFFFFF);
+    guiGraphics.centeredText(this.font, this.title, this.width / 2, 8, 0xFFFFFFFF);
 
 // === Left column labels (above each field) ===
     int currentY = contentStartY;
 
 // Name label
-    guiGraphics.drawString(this.font, Component.translatable("screen.command-gui.name"),
+    guiGraphics.text(this.font, Component.translatable("screen.command-gui.name"),
         leftColX, currentY, LABEL_COLOR);
 
 // Description label
     currentY += rowGap;
-    guiGraphics.drawString(this.font, Component.translatable("screen.command-gui.description"),
+    guiGraphics.text(this.font, Component.translatable("screen.command-gui.description"),
         leftColX, currentY, LABEL_COLOR);
 
 // Fake Player Name label
     currentY += rowGap;
-    guiGraphics.drawString(this.font,
+    guiGraphics.text(this.font,
         Component.translatable("screen.command-gui.fakeplayer.playername"),
         leftColX, currentY, LABEL_COLOR);
 
 // Spawn At label
     currentY += rowGap;
-    guiGraphics.drawString(this.font,
+    guiGraphics.text(this.font,
         Component.translatable("screen.command-gui.fakeplayer.spawn_at"),
         leftColX, currentY, LABEL_COLOR);
 
 // XYZ labels (above each field)
     currentY += rowGap;
-    guiGraphics.drawString(this.font, "X", leftColX, currentY, 0xFFFF5555);
-    guiGraphics.drawString(this.font, "Y", leftColX + XYZ_FIELD_WIDTH + COORD_GAP, currentY,
+    guiGraphics.text(this.font, "X", leftColX, currentY, 0xFFFF5555);
+    guiGraphics.text(this.font, "Y", leftColX + XYZ_FIELD_WIDTH + COORD_GAP, currentY,
         0xFF55FF55);
-    guiGraphics.drawString(this.font, "Z", leftColX + (XYZ_FIELD_WIDTH + COORD_GAP) * 2, currentY,
+    guiGraphics.text(this.font, "Z", leftColX + (XYZ_FIELD_WIDTH + COORD_GAP) * 2, currentY,
         0xFF5555FF);
 
 // Yaw/Pitch labels (above each field)
     currentY += rowGap;
-    guiGraphics.drawString(this.font, "Yaw", leftColX, currentY, LABEL_COLOR);
-    guiGraphics.drawString(this.font, "Pitch", leftColX + YAW_PITCH_FIELD_WIDTH + ROT_GAP, currentY,
+    guiGraphics.text(this.font, "Yaw", leftColX, currentY, LABEL_COLOR);
+    guiGraphics.text(this.font, "Pitch", leftColX + YAW_PITCH_FIELD_WIDTH + ROT_GAP, currentY,
         LABEL_COLOR);
 
 // Dimension label (above buttons)
     currentY += rowGap;
-    guiGraphics.drawString(this.font,
+    guiGraphics.text(this.font,
         Component.translatable("screen.command-gui.fakeplayer.dimension"),
         leftColX, currentY, LABEL_COLOR);
 
 // Gamemode label (above buttons)
     currentY += rowGap;
-    guiGraphics.drawString(this.font,
+    guiGraphics.text(this.font,
         Component.translatable("screen.command-gui.fakeplayer.gamemode"),
         leftColX, currentY, LABEL_COLOR);
 
 // === Right column labels (above the widgets) ===
 // "Actions" label above action buttons
-    guiGraphics.drawString(this.font,
+    guiGraphics.text(this.font,
         Component.translatable("screen.command-gui.fakeplayer.actions_label"),
         rightColX, contentStartY, LABEL_COLOR);
 
 // "Config" label above config fields
     int configStartY = getConfigStartY();
-    guiGraphics.drawString(this.font,
+    guiGraphics.text(this.font,
         Component.translatable("screen.command-gui.fakeplayer.config_label"),
         rightColX, configStartY - LABEL_HEIGHT, LABEL_COLOR);
-
-// === Selected dimension overlay ===
-    for (int i = 0; i < dimensionButtons.size(); i++) {
-      if (i == dimensionIndex) {
-        Button btn = dimensionButtons.get(i);
-        guiGraphics.fill(btn.getX(), btn.getY(),
-            btn.getX() + btn.getWidth(), btn.getY() + btn.getHeight(), SELECTED_OVERLAY_COLOR);
-      }
-    }
-
-// === Selected gamemode overlay ===
-    for (int i = 0; i < gamemodeButtons.size(); i++) {
-      if (i == gamemodeIndex) {
-        Button btn = gamemodeButtons.get(i);
-        guiGraphics.fill(btn.getX(), btn.getY(),
-            btn.getX() + btn.getWidth(), btn.getY() + btn.getHeight(), SELECTED_OVERLAY_COLOR);
-      }
-    }
-
-// === Selected action overlays ===
-    for (int i = 0; i < actionButtons.size(); i++) {
-      if (selectedActions.contains(i)) {
-        Button btn = actionButtons.get(i);
-        guiGraphics.fill(btn.getX(), btn.getY(),
-            btn.getX() + btn.getWidth(), btn.getY() + btn.getHeight(), SELECTED_OVERLAY_COLOR);
-      }
-    }
 
 // === Command preview (right column, below config section) ===
     List<String> commands = buildCommands();
@@ -843,7 +825,7 @@ public class AddFakePlayerCommandScreen extends BaseParentedScreen<CommandGUIScr
     // since overflow protection may have truncated how many rows were added.
     int configEndY = configStartY + configFields.size() * rowGap + 20;
 
-    guiGraphics.drawString(this.font,
+    guiGraphics.text(this.font,
         Component.translatable("screen.command-gui.fakeplayer.config_desc"),
         rightColX, configEndY + 2, 0xFF888888);
 
@@ -855,7 +837,7 @@ public class AddFakePlayerCommandScreen extends BaseParentedScreen<CommandGUIScr
     if (previewAreaTop + 20 < saveBtnTopY - 4) {
       int previewBoxX = rightColX;
       int previewBoxW = FIELD_WIDTH;
-      guiGraphics.drawString(this.font,
+      guiGraphics.text(this.font,
           Component.translatable("screen.command-gui.fakeplayer.command_preview"),
           previewBoxX, previewAreaTop, 0xFF888888);
 
@@ -898,7 +880,7 @@ public class AddFakePlayerCommandScreen extends BaseParentedScreen<CommandGUIScr
       for (int i = 0; i < wrappedLines.size(); i++) {
         int lineY = previewY + i * 9;
         if (lineY + 9 > previewBoxY + previewBoxHeight - 2) break;
-        guiGraphics.drawString(this.font, wrappedLines.get(i), previewBoxX + 4, lineY,
+        guiGraphics.text(this.font, wrappedLines.get(i), previewBoxX + 4, lineY,
             0xFF55FF55);
       }
     }
@@ -908,13 +890,12 @@ public class AddFakePlayerCommandScreen extends BaseParentedScreen<CommandGUIScr
   public boolean keyPressed(KeyEvent keyEvent) {
     int keyCode = keyEvent.key();
     if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
-      this.minecraft.setScreen(parent);
+      this.minecraft.gui.setScreen(parent);
       return true;
     }
     if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
-      String name = nameField.getValue().trim();
       String fpName = fakePlayerNameField.getValue().trim();
-      if (!name.isEmpty() && !fpName.isEmpty()) {
+      if (!fpName.isEmpty()) {
         saveAndClose();
       }
       return true;

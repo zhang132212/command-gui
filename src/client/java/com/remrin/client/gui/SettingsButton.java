@@ -1,6 +1,6 @@
 package com.remrin.client.gui;
 
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.renderer.RenderPipelines;
@@ -25,7 +25,7 @@ public class SettingsButton extends Button {
   }
 
   @Override
-  protected void renderContents(GuiGraphics guiGraphics, int mouseX, int mouseY,
+  protected void extractContents(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY,
       float partialTick) {
     int iconSize = 16;
     int iconX = this.getX() + (this.getWidth() - iconSize) / 2;

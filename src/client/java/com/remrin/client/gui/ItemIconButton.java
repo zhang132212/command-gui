@@ -1,6 +1,6 @@
 package com.remrin.client.gui;
 
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.network.chat.Component;
@@ -37,7 +37,7 @@ public class ItemIconButton extends Button {
   }
 
   @Override
-  protected void renderContents(GuiGraphics guiGraphics, int mouseX, int mouseY,
+  protected void extractContents(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY,
       float partialTick) {
     int iconX = this.getX() + (this.getWidth() - ICON_SIZE) / 2;
     int iconY = this.getY() + (this.getHeight() - ICON_SIZE) / 2;
@@ -45,7 +45,7 @@ public class ItemIconButton extends Button {
     pose.pushMatrix();
     pose.translate(iconX, iconY);
     pose.scale(ICON_SCALE, ICON_SCALE);
-    guiGraphics.renderItem(iconItem, 0, 0);
+    guiGraphics.item(iconItem, 0, 0);
     pose.popMatrix();
   }
 }

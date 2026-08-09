@@ -131,6 +131,19 @@ public class CommandConfig {
     return null;
   }
 
+  /**
+   * Generates the next available default command name ({@code command_1}, {@code command_2}, ...),
+   * skipping names that are already in use.
+   */
+  public static String nextDefaultCommandName() {
+    Map<String, CommandEntry> allCommands = getCommands();
+    int n = 1;
+    while (allCommands.containsKey("command_" + n)) {
+      n++;
+    }
+    return "command_" + n;
+  }
+
   public static void addCommand(String name, String command, String description) {
     addCommand(DEFAULT_CATEGORY, name, command, description);
   }

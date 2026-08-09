@@ -1,7 +1,7 @@
 package com.remrin.client.gui;
 
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
@@ -84,7 +84,6 @@ public class TimedSpawnSetupScreen extends BaseParentedScreen<Screen> {
         Component.literal("H"));
     hoursField.setMaxLength(5);
     hoursField.setValue(String.valueOf(hours));
-    hoursField.setFilter(s -> s.isEmpty() || s.matches("\\d+"));
     hoursField.setResponder(s -> {
       try {
         hours = Math.max(0, Integer.parseInt(s));
@@ -98,7 +97,6 @@ public class TimedSpawnSetupScreen extends BaseParentedScreen<Screen> {
         TIME_FIELD_WIDTH, 20, Component.literal("M"));
     minutesField.setMaxLength(5);
     minutesField.setValue(String.valueOf(minutes));
-    minutesField.setFilter(s -> s.isEmpty() || s.matches("\\d+"));
     minutesField.setResponder(s -> {
       try {
         minutes = Math.max(0, Integer.parseInt(s));
@@ -112,7 +110,6 @@ public class TimedSpawnSetupScreen extends BaseParentedScreen<Screen> {
         timeFieldY, TIME_FIELD_WIDTH, 20, Component.literal("S"));
     secondsField.setMaxLength(5);
     secondsField.setValue(String.valueOf(seconds));
-    secondsField.setFilter(s -> s.isEmpty() || s.matches("\\d+"));
     secondsField.setResponder(s -> {
       try {
         seconds = Math.max(0, Integer.parseInt(s));
@@ -140,7 +137,6 @@ public class TimedSpawnSetupScreen extends BaseParentedScreen<Screen> {
     xField = new EditBox(this.font, coordStartX, coordFieldY, COORD_FIELD_WIDTH, 20,
         Component.literal("X"));
     xField.setMaxLength(12);
-    xField.setFilter(s -> s.isEmpty() || s.matches("-?\\d*\\.?\\d*"));
     xField.setResponder(s -> {
       try {
         spawnX = Double.parseDouble(s);
@@ -153,7 +149,6 @@ public class TimedSpawnSetupScreen extends BaseParentedScreen<Screen> {
     yField = new EditBox(this.font, coordStartX + COORD_FIELD_WIDTH + COORD_GAP, coordFieldY,
         COORD_FIELD_WIDTH, 20, Component.literal("Y"));
     yField.setMaxLength(12);
-    yField.setFilter(s -> s.isEmpty() || s.matches("-?\\d*\\.?\\d*"));
     yField.setResponder(s -> {
       try {
         spawnY = Double.parseDouble(s);
@@ -166,7 +161,6 @@ public class TimedSpawnSetupScreen extends BaseParentedScreen<Screen> {
     zField = new EditBox(this.font, coordStartX + (COORD_FIELD_WIDTH + COORD_GAP) * 2, coordFieldY,
         COORD_FIELD_WIDTH, 20, Component.literal("Z"));
     zField.setMaxLength(12);
-    zField.setFilter(s -> s.isEmpty() || s.matches("-?\\d*\\.?\\d*"));
     zField.setResponder(s -> {
       try {
         spawnZ = Double.parseDouble(s);
@@ -200,14 +194,14 @@ public class TimedSpawnSetupScreen extends BaseParentedScreen<Screen> {
               TimedTaskManager.addSpawnTask(playerName, hours, minutes, seconds, spawnX, spawnY,
                   spawnZ);
             }
-            this.minecraft.setScreen(parent);
+            this.minecraft.gui.setScreen(parent);
           }
         }
     ).bounds(centerX - 102, saveCancelY, 100, 20).build());
 
     this.addRenderableWidget(Button.builder(
         Component.translatable("screen.command-gui.cancel"),
-        btn -> this.minecraft.setScreen(parent)
+        btn -> this.minecraft.gui.setScreen(parent)
     ).bounds(centerX + 2, saveCancelY, 100, 20).build());
   }
 
@@ -231,8 +225,9 @@ public class TimedSpawnSetupScreen extends BaseParentedScreen<Screen> {
   }
 
   @Override
-  public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
-    super.render(guiGraphics, mouseX, mouseY, partialTick);
+  public void extractRenderState(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY,
+      float partialTick) {
+    super.extractRenderState(guiGraphics, mouseX, mouseY, partialTick);
 
     int centerX = this.width / 2;
     int nameFieldY = titleY + 34;
@@ -240,40 +235,40 @@ public class TimedSpawnSetupScreen extends BaseParentedScreen<Screen> {
     int coordFieldY = timeFieldY + 42 + 28;
 
     // Title
-    guiGraphics.drawCenteredString(this.font, this.title, centerX, titleY, 0xFFFFFFFF);
+    guiGraphics.centeredText(this.font, this.title, centerX, titleY, 0xFFFFFFFF);
 
     // Name label
-    guiGraphics.drawCenteredString(this.font,
+    guiGraphics.centeredText(this.font,
         Component.translatable("screen.command-gui.fakeplayer.timed.name"),
         centerX, nameFieldY - 12, 0xFFAAAAAA);
 
     // Time section label and column headers
-    guiGraphics.drawCenteredString(this.font,
+    guiGraphics.centeredText(this.font,
         Component.translatable("screen.command-gui.fakeplayer.timed.time"),
         centerX, timeFieldY - 24, 0xFFAAAAAA);
 
     int totalTimeWidth = TIME_FIELD_WIDTH * 3 + COLON_GAP * 2;
     int timeStartX = centerX - totalTimeWidth / 2;
-    guiGraphics.drawCenteredString(this.font, "H", timeStartX + TIME_FIELD_WIDTH / 2,
+    guiGraphics.centeredText(this.font, "H", timeStartX + TIME_FIELD_WIDTH / 2,
         timeFieldY - 12, 0xFF888888);
-    guiGraphics.drawCenteredString(this.font, "M",
+    guiGraphics.centeredText(this.font, "M",
         timeStartX + TIME_FIELD_WIDTH + COLON_GAP + TIME_FIELD_WIDTH / 2, timeFieldY - 12,
         0xFF888888);
-    guiGraphics.drawCenteredString(this.font, "S",
+    guiGraphics.centeredText(this.font, "S",
         timeStartX + (TIME_FIELD_WIDTH + COLON_GAP) * 2 + TIME_FIELD_WIDTH / 2, timeFieldY - 12,
         0xFF888888);
 
     int colonY = timeFieldY + 6;
-    guiGraphics.drawString(this.font, ":", timeStartX + TIME_FIELD_WIDTH + COLON_GAP / 2 - 2,
+    guiGraphics.text(this.font, ":", timeStartX + TIME_FIELD_WIDTH + COLON_GAP / 2 - 2,
         colonY, 0xFFCCCCCC);
-    guiGraphics.drawString(this.font, ":",
+    guiGraphics.text(this.font, ":",
         timeStartX + TIME_FIELD_WIDTH + COLON_GAP + TIME_FIELD_WIDTH + COLON_GAP / 2 - 2, colonY,
         0xFFCCCCCC);
 
     // Duration preview
     int totalSec = hours * 3600 + minutes * 60 + seconds;
     int previewColor = totalSec > 0 ? 0xFF55FFFF : 0xFF666666;
-    guiGraphics.drawCenteredString(this.font,
+    guiGraphics.centeredText(this.font,
         Component.literal(formatDuration(totalSec)),
         centerX, timeFieldY + 28, previewColor);
 
@@ -281,12 +276,12 @@ public class TimedSpawnSetupScreen extends BaseParentedScreen<Screen> {
     if (!useCurrentPos) {
       int coordTotalWidth = COORD_FIELD_WIDTH * 3 + COORD_GAP * 2;
       int coordStartX = centerX - coordTotalWidth / 2;
-      guiGraphics.drawCenteredString(this.font, "X", coordStartX + COORD_FIELD_WIDTH / 2,
+      guiGraphics.centeredText(this.font, "X", coordStartX + COORD_FIELD_WIDTH / 2,
           coordFieldY - 10, 0xFF888888);
-      guiGraphics.drawCenteredString(this.font, "Y",
+      guiGraphics.centeredText(this.font, "Y",
           coordStartX + COORD_FIELD_WIDTH + COORD_GAP + COORD_FIELD_WIDTH / 2, coordFieldY - 10,
           0xFF888888);
-      guiGraphics.drawCenteredString(this.font, "Z",
+      guiGraphics.centeredText(this.font, "Z",
           coordStartX + (COORD_FIELD_WIDTH + COORD_GAP) * 2 + COORD_FIELD_WIDTH / 2,
           coordFieldY - 10, 0xFF888888);
     }

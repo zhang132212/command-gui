@@ -7,11 +7,13 @@ import java.util.Map;
 import java.util.function.Consumer;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
-import net.minecraft.client.gui.components.PlayerFaceRenderer;
+import net.minecraft.client.gui.components.PlayerFaceExtractor;
 import net.minecraft.client.gui.components.tabs.Tab;
+import net.minecraft.client.gui.layouts.FrameLayout;
+import net.minecraft.client.gui.layouts.Layout;
 import net.minecraft.client.gui.navigation.ScreenRectangle;
 import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.client.renderer.RenderPipelines;
@@ -111,6 +113,11 @@ public class FakePlayerTab implements Tab {
   @Override
   public Component getTabExtraNarration() {
     return Component.empty();
+  }
+
+  @Override
+  public Layout getLayout() {
+    return new FrameLayout();
   }
 
   @Override
@@ -360,7 +367,6 @@ public class FakePlayerTab implements Tab {
     ticksField.setMaxLength(5);
     ticksField.setValue(String.valueOf(intervalTicks));
     ticksField.setHint(Component.literal("ticks"));
-    ticksField.setFilter(s -> s.isEmpty() || s.matches("\\d*"));
     ticksField.setResponder(s -> {
       try {
         intervalTicks = s.isEmpty() ? 20 : Integer.parseInt(s);
@@ -414,17 +420,17 @@ public class FakePlayerTab implements Tab {
 
   private void openBatchSpawnScreen() {
     Minecraft mc = Minecraft.getInstance();
-    mc.setScreen(new BatchSpawnScreen(parent));
+    mc.gui.setScreen(new BatchSpawnScreen(parent));
   }
 
   private void openTimedSpawnScreen() {
     Minecraft mc = Minecraft.getInstance();
-    mc.setScreen(new TimedSpawnSetupScreen(parent));
+    mc.gui.setScreen(new TimedSpawnSetupScreen(parent));
   }
 
   private void openTimedKillScreen(String playerName) {
     Minecraft mc = Minecraft.getInstance();
-    mc.setScreen(new TimedKillSetupScreen(parent, playerName));
+    mc.gui.setScreen(new TimedKillSetupScreen(parent, playerName));
   }
 
   private void killAllFakePlayers() {
@@ -451,14 +457,14 @@ public class FakePlayerTab implements Tab {
     }
   }
 
-  public void render(GuiGraphics guiGraphics, int mouseX, int mouseY) {
+  public void render(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY) {
     if (area == null) {
       return;
     }
 
     if (displayList.isEmpty()) {
       Minecraft mc = Minecraft.getInstance();
-      guiGraphics.drawCenteredString(mc.font,
+      guiGraphics.centeredText(mc.font,
           Component.translatable("screen.command-gui.fakeplayer.empty"),
           playerListX + PLAYER_ITEM_WIDTH / 2,
           area.top() + area.height() / 2 - 4,
@@ -492,41 +498,31 @@ public class FakePlayerTab implements Tab {
             0x3300AA00);
       }
     }
-
-    // Separator between list and actions
-    guiGraphics.fill(separatorX, area.top(), separatorX + SEPARATOR_WIDTH, area.bottom(),
-        0xFF888888);
   }
 
-  public void renderScrollbar(GuiGraphics guiGraphics) {
+  /** X of the fake player list scrollbar (12px right of the list edge). */
+  public int getScrollbarX() {
+    return playerListX + PLAYER_ITEM_WIDTH + 12;
+  }
+
+  public void renderScrollbar(GuiGraphicsExtractor guiGraphics) {
     if (area == null || displayList.isEmpty()) {
       return;
     }
 
     int maxScroll = getMaxScroll();
-    if (maxScroll <= 0) {
-      return;
-    }
-
-    int scrollbarX = separatorX - 6;
+    int scrollbarWidth = 12;
+    int scrollbarX = getScrollbarX();
     int scrollbarTop = area.top();
     int scrollbarHeight = area.height();
-    int scrollbarWidth = 3;
 
-    guiGraphics.fill(scrollbarX, scrollbarTop, scrollbarX + scrollbarWidth,
-        scrollbarTop + scrollbarHeight, 0xFF111111);
-
-    int thumbHeight = Math.max(12,
-        scrollbarHeight * scrollbarHeight / (scrollbarHeight + maxScroll * PLAYER_ITEM_HEIGHT));
-    int thumbY = scrollbarTop + (scrollbarHeight - thumbHeight) * scrollOffset / maxScroll;
-
-    guiGraphics.fill(scrollbarX, thumbY, scrollbarX + scrollbarWidth, thumbY + thumbHeight,
-        0xFF555555);
-    guiGraphics.fill(scrollbarX, thumbY, scrollbarX + scrollbarWidth - 1, thumbY + thumbHeight - 1,
-        0xFF888888);
+    ScrollbarHandle handle = new ScrollbarHandle(scrollbarX, scrollbarTop, scrollbarWidth,
+        scrollbarHeight);
+    handle.render(guiGraphics, scrollOffset, maxScroll, getVisibleRowCount(), getTotalRowCount(),
+        false);
   }
 
-  public void renderFaces(GuiGraphics guiGraphics) {
+  public void renderFaces(GuiGraphicsExtractor guiGraphics) {
     if (area == null) {
       return;
     }
@@ -564,7 +560,7 @@ public class FakePlayerTab implements Tab {
         PlayerInfo playerInfo = getPlayerInfo(playerName);
         if (playerInfo != null) {
           PlayerSkin skin = playerInfo.getSkin();
-          PlayerFaceRenderer.draw(guiGraphics, skin, faceX, faceY, FACE_SIZE);
+          PlayerFaceExtractor.extractRenderState(guiGraphics, skin, faceX, faceY, FACE_SIZE);
         } else {
           // Offline: grey placeholder box
           guiGraphics.fill(faceX, faceY, faceX + FACE_SIZE, faceY + FACE_SIZE, 0xFF555555);
@@ -594,13 +590,13 @@ public class FakePlayerTab implements Tab {
         int clockY = y + (PLAYER_ITEM_HEIGHT - clockSize) / 2;
         guiGraphics.blitSprite(RenderPipelines.GUI_TEXTURED, CLOCK_SPRITE, clockX, clockY,
             clockSize, clockSize);
-        guiGraphics.drawString(mc.font, timeStr, textX, y + textVertOffset, timeColor);
+        guiGraphics.text(mc.font, timeStr, textX, y + textVertOffset, timeColor);
       }
 
       int maxNameWidth = playerListX + PLAYER_ITEM_WIDTH - nameX - timerWidth - 4;
       String displayName = mc.font.plainSubstrByWidth(playerName, maxNameWidth);
       int nameColor = isPending ? 0xFF55FF55 : isSelected ? 0xFFFFFFFF : 0xFFDDDDDD;
-      guiGraphics.drawString(mc.font, displayName, nameX, y + textVertOffset, nameColor);
+      guiGraphics.text(mc.font, displayName, nameX, y + textVertOffset, nameColor);
     }
   }
 
@@ -618,7 +614,7 @@ public class FakePlayerTab implements Tab {
       CommandHelper.sendCommand(command);
     }
     if (!CommandGUIScreen.shouldKeepOpen()) {
-      mc.setScreen(null);
+      mc.gui.setScreen(null);
     }
   }
 
@@ -636,6 +632,29 @@ public class FakePlayerTab implements Tab {
 
   public int getScrollOffset() {
     return scrollOffset;
+  }
+
+  /** Sets the scroll offset directly (drag gestures), clamped to the valid range. */
+  public void setScrollOffset(int offset) {
+    int maxScroll = getMaxScroll();
+    int newOffset = Math.max(0, Math.min(maxScroll, offset));
+    if (newOffset == scrollOffset) {
+      return;
+    }
+    scrollOffset = newOffset;
+    fireBeforeRebuild();
+    rebuildPlayerButtons();
+    fireAfterRebuild();
+  }
+
+  /** Number of player rows visible in the scrollable area. */
+  public int getVisibleRowCount() {
+    return area != null ? Math.max(1, area.height() / (PLAYER_ITEM_HEIGHT + ITEM_GAP)) : 1;
+  }
+
+  /** Total number of player rows. */
+  public int getTotalRowCount() {
+    return Math.max(1, displayList.size());
   }
 
   public int getMaxScroll() {

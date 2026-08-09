@@ -2,10 +2,10 @@
 
 ## Project Overview
 
-**easy-cmd** (Command-GUI) is a Fabric Minecraft mod (Java 21) that provides a GUI for executing commands, managing fake players, and using a placeholder system. Targets Minecraft 1.21.11.
+**easy-cmd** (Command-GUI) is a Fabric Minecraft mod (Java 25) that provides a GUI for executing commands, managing fake players, and using a placeholder system. Targets Minecraft 26.2.
 
 - Mod ID: `command-gui`
-- Version: `0.1.0-beta.5`
+- Version: `0.1.0-beta.8`
 - License: GPL-3.0
 
 ## Build & Run

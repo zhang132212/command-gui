@@ -3,7 +3,7 @@ package com.remrin.client.gui;
 import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
@@ -76,7 +76,6 @@ public class NumberInputScreen extends BaseParentedScreen<Screen> {
         Component.literal(""));
     inputField.setMaxLength(10);
     inputField.setHint(Component.literal(minValue + " - " + maxValue));
-    inputField.setFilter(this::isValidNumberInput);
     this.addRenderableWidget(inputField);
     this.setInitialFocus(inputField);
 
@@ -109,23 +108,8 @@ public class NumberInputScreen extends BaseParentedScreen<Screen> {
         this.height - BUTTON_HEIGHT - 4);
     this.addRenderableWidget(Button.builder(
         Component.translatable("screen.command-gui.back"),
-        btn -> this.minecraft.setScreen(parent)
+        btn -> this.minecraft.gui.setScreen(parent)
     ).bounds(centerX - 50, closeBtnY, 100, 20).build());
-  }
-
-  private boolean isValidNumberInput(String text) {
-    if (text.isEmpty()) {
-      return true;
-    }
-    if (text.equals("-") && minValue < 0) {
-      return true;
-    }
-    try {
-      Integer.parseInt(text);
-      return true;
-    } catch (NumberFormatException e) {
-      return false;
-    }
   }
 
   protected void onNumberConfirmed(String number) {
@@ -158,7 +142,7 @@ public class NumberInputScreen extends BaseParentedScreen<Screen> {
     }
 
     if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
-      this.minecraft.setScreen(parent);
+      this.minecraft.gui.setScreen(parent);
       return true;
     }
 
@@ -168,20 +152,21 @@ public class NumberInputScreen extends BaseParentedScreen<Screen> {
   private void executeCommand(String command) {
     Minecraft mc = Minecraft.getInstance();
     if (mc != null && mc.player != null) {
-      mc.setScreen(null);
+      mc.gui.setScreen(null);
       ChainedCommandExecutor.sendCommand(command);
     }
   }
 
   @Override
-  public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
-    super.render(guiGraphics, mouseX, mouseY, partialTick);
+  public void extractRenderState(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY,
+      float partialTick) {
+    super.extractRenderState(guiGraphics, mouseX, mouseY, partialTick);
 
     int centerX = this.width / 2;
     int centerY = this.height / 2;
 
-    guiGraphics.drawCenteredString(this.font, this.title, centerX, centerY - 70, 0xFFFFFFFF);
-    guiGraphics.drawCenteredString(this.font,
+    guiGraphics.centeredText(this.font, this.title, centerX, centerY - 70, 0xFFFFFFFF);
+    guiGraphics.centeredText(this.font,
         Component.translatable("screen.command-gui.number_range", minValue, maxValue),
         centerX, centerY - 55, 0xFF888888);
   }

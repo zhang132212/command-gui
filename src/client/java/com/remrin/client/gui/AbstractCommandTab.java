@@ -3,9 +3,11 @@ package com.remrin.client.gui;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.tabs.Tab;
+import net.minecraft.client.gui.layouts.FrameLayout;
+import net.minecraft.client.gui.layouts.Layout;
 import net.minecraft.client.gui.navigation.ScreenRectangle;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
@@ -35,12 +37,20 @@ public abstract class AbstractCommandTab implements Tab {
    * Width of each category button in the sidebar
    */
   protected static final int CATEGORY_TAB_WIDTH = 50;
+
+  /**
+   * Width of the category sidebar (buttons / separator / scrollbar / command area offset). The
+   * default is {@link #CATEGORY_TAB_WIDTH}; subclasses may override to widen the sidebar.
+   */
+  protected int categoryTabWidth() {
+    return CATEGORY_TAB_WIDTH;
+  }
   protected static final int CATEGORY_TAB_HEIGHT = 16;
   protected static final int CATEGORY_TAB_GAP = 2;
   /**
    * Width of the category sidebar scrollbar
    */
-  protected static final int CATEGORY_SCROLLBAR_WIDTH = 4;
+  protected static final int CATEGORY_SCROLLBAR_WIDTH = 12;
 
   protected final Screen parent;
   protected final List<Button> commandButtons = new ArrayList<>();
@@ -83,6 +93,11 @@ public abstract class AbstractCommandTab implements Tab {
   }
 
   @Override
+  public Layout getLayout() {
+    return new FrameLayout();
+  }
+
+  @Override
   public void visitChildren(Consumer consumer) {
     commandButtons.forEach(consumer);
     categoryButtons.forEach(consumer);
@@ -101,6 +116,7 @@ public abstract class AbstractCommandTab implements Tab {
    * updates {@link #categoryButtons}. Called whenever category data or scroll position changes.
    */
   protected void rebuildVisibleCategoryButtons() {
+    removeOldCategoryButtonsFromScreen();
     categoryButtons.clear();
       if (area == null) {
           return;
@@ -115,6 +131,30 @@ public abstract class AbstractCommandTab implements Tab {
       int y = area.top() + (i - startIndex) * (CATEGORY_TAB_HEIGHT + CATEGORY_TAB_GAP);
       btn.setY(y);
       categoryButtons.add(btn);
+    }
+  }
+
+  /**
+   * Removes the currently visible category buttons from the parent screen so a rebuild never
+   * leaves stale instances behind (they would linger on other tabs).
+   */
+  protected void removeOldCategoryButtonsFromScreen() {
+    if (parent instanceof CommandGUIScreen screen) {
+      for (Button button : categoryButtons) {
+        screen.removeTabButton(button);
+      }
+    }
+  }
+
+  /**
+   * Re-registers the visible category buttons with the parent screen (used after direct rebuilds
+   * such as sidebar scrolling, which are not wrapped by the tab change callbacks).
+   */
+  protected void reRegisterCategoryButtons() {
+    if (parent instanceof CommandGUIScreen screen) {
+      for (Button button : categoryButtons) {
+        screen.addTabButton(button);
+      }
     }
   }
 
@@ -138,17 +178,19 @@ public abstract class AbstractCommandTab implements Tab {
   }
 
   public void scrollCategory(double delta) {
-      if (area == null) {
-          return;
-      }
+    if (area == null) {
+      return;
+    }
     int maxScroll = getMaxCategoryScroll();
     if (maxScroll > 0) {
       if (delta > 0 && categoryScrollOffset > 0) {
         categoryScrollOffset--;
         rebuildVisibleCategoryButtons();
+        reRegisterCategoryButtons();
       } else if (delta < 0 && categoryScrollOffset < maxScroll) {
         categoryScrollOffset++;
         rebuildVisibleCategoryButtons();
+        reRegisterCategoryButtons();
       }
     }
   }
@@ -157,8 +199,8 @@ public abstract class AbstractCommandTab implements Tab {
       if (area == null) {
           return false;
       }
-    return mouseX >= area.left()
-        && mouseX < area.left() + CATEGORY_TAB_WIDTH + CATEGORY_SCROLLBAR_WIDTH + 2 &&
+    return mouseX >= area.left() + sidebarOffset()
+        && mouseX < area.left() + sidebarOffset() + categoryTabWidth() + CATEGORY_SCROLLBAR_WIDTH + 2 &&
         mouseY >= area.top() && mouseY < area.bottom();
   }
 
@@ -190,12 +232,22 @@ public abstract class AbstractCommandTab implements Tab {
       }
   }
 
+  /**
+   * Horizontal offset of the category sidebar from the area's left edge. Applied to the sidebar
+   * buttons, the separator, the scrollbar and the command area's left edge so they stay aligned.
+   * Subclasses can override this to shift the whole sidebar right (e.g. when delete buttons make
+   * the column wider).
+   */
+  protected int sidebarOffset() {
+    return 0;
+  }
+
   protected int getCommandAreaLeft() {
-    return area.left() + CATEGORY_TAB_WIDTH + CATEGORY_SCROLLBAR_WIDTH + 8;
+    return area.left() + sidebarOffset() + categoryTabWidth() + CATEGORY_SCROLLBAR_WIDTH + 8;
   }
 
   protected int getCommandAreaWidth() {
-    return area.width() - CATEGORY_TAB_WIDTH - CATEGORY_SCROLLBAR_WIDTH - 8;
+    return area.width() - sidebarOffset() - categoryTabWidth() - CATEGORY_SCROLLBAR_WIDTH - 8;
   }
 
   /**
@@ -205,6 +257,7 @@ public abstract class AbstractCommandTab implements Tab {
    * called so subclasses can add extra widgets (e.g., action icon buttons) aligned with it.
    */
   protected void rebuildButtons() {
+    removeOldCommandButtonsFromScreen();
     commandButtons.clear();
       if (area == null) {
           return;
@@ -238,6 +291,18 @@ public abstract class AbstractCommandTab implements Tab {
       int btnWidth = colWidth - 4;
       commandButtons.add(buildCommandButton(index, btnX + 2, btnY, btnWidth, ITEM_HEIGHT - 2));
       onCommandButtonBuilt(index, btnX + 2, btnY, btnWidth, ITEM_HEIGHT - 2);
+    }
+  }
+
+  /**
+   * Removes the currently visible command buttons from the parent screen so a rebuild never leaves
+   * stale instances behind (they would linger on other tabs).
+   */
+  protected void removeOldCommandButtonsFromScreen() {
+    if (parent instanceof CommandGUIScreen screen) {
+      for (Button button : commandButtons) {
+        screen.removeTabButton(button);
+      }
     }
   }
 
@@ -290,6 +355,33 @@ public abstract class AbstractCommandTab implements Tab {
     return Math.max(0, totalRows - visibleRows);
   }
 
+  /** Number of command rows visible in the scrollable area. */
+  public int getVisibleRowCount() {
+      if (area == null) {
+          return 1;
+      }
+    return Math.max(1, area.height() / ITEM_HEIGHT);
+  }
+
+  /** Total number of command rows (rounded up to full columns). */
+  public int getTotalRowCount() {
+    int count = getFilteredCommandCount();
+    if (count == 0) {
+      return 1;
+    }
+    return (count + COLUMNS - 1) / COLUMNS;
+  }
+
+  /** Horizontal offset of the category sidebar (see {@link #sidebarOffset()}). */
+  public int getCategorySidebarOffset() {
+    return sidebarOffset();
+  }
+
+  /** Total number of category entries (used for the sidebar thumb ratio). */
+  public int getAllCategoryCount() {
+    return allCategoryButtons.size();
+  }
+
   public List<Button> getButtons() {
     return commandButtons;
   }
@@ -302,40 +394,37 @@ public abstract class AbstractCommandTab implements Tab {
     return area;
   }
 
-  public void renderSeparator(GuiGraphics guiGraphics) {
+  public void renderSeparator(GuiGraphicsExtractor guiGraphics) {
       if (area == null) {
           return;
       }
-    int separatorX = area.left() + CATEGORY_TAB_WIDTH + CATEGORY_SCROLLBAR_WIDTH + 4;
+    int separatorX = area.left() + sidebarOffset() + categoryTabWidth() + CATEGORY_SCROLLBAR_WIDTH + 4;
     guiGraphics.fill(separatorX, area.top(), separatorX + 1, area.bottom(), 0xFF555555);
   }
 
-  public void renderCategoryScrollbar(GuiGraphics guiGraphics) {
+  public void renderCategoryScrollbar(GuiGraphicsExtractor guiGraphics) {
       if (area == null) {
           return;
       }
 
     int maxScroll = getMaxCategoryScroll();
-    int scrollbarX = area.left() + CATEGORY_TAB_WIDTH + 2;
+    int scrollbarX = area.left() + sidebarOffset() + categoryTabWidth() + 2;
     int scrollbarTop = area.top();
     int scrollbarHeight = area.height();
 
-    guiGraphics.fill(scrollbarX, scrollbarTop, scrollbarX + CATEGORY_SCROLLBAR_WIDTH,
-        scrollbarTop + scrollbarHeight, 0xFF000000);
+    ScrollbarHandle handle = new ScrollbarHandle(scrollbarX, scrollbarTop, CATEGORY_SCROLLBAR_WIDTH,
+        scrollbarHeight);
+    handle.render(guiGraphics, categoryScrollOffset, maxScroll,
+        getVisibleCategoryCount(), allCategoryButtons.size(), false);
+  }
 
-    if (maxScroll <= 0) {
-      guiGraphics.fill(scrollbarX, scrollbarTop, scrollbarX + CATEGORY_SCROLLBAR_WIDTH,
-          scrollbarTop + scrollbarHeight, 0xFF555555);
-      return;
-    }
-
-    int thumbHeight = Math.max(12,
-        scrollbarHeight * getVisibleCategoryCount() / allCategoryButtons.size());
-    int thumbY = scrollbarTop + (scrollbarHeight - thumbHeight) * categoryScrollOffset / maxScroll;
-
-    guiGraphics.fill(scrollbarX, thumbY, scrollbarX + CATEGORY_SCROLLBAR_WIDTH,
-        thumbY + thumbHeight, 0xFF808080);
-    guiGraphics.fill(scrollbarX, thumbY, scrollbarX + CATEGORY_SCROLLBAR_WIDTH - 1,
-        thumbY + thumbHeight - 1, 0xFFC0C0C0);
+  /**
+   * Sets the category scroll offset directly (drag gestures), clamped to the valid range.
+   */
+  public void setCategoryScrollOffset(int offset) {
+    int maxScroll = getMaxCategoryScroll();
+    categoryScrollOffset = Math.max(0, Math.min(offset, maxScroll));
+    rebuildVisibleCategoryButtons();
+    reRegisterCategoryButtons();
   }
 }

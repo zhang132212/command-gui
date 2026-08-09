@@ -12,8 +12,8 @@ import net.minecraft.network.chat.Component;
  * Chained command executor that supports commands with placeholders
  * ({@code {player}}/{@code {number}}, etc.).
  * <p>
- * Execution flow: parse all placeholder types in the command → pop the corresponding input screen
- * for each → replace the placeholder text → send the complete command. Supports multi-command
+ * Execution flow: parse all placeholder types in the command 鈫?pop the corresponding input screen
+ * for each 鈫?replace the placeholder text 鈫?send the complete command. Supports multi-command
  * sequences, and automatically delays subsequent action commands after a fake player spawn
  * command.
  */
@@ -70,7 +70,7 @@ public class ChainedCommandExecutor {
             parent.onClose();
           }
         } else {
-          mc.setScreen(parent);
+          mc.gui.setScreen(parent);
         }
       }
     }
@@ -104,31 +104,35 @@ public class ChainedCommandExecutor {
           if (needsDelay) {
             scheduleDelayed(new ArrayList<>(rest), 0);
           } else {
-            for (String cmd : rest) {
-              CommandHelper.sendCommand(cmd);
-            }
+            sendInOrder(new ArrayList<>(rest));
           }
         }
       }.start();
     } else {
       Minecraft mc = Minecraft.getInstance();
       if (mc != null && mc.player != null) {
-        CommandHelper.sendCommand(first);
-        if (needsDelay) {
-          scheduleDelayed(new ArrayList<>(rest), 0);
-        } else {
-          for (String cmd : rest) {
-            CommandHelper.sendCommand(cmd);
-          }
-        }
+        // Send all commands in strict order through the delayed queue (1 tick apart),
+        // so the server always executes them in the configured sequence.
+        sendInOrder(new ArrayList<>(commands));
         if (!CommandGUIScreen.shouldKeepOpen()) {
           if (parent != null) {
             parent.onClose();
           }
         } else {
-          mc.setScreen(parent);
+          mc.gui.setScreen(parent);
         }
       }
+    }
+  }
+
+  /**
+   * Queues each command with an increasing per-command delay (1 tick between commands) so the
+   * server receives and executes them in the exact list order, regardless of any client/network
+   * batching behavior.
+   */
+  private static void sendInOrder(List<String> commands) {
+    for (int i = 0; i < commands.size(); i++) {
+      delayedQueue.add(new DelayedBatch(List.of(commands.get(i)), i + 1));
     }
   }
 
@@ -222,7 +226,7 @@ public class ChainedCommandExecutor {
               start();
             }
         );
-        mc.setScreen(screen);
+        mc.gui.setScreen(screen);
       }
 
       case PLAYER_OTHER -> {
@@ -237,7 +241,7 @@ public class ChainedCommandExecutor {
               start();
             }
         );
-        mc.setScreen(screen);
+        mc.gui.setScreen(screen);
       }
 
       case PLAYER_FAKE -> {
@@ -252,7 +256,7 @@ public class ChainedCommandExecutor {
               start();
             }
         );
-        mc.setScreen(screen);
+        mc.gui.setScreen(screen);
       }
 
       case NAME -> {
@@ -269,7 +273,7 @@ public class ChainedCommandExecutor {
             start();
           }
         };
-        mc.setScreen(screen);
+        mc.gui.setScreen(screen);
       }
 
       case NUMBER -> {
@@ -286,7 +290,7 @@ public class ChainedCommandExecutor {
             start();
           }
         };
-        mc.setScreen(screen);
+        mc.gui.setScreen(screen);
       }
 
       case TIME -> {
@@ -303,7 +307,7 @@ public class ChainedCommandExecutor {
             start();
           }
         };
-        mc.setScreen(screen);
+        mc.gui.setScreen(screen);
       }
 
       case COORDS -> {
@@ -323,7 +327,7 @@ public class ChainedCommandExecutor {
             start();
           }
         };
-        mc.setScreen(screen);
+        mc.gui.setScreen(screen);
       }
     }
   }
@@ -340,7 +344,7 @@ public class ChainedCommandExecutor {
           parent.onClose();
         }
       } else {
-        mc.setScreen(parent);
+        mc.gui.setScreen(parent);
       }
     }
   }

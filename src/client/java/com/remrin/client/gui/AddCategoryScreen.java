@@ -1,7 +1,7 @@
 package com.remrin.client.gui;
 
 import com.remrin.client.config.CommandConfig;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.input.KeyEvent;
@@ -45,32 +45,33 @@ public class AddCategoryScreen extends BaseParentedScreen<CommandGUIScreen> {
     // Cancel button
     this.addRenderableWidget(Button.builder(
         Component.translatable("screen.command-gui.cancel"),
-        button -> this.minecraft.setScreen(parent)
+        button -> this.minecraft.gui.setScreen(parent)
     ).bounds(centerX + 2, centerY + 15, 100, 20).build());
   }
 
   @Override
-  public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
-    super.render(guiGraphics, mouseX, mouseY, partialTick);
+  public void extractRenderState(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY,
+      float partialTick) {
+    super.extractRenderState(guiGraphics, mouseX, mouseY, partialTick);
 
     int centerX = this.width / 2;
     int centerY = this.height / 2;
 
     // Title
-    guiGraphics.drawCenteredString(this.font, this.title, centerX, centerY - 55, 0xFFFFFF);
+    guiGraphics.centeredText(this.font, this.title, centerX, centerY - 55, 0xFFFFFF);
 
     // Description
-    guiGraphics.drawCenteredString(this.font,
+    guiGraphics.centeredText(this.font,
         Component.translatable("screen.command-gui.add_category_desc"),
         centerX, centerY - 40, 0xFF888888);
 
     // Label
-    guiGraphics.drawString(this.font,
+    guiGraphics.text(this.font,
         Component.translatable("screen.command-gui.category_name"),
         centerX - 100, centerY - 32, 0xFFAAAAAA);
 
     // Hint
-    guiGraphics.drawCenteredString(this.font,
+    guiGraphics.centeredText(this.font,
         Component.translatable("screen.command-gui.enter_to_save"),
         centerX, centerY + 45, 0xFF888888);
   }
@@ -80,7 +81,7 @@ public class AddCategoryScreen extends BaseParentedScreen<CommandGUIScreen> {
     int keyCode = keyEvent.key();
 
     if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
-      this.minecraft.setScreen(parent);
+      this.minecraft.gui.setScreen(parent);
       return true;
     }
     if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
@@ -111,6 +112,6 @@ public class AddCategoryScreen extends BaseParentedScreen<CommandGUIScreen> {
     if (parent != null) {
       parent.refresh();
     }
-    this.minecraft.setScreen(parent);
+    this.minecraft.gui.setScreen(parent);
   }
 }

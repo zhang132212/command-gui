@@ -1,6 +1,6 @@
 package com.remrin.client.gui;
 
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
@@ -120,7 +120,7 @@ public class BatchSpawnScreen extends BaseParentedScreen<Screen> {
 
     this.addRenderableWidget(Button.builder(
         Component.translatable("screen.command-gui.back"),
-        btn -> this.minecraft.setScreen(parent)
+        btn -> this.minecraft.gui.setScreen(parent)
     ).bounds(centerX + 2, y, 100, 20).build());
   }
 
@@ -141,7 +141,7 @@ public class BatchSpawnScreen extends BaseParentedScreen<Screen> {
         CommandHelper.sendCommand("/player " + prefix + (startNum + i) + " spawn");
       }
     }
-    this.minecraft.setScreen(parent);
+    this.minecraft.gui.setScreen(parent);
   }
 
   private String buildPreview() {
@@ -158,39 +158,40 @@ public class BatchSpawnScreen extends BaseParentedScreen<Screen> {
   }
 
   @Override
-  public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
-    super.render(guiGraphics, mouseX, mouseY, partialTick);
+  public void extractRenderState(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY,
+      float partialTick) {
+    super.extractRenderState(guiGraphics, mouseX, mouseY, partialTick);
 
     int centerX = this.width / 2;
     int labelX = Math.max(4, centerX - FIELD_WIDTH / 2 - LABEL_WIDTH / 2 - 5);
     int y = layoutTopY;
 
-    guiGraphics.drawCenteredString(this.font, this.title, centerX, y, 0xFFFFFFFF);
+    guiGraphics.centeredText(this.font, this.title, centerX, y, 0xFFFFFFFF);
     y += 24;
 
-    guiGraphics.drawString(this.font,
+    guiGraphics.text(this.font,
         Component.translatable("screen.command-gui.fakeplayer.batch.type"),
         labelX, y + 6, 0xFFFFFFFF);
     y += ROW_GAP;
 
     if (!useEnglishNames) {
-      guiGraphics.drawString(this.font,
+      guiGraphics.text(this.font,
           Component.translatable("screen.command-gui.fakeplayer.batch.prefix"),
           labelX, y + 6, 0xFFFFFFFF);
       y += ROW_GAP;
 
-      guiGraphics.drawString(this.font,
+      guiGraphics.text(this.font,
           Component.translatable("screen.command-gui.fakeplayer.batch.start"),
           labelX, y + 6, 0xFFFFFFFF);
       y += ROW_GAP;
     }
 
-    guiGraphics.drawString(this.font,
+    guiGraphics.text(this.font,
         Component.translatable("screen.command-gui.fakeplayer.batch.count"),
         labelX, y + 6, 0xFFFFFFFF);
     y += 40 + 20 + 12; // count field height + button height + gap
 
-    guiGraphics.drawCenteredString(this.font,
+    guiGraphics.centeredText(this.font,
         Component.translatable("screen.command-gui.fakeplayer.batch.preview", buildPreview()),
         centerX, y, 0xFF888888);
   }

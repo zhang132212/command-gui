@@ -2,7 +2,7 @@ package com.remrin.client.gui;
 
 import com.remrin.client.config.CommandConfig;
 import java.util.List;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.network.chat.Component;
@@ -55,7 +55,7 @@ public class MoveCategoryScreen extends BaseParentedScreen<CommandGUIScreen> {
       Button catBtn = Button.builder(btnText, btn -> {
         CommandConfig.moveCommand(commandName, targetCategoryId);
         parent.refresh();
-        this.minecraft.setScreen(parent);
+        this.minecraft.gui.setScreen(parent);
       }).bounds(btnX, btnY, BTN_WIDTH, BTN_HEIGHT).build();
       catBtn.active = !isCurrent;
       this.addRenderableWidget(catBtn);
@@ -71,20 +71,21 @@ public class MoveCategoryScreen extends BaseParentedScreen<CommandGUIScreen> {
     int cancelY = startY + (row + (col > 0 ? 1 : 0)) * (BTN_HEIGHT + BTN_GAP) + 10;
     this.addRenderableWidget(Button.builder(
         Component.translatable("screen.command-gui.cancel"),
-        btn -> this.minecraft.setScreen(parent)
+        btn -> this.minecraft.gui.setScreen(parent)
     ).bounds(this.width / 2 - 50, cancelY, 100, 20).build());
   }
 
   @Override
-  public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
-    super.render(guiGraphics, mouseX, mouseY, partialTick);
-    guiGraphics.drawCenteredString(this.font, this.title, this.width / 2, 12, 0xFFFFFFFF);
+  public void extractRenderState(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY,
+      float partialTick) {
+    super.extractRenderState(guiGraphics, mouseX, mouseY, partialTick);
+    guiGraphics.centeredText(this.font, this.title, this.width / 2, 12, 0xFFFFFFFF);
   }
 
   @Override
   public boolean keyPressed(KeyEvent keyEvent) {
     if (keyEvent.key() == GLFW.GLFW_KEY_ESCAPE) {
-      this.minecraft.setScreen(parent);
+      this.minecraft.gui.setScreen(parent);
       return true;
     }
     return super.keyPressed(keyEvent);

@@ -6,9 +6,9 @@ import java.util.List;
 import java.util.UUID;
 import java.util.function.Consumer;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.components.PlayerFaceRenderer;
+import net.minecraft.client.gui.components.PlayerFaceExtractor;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.network.chat.Component;
@@ -44,6 +44,9 @@ public class PlayerSelectorScreen extends BaseParentedScreen<Screen> {
   private List<PlayerInfo> players = new ArrayList<>();
   private int scrollOffset = 0;
   private boolean initialized = false;
+  private ScrollbarHandle scrollbar = null;
+  private boolean draggingScrollbar = false;
+  private double scrollbarGrabOffset = 0;
 
   // Cached layout values, updated by computeLayout() in init() and mouseScrolled()
   private int layoutStartX;
@@ -85,7 +88,7 @@ public class PlayerSelectorScreen extends BaseParentedScreen<Screen> {
     int closeBtnY = this.height - 28;
     this.addRenderableWidget(Button.builder(
         Component.translatable("screen.command-gui.back"),
-        button -> this.minecraft.setScreen(parent)
+        button -> this.minecraft.gui.setScreen(parent)
     ).bounds(this.width / 2 - 75, closeBtnY, 150, 20).build());
   }
 
@@ -173,7 +176,7 @@ public class PlayerSelectorScreen extends BaseParentedScreen<Screen> {
   private void executeCommand(String command) {
     Minecraft mc = Minecraft.getInstance();
     if (mc != null && mc.player != null) {
-      mc.setScreen(null);
+      mc.gui.setScreen(null);
       ChainedCommandExecutor.sendCommand(command);
     }
   }
@@ -203,10 +206,11 @@ public class PlayerSelectorScreen extends BaseParentedScreen<Screen> {
   }
 
   @Override
-  public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
-    super.render(guiGraphics, mouseX, mouseY, partialTick);
+  public void extractRenderState(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY,
+      float partialTick) {
+    super.extractRenderState(guiGraphics, mouseX, mouseY, partialTick);
 
-    guiGraphics.drawCenteredString(this.font, this.titleText, this.width / 2, 15, 0xFFFFFFFF);
+    guiGraphics.centeredText(this.font, this.titleText, this.width / 2, 15, 0xFFFFFFFF);
 
     for (int i = 0; i < Math.min(layoutMaxItemsVisible, players.size() - scrollOffset * COLUMNS); i++) {
       int index = i + scrollOffset * COLUMNS;
@@ -225,17 +229,65 @@ public class PlayerSelectorScreen extends BaseParentedScreen<Screen> {
       int faceY = btnCenterY - FACE_SIZE / 2;
 
       PlayerSkin skin = playerInfo.getSkin();
-      PlayerFaceRenderer.draw(guiGraphics, skin, x + 4, faceY, FACE_SIZE);
+      PlayerFaceExtractor.extractRenderState(guiGraphics, skin, x + 4, faceY, FACE_SIZE);
     }
 
     if (players.isEmpty()) {
-      guiGraphics.drawCenteredString(this.font,
+      guiGraphics.centeredText(this.font,
           Component.translatable("screen.command-gui.no_players"),
           this.width / 2, this.height / 2, 0xFF888888);
     }
 
+    // Right-edge scrollbar for the player grid
+    int totalRows = (players.size() + COLUMNS - 1) / COLUMNS;
+    if (totalRows > layoutMaxRowsVisible) {
+      int listBottom = this.height - LIST_BOTTOM_MARGIN;
+      int gridRight = layoutStartX + COLUMNS * ITEM_WIDTH + (COLUMNS - 1) * ITEM_GAP;
+      scrollbar = new ScrollbarHandle(gridRight + 10, LIST_START_Y, 12, listBottom - LIST_START_Y);
+      boolean hovered = scrollbar.contains(mouseX, mouseY);
+      scrollbar.render(guiGraphics, scrollOffset, totalRows - layoutMaxRowsVisible,
+          layoutMaxRowsVisible, totalRows, hovered);
+    } else {
+      scrollbar = null;
+    }
+
     int bottomY = this.height - 45;
     guiGraphics.fill(0, bottomY, this.width, bottomY + 1, 0xFF555555);
+  }
+
+  @Override
+  public boolean mouseClicked(net.minecraft.client.input.MouseButtonEvent mouseEvent,
+      boolean focused) {
+    if (mouseEvent.button() == 0 && scrollbar != null
+        && scrollbar.contains(mouseEvent.x(), mouseEvent.y())) {
+      int totalRows = (players.size() + COLUMNS - 1) / COLUMNS;
+      int thumbTop = scrollbar.thumbTop(scrollOffset, totalRows - layoutMaxRowsVisible,
+          layoutMaxRowsVisible, totalRows);
+      scrollbarGrabOffset = mouseEvent.y() - thumbTop;
+      draggingScrollbar = true;
+      return true;
+    }
+    return super.mouseClicked(mouseEvent, focused);
+  }
+
+  @Override
+  public boolean mouseDragged(net.minecraft.client.input.MouseButtonEvent mouseEvent,
+      double dragX, double dragY) {
+    if (draggingScrollbar && scrollbar != null) {
+      int totalRows = (players.size() + COLUMNS - 1) / COLUMNS;
+      int offset = scrollbar.offsetFromY(mouseEvent.y(), scrollbarGrabOffset,
+          totalRows - layoutMaxRowsVisible, layoutMaxRowsVisible, totalRows);
+      scrollOffset = Math.max(0, Math.min(offset, totalRows - layoutMaxRowsVisible));
+      rebuildPlayerButtons();
+      return true;
+    }
+    return super.mouseDragged(mouseEvent, dragX, dragY);
+  }
+
+  @Override
+  public boolean mouseReleased(net.minecraft.client.input.MouseButtonEvent mouseEvent) {
+    draggingScrollbar = false;
+    return super.mouseReleased(mouseEvent);
   }
 
   public enum FilterMode {

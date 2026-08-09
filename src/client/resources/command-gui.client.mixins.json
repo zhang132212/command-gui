@@ -1,8 +1,8 @@
 {
   "required": true,
   "package": "com.remrin.client.mixin",
-  "compatibilityLevel": "JAVA_21",
-  "client": [],
+  "compatibilityLevel": "JAVA_25",
+  "client": ["CommandSuggestionsMixin", "CommandSuggestionsPlaceholderMixin"],
   "injectors": {
     "defaultRequire": 1
   },

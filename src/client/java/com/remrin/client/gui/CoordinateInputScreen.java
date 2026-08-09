@@ -1,7 +1,7 @@
 package com.remrin.client.gui;
 
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
@@ -44,7 +44,6 @@ public class CoordinateInputScreen extends BaseParentedScreen<Screen> {
     xField = new EditBox(this.font, startX, centerY - 30, FIELD_WIDTH, 20, Component.literal("X"));
     xField.setMaxLength(10);
     xField.setHint(Component.literal("X"));
-    xField.setFilter(this::isValidCoordInput);
     this.addRenderableWidget(xField);
     this.setInitialFocus(xField);
 
@@ -52,14 +51,12 @@ public class CoordinateInputScreen extends BaseParentedScreen<Screen> {
         Component.literal("Y"));
     yField.setMaxLength(10);
     yField.setHint(Component.literal("Y"));
-    yField.setFilter(this::isValidCoordInput);
     this.addRenderableWidget(yField);
 
     zField = new EditBox(this.font, startX + (FIELD_WIDTH + FIELD_GAP) * 2, centerY - 30, FIELD_WIDTH, 20,
         Component.literal("Z"));
     zField.setMaxLength(10);
     zField.setHint(Component.literal("Z"));
-    zField.setFilter(this::isValidCoordInput);
     this.addRenderableWidget(zField);
 
     this.addRenderableWidget(Button.builder(
@@ -74,37 +71,8 @@ public class CoordinateInputScreen extends BaseParentedScreen<Screen> {
 
     this.addRenderableWidget(Button.builder(
         Component.translatable("screen.command-gui.back"),
-        btn -> this.minecraft.setScreen(parent)
+        btn -> this.minecraft.gui.setScreen(parent)
     ).bounds(centerX - 75, centerY + 60, 150, 20).build());
-  }
-
-  /**
-   * Validates coordinate input format, allowing: plain numbers (including negatives and decimals),
-   * {@code ~}, {@code ^}, and relative/local coordinates starting with {@code ~} or {@code ^}
-   * followed by an optional offset.
-   */
-  private boolean isValidCoordInput(String text) {
-    if (text.isEmpty() || text.equals("-") || text.equals("~") || text.equals("^")) {
-      return true;
-    }
-    if (text.startsWith("~") || text.startsWith("^")) {
-      String rest = text.substring(1);
-      if (rest.isEmpty() || rest.equals("-")) {
-        return true;
-      }
-      try {
-        Double.parseDouble(rest);
-        return true;
-      } catch (NumberFormatException e) {
-        return false;
-      }
-    }
-    try {
-      Double.parseDouble(text);
-      return true;
-    } catch (NumberFormatException e) {
-      return false;
-    }
   }
 
   private void fillCurrentPosition() {
@@ -162,7 +130,7 @@ public class CoordinateInputScreen extends BaseParentedScreen<Screen> {
     }
 
     if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
-      this.minecraft.setScreen(parent);
+      this.minecraft.gui.setScreen(parent);
       return true;
     }
 
@@ -172,29 +140,30 @@ public class CoordinateInputScreen extends BaseParentedScreen<Screen> {
   private void executeCommand(String command) {
     Minecraft mc = Minecraft.getInstance();
     if (mc != null && mc.player != null) {
-      mc.setScreen(null);
+      mc.gui.setScreen(null);
       ChainedCommandExecutor.sendCommand(command);
     }
   }
 
   @Override
-  public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
-    super.render(guiGraphics, mouseX, mouseY, partialTick);
+  public void extractRenderState(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY,
+      float partialTick) {
+    super.extractRenderState(guiGraphics, mouseX, mouseY, partialTick);
 
     int centerX = this.width / 2;
     int centerY = this.height / 2;
 
-    guiGraphics.drawCenteredString(this.font, this.title, centerX, centerY - 60, 0xFFFFFFFF);
+    guiGraphics.centeredText(this.font, this.title, centerX, centerY - 60, 0xFFFFFFFF);
 
     int totalWidth = FIELD_WIDTH * 3 + FIELD_GAP * 2;
     int startX = centerX - totalWidth / 2;
 
-    guiGraphics.drawString(this.font, "X", startX, centerY - 42, 0xFFFF5555);
-    guiGraphics.drawString(this.font, "Y", startX + FIELD_WIDTH + FIELD_GAP, centerY - 42, 0xFF55FF55);
-    guiGraphics.drawString(this.font, "Z", startX + (FIELD_WIDTH + FIELD_GAP) * 2, centerY - 42,
+    guiGraphics.text(this.font, "X", startX, centerY - 42, 0xFFFF5555);
+    guiGraphics.text(this.font, "Y", startX + FIELD_WIDTH + FIELD_GAP, centerY - 42, 0xFF55FF55);
+    guiGraphics.text(this.font, "Z", startX + (FIELD_WIDTH + FIELD_GAP) * 2, centerY - 42,
         0xFF5555FF);
 
-    guiGraphics.drawCenteredString(this.font,
+    guiGraphics.centeredText(this.font,
         Component.translatable("screen.command-gui.enter_to_confirm"),
         centerX, centerY + 90, 0xFF888888);
   }

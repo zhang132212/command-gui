@@ -2,7 +2,7 @@ package com.remrin.client.gui;
 
 import java.util.ArrayList;
 import java.util.List;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.CommandSuggestions;
 import net.minecraft.client.gui.components.EditBox;
@@ -25,6 +25,10 @@ import org.lwjgl.glfw.GLFW;
  */
 public abstract class BaseCommandEditorScreen extends BaseParentedScreen<CommandGUIScreen> {
 
+  /**
+   * Placeholder type translation keys, shown on the right-column insert buttons; index-aligned with
+   * {@link #PLACEHOLDERS}.
+   */
   protected static final String[] TYPE_KEYS = {
       "screen.command-gui.type.player_all_full",
       "screen.command-gui.type.player_other_full",
@@ -36,10 +40,11 @@ public abstract class BaseCommandEditorScreen extends BaseParentedScreen<Command
   };
 
   /**
-   * Placeholder token array, corresponding 1:1 with TYPE_KEYS; clicking a type button inserts the
-   * matching token
+   * Placeholder tokens, index-aligned with {@link #TYPE_KEYS}; clicking an insert button appends
+   * the matching token to the command field. Also exposed to the tab-completion mixin so these
+   * appear as suggestions while typing a {@code {…}} token.
    */
-  protected static final String[] PLACEHOLDERS = {
+  public static final String[] PLACEHOLDERS = {
       "{player_all}",
       "{player}",
       "{player_fake}",
@@ -57,16 +62,19 @@ public abstract class BaseCommandEditorScreen extends BaseParentedScreen<Command
   protected static final int CONTENT_WIDTH = 300;
   /** Vertical gap from label top to its input field top (label sits above the field). */
   protected static final int LABEL_TO_FIELD = 10;
-  protected static final int ROW_GAP = 28;
+  protected static final int ROW_GAP = 36;
   protected static final int Y_OFFSET = -20;
   protected static final int BTN_GAP = 4;
   protected static final int ADD_BTN_WIDTH = 120;
+  /** Y of the name field (top of the form). */
+  protected static final int NAME_FIELD_Y = 44;
+  /** Y of the description field (below the name field). */
+  protected static final int DESC_FIELD_Y = NAME_FIELD_Y + ROW_GAP;
   /**
-   * Y position and height of the command field, matching the vanilla command block so that
-   * {@link CommandSuggestions} (which hardcodes the suggestion popup at y=72 when
-   * {@code anchorToBottom=false}) places suggestions directly below the field.
+   * Y position and height of the command field, below the name / description fields. The
+   * tab-completion popup is bottom-anchored for this editor, so its position is independent.
    */
-  protected static final int CMD_FIELD_Y = 50;
+  protected static final int CMD_FIELD_Y = DESC_FIELD_Y + INPUT_HEIGHT + 14;
   protected static final int CMD_FIELD_HEIGHT = 20;
   /**
    * Multi-command list (command sequence); commands are sent in order at execution time
@@ -91,18 +99,17 @@ public abstract class BaseCommandEditorScreen extends BaseParentedScreen<Command
   }
 
   /**
-   * Y coordinate of name field relative to screen top (left column start).
-   * In the two-column layout, form fields begin at the same Y as placeholder buttons.
+   * Y coordinate of the name field relative to screen top (left column start).
    */
   protected int getFieldStartY(int centerY) {
-    return CMD_FIELD_Y + CMD_FIELD_HEIGHT + 6 + LABEL_TO_FIELD;
+    return NAME_FIELD_Y;
   }
 
   /**
    * Y coordinate of title text.
    */
   protected int getTitleY(int centerY) {
-    return Math.max(6, (CMD_FIELD_Y - LABEL_TO_FIELD - this.font.lineHeight) / 2);
+    return Math.max(6, (NAME_FIELD_Y - LABEL_TO_FIELD - this.font.lineHeight) / 2);
   }
 
   protected abstract String getInitialName();
@@ -147,7 +154,7 @@ public abstract class BaseCommandEditorScreen extends BaseParentedScreen<Command
    * {@code currentY - LABEL_TO_FIELD}. Return {@code currentY + ROW_GAP} if rendered, or
    * {@code currentY} if not.
    */
-  protected int renderExtraLabel(GuiGraphics guiGraphics, int fieldX, int currentY) {
+  protected int renderExtraLabel(GuiGraphicsExtractor guiGraphics, int fieldX, int currentY) {
     return currentY;
   }
 
@@ -225,14 +232,29 @@ public abstract class BaseCommandEditorScreen extends BaseParentedScreen<Command
     int leftWidth = effectiveLeftColWidth();
     int rightWidth = effectiveRightColWidth();
     int rightColX = effectiveRightColX();
-    // Y where left column form section begins (below command field)
-    int formStartY = CMD_FIELD_Y + CMD_FIELD_HEIGHT + 6;  // = 76
     int bottomBarY = this.height - 26;
 
-    // Command field — full width, fixed at top.
-    // CommandSuggestions with anchorToBottom=false hardcodes the popup at y=72;
-    // placing the field at CMD_FIELD_Y=50 with CMD_FIELD_HEIGHT=20 makes the popup
-    // appear at y=71, directly below the field (same as vanilla).
+    // ── Row 1: name field (top of the form) ──
+    nameField = new EditBox(this.font, fieldX, NAME_FIELD_Y, getNameFieldWidth(leftWidth),
+        INPUT_HEIGHT, Component.translatable("screen.command-gui.name"));
+    nameField.setMaxLength(50);
+    nameField.setValue(getInitialName());
+    if (showNameHint()) {
+      nameField.setHint(Component.translatable("screen.command-gui.name_hint"));
+    }
+    this.addRenderableWidget(nameField);
+
+    // ── Row 2: description field (with inline extra rows, e.g. the category button) ──
+    int currentY = NAME_FIELD_Y + ROW_GAP;
+    currentY = initExtraRow(fieldX, currentY);
+    descriptionField = new EditBox(this.font, fieldX, currentY, leftWidth, INPUT_HEIGHT,
+        Component.translatable("screen.command-gui.description"));
+    descriptionField.setMaxLength(100);
+    descriptionField.setValue(getInitialDescription());
+    descriptionField.setHint(Component.translatable("screen.command-gui.description_hint"));
+    this.addRenderableWidget(descriptionField);
+
+    // ── Row 3: command field, below name / description ──
     commandField = new EditBox(this.font, fieldX, CMD_FIELD_Y, leftWidth, CMD_FIELD_HEIGHT,
         Component.translatable("screen.command-gui.command"));
     commandField.setMaxLength(256);
@@ -245,43 +267,35 @@ public abstract class BaseCommandEditorScreen extends BaseParentedScreen<Command
     this.setInitialFocus(commandField);
 
     this.commandSuggestions = new CommandSuggestions(this.minecraft, this, commandField,
-        this.font, true, true, 0, 7, false, Integer.MIN_VALUE);
+        this.font, false, true, 0, 7, false, Integer.MIN_VALUE);
     this.commandSuggestions.setAllowSuggestions(true);
     this.commandSuggestions.updateCommandInfo();
-    commandField.setResponder(text -> this.commandSuggestions.updateCommandInfo());
+    // Only enable tab completion when the command starts with "/": without the slash the vanilla
+    // chat-suggestion path would pop player-name completions (26.2 default). Disabling the
+    // suggestions entirely prevents that.
+    commandField.setResponder(text -> {
+      if (text.startsWith("/")) {
+        this.commandSuggestions.setAllowSuggestions(true);
+        this.commandSuggestions.updateCommandInfo();
+      } else {
+        this.commandSuggestions.hide();
+        this.commandSuggestions.setAllowSuggestions(false);
+      }
+    });
 
-    // Right column: placeholder buttons start at CMD_FIELD_Y (parallel with command field).
-    // The suggestion popup (rendered on top) temporarily covers these when active.
+    // Right column: placeholder insert buttons, parallel with the command field. The suggestion
+    // popup (rendered on top) temporarily covers these when active. PassiveButton keeps the focus
+    // on the command field after the click: vanilla would otherwise refocus the button, so the next
+    // Space press would re-trigger the insert instead of typing a space.
     for (int i = 0; i < TYPE_KEYS.length; i++) {
       final int index = i;
       int btnY = CMD_FIELD_Y + i * (PLACEHOLDER_BTN_HEIGHT + 1);
-      Button typeBtn = Button.builder(
+      PassiveButton typeBtn = new PassiveButton(
+          rightColX, btnY, rightWidth, PLACEHOLDER_BTN_HEIGHT,
           Component.translatable(TYPE_KEYS[i]),
-          btn -> appendPlaceholder(index)
-      ).bounds(rightColX, btnY, rightWidth, PLACEHOLDER_BTN_HEIGHT).build();
+          btn -> appendPlaceholder(index));
       this.addRenderableWidget(typeBtn);
     }
-
-    // Left column: form fields starting at formStartY + LABEL_TO_FIELD = 86
-    int currentY = formStartY + LABEL_TO_FIELD;  // = 86
-    nameField = new EditBox(this.font, fieldX, currentY, getNameFieldWidth(leftWidth), INPUT_HEIGHT,
-        Component.translatable("screen.command-gui.name"));
-    nameField.setMaxLength(50);
-    nameField.setValue(getInitialName());
-    if (showNameHint()) {
-      nameField.setHint(Component.translatable("screen.command-gui.name_hint"));
-    }
-    this.addRenderableWidget(nameField);
-
-    currentY += ROW_GAP;  // = 114
-    currentY = initExtraRow(fieldX, currentY);
-
-    descriptionField = new EditBox(this.font, fieldX, currentY, leftWidth, INPUT_HEIGHT,
-        Component.translatable("screen.command-gui.description"));
-    descriptionField.setMaxLength(100);
-    descriptionField.setValue(getInitialDescription());
-    descriptionField.setHint(Component.translatable("screen.command-gui.description_hint"));
-    this.addRenderableWidget(descriptionField);
 
     // Initialize command list from initial data
     if (commandList.isEmpty()) {
@@ -311,7 +325,7 @@ public abstract class BaseCommandEditorScreen extends BaseParentedScreen<Command
 
     Button cancelButton = Button.builder(
         Component.translatable("screen.command-gui.cancel"),
-        btn -> this.minecraft.setScreen(parent)
+        btn -> this.minecraft.gui.setScreen(parent)
     ).bounds(barStartX + addBtnW + BTN_GAP + saveCancelW + BTN_GAP, bottomBarY, saveCancelW, 20).build();
     this.addRenderableWidget(cancelButton);
 
@@ -355,13 +369,17 @@ public abstract class BaseCommandEditorScreen extends BaseParentedScreen<Command
    * Y coordinate of the command list label — just below the description field.
    */
   private int getCommandListStartY() {
-    // Name field Y=86, desc field Y=114 (86+ROW_GAP), list label Y=136 (114+INPUT_HEIGHT+6)
-    return CMD_FIELD_Y + CMD_FIELD_HEIGHT + 6 + LABEL_TO_FIELD + ROW_GAP + INPUT_HEIGHT + 6;
+    // Command field at CMD_FIELD_Y; list starts just below it
+    return CMD_FIELD_Y + CMD_FIELD_HEIGHT + 6;
   }
 
   /**
    * Appends the placeholder to the end of the command input field and shifts focus to it. If the
    * current text does not end with a space, a space is prepended for readability.
+   * <p>
+   * Focus must be handed over with {@code setFocused} (the runtime keyboard-focus switch), not
+   * {@code setInitialFocus} (which only configures the focus used on first screen init) — otherwise
+   * the insert button keeps the focus and the next Space press re-triggers it.
    */
   protected void appendPlaceholder(int index) {
     String placeholder = PLACEHOLDERS[index];
@@ -390,10 +408,14 @@ public abstract class BaseCommandEditorScreen extends BaseParentedScreen<Command
   protected final void saveAndClose() {
     String newName = nameField.getValue().trim();
     List<String> commands = getAllCommands();
+    if (newName.isEmpty()) {
+      newName = com.remrin.client.config.CommandConfig.nextDefaultCommandName();
+      nameField.setValue(newName);
+    }
     if (!newName.isEmpty() && !commands.isEmpty()) {
       performSave();
       parent.refresh();
-      this.minecraft.setScreen(parent);
+      this.minecraft.gui.setScreen(parent);
     }
   }
 
@@ -428,16 +450,15 @@ public abstract class BaseCommandEditorScreen extends BaseParentedScreen<Command
     }
 
     if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
-      String name = nameField.getValue().trim();
       List<String> commands = getAllCommands();
-      if (!name.isEmpty() && !commands.isEmpty()) {
+      if (!commands.isEmpty()) {
         saveAndClose();
       }
       return true;
     }
 
     if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
-      this.minecraft.setScreen(parent);
+      this.minecraft.gui.setScreen(parent);
       return true;
     }
 
@@ -461,48 +482,47 @@ public abstract class BaseCommandEditorScreen extends BaseParentedScreen<Command
   }
 
   @Override
-  public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
-    super.render(guiGraphics, mouseX, mouseY, partialTick);
+  public void extractRenderState(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY,
+      float partialTick) {
+    super.extractRenderState(guiGraphics, mouseX, mouseY, partialTick);
 
     int centerX = this.width / 2;
     int centerY = this.height / 2 + Y_OFFSET;
     int fieldX = effectiveFieldX();
     int leftWidth = effectiveLeftColWidth();
     int rightColX = effectiveRightColX();
-    // Y where left column form section begins (below command field)
-    int formStartY = CMD_FIELD_Y + CMD_FIELD_HEIGHT + 6;  // = 76
 
-    guiGraphics.drawCenteredString(this.font, this.title, centerX, getTitleY(centerY), 0xFFFFFFFF);
+    guiGraphics.centeredText(this.font, this.title, centerX, getTitleY(centerY), 0xFFFFFFFF);
+
+    // Name field label
+    guiGraphics.text(this.font, cachedLabelName,
+        fieldX, NAME_FIELD_Y - LABEL_TO_FIELD, 0xFFAAAAAA);
+
+    // Description label
+    int descLabelY = NAME_FIELD_Y + ROW_GAP;
+    descLabelY = renderExtraLabel(guiGraphics, fieldX, descLabelY);
+    guiGraphics.text(this.font, cachedLabelDesc,
+        fieldX, descLabelY - LABEL_TO_FIELD, 0xFFAAAAAA);
 
     // Command field label
-    guiGraphics.drawString(this.font, cachedLabelCommand,
+    guiGraphics.text(this.font, cachedLabelCommand,
         fieldX, CMD_FIELD_Y - LABEL_TO_FIELD, 0xFFAAAAAA);
 
     // Right column: placeholder label aligned with command field label
-    guiGraphics.drawString(this.font, cachedLabelPlaceholder,
+    guiGraphics.text(this.font, cachedLabelPlaceholder,
         rightColX, CMD_FIELD_Y - LABEL_TO_FIELD, 0xFFAAAAAA);
-
-    // Left column: name label
-    guiGraphics.drawString(this.font, cachedLabelName,
-        fieldX, formStartY, 0xFFAAAAAA);
-
-    // Description label — currentY is the desc field Y
-    int currentY = formStartY + LABEL_TO_FIELD + ROW_GAP;  // = 114
-    currentY = renderExtraLabel(guiGraphics, fieldX, currentY);
-    guiGraphics.drawString(this.font, cachedLabelDesc,
-        fieldX, currentY - LABEL_TO_FIELD, 0xFFAAAAAA);
 
     // Command list label and items
     if (!commandList.isEmpty()) {
       int listY = getCommandListStartY();
-      guiGraphics.drawString(this.font, cachedLabelCommands, fieldX, listY, 0xFFAAAAAA);
+      guiGraphics.text(this.font, cachedLabelCommands, fieldX, listY, 0xFFAAAAAA);
       for (int i = 0; i < commandList.size(); i++) {
         String cmd = commandList.get(i);
         String display = this.font.plainSubstrByWidth(cmd, leftWidth - 20);
-        guiGraphics.drawString(this.font, display, fieldX, listY + 12 + i * 12, 0xFF55FF55);
+        guiGraphics.text(this.font, display, fieldX, listY + 12 + i * 12, 0xFF55FF55);
       }
     }
 
-    this.commandSuggestions.render(guiGraphics, mouseX, mouseY);
+    this.commandSuggestions.extractRenderState(guiGraphics, mouseX, mouseY);
   }
 }

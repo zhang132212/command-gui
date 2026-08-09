@@ -35,7 +35,7 @@ public class CustomCommandTab extends AbstractCommandTab {
   /** Item icons for the action buttons (edit / delete / move). */
   private static final ItemStack EDIT_ICON   = new ItemStack(Items.WRITABLE_BOOK);
   private static final ItemStack DELETE_ICON = new ItemStack(Items.LAVA_BUCKET);
-  private static final ItemStack MOVE_ICON   = new ItemStack(Items.PURPLE_SHULKER_BOX);
+  private static final ItemStack MOVE_ICON   = new ItemStack(Items.SHULKER_BOX);
 
   private final List<FilteredCommand> filteredCommands = new ArrayList<>();
   /** Extra action icon button widgets generated alongside each command button row. */
@@ -103,20 +103,12 @@ public class CustomCommandTab extends AbstractCommandTab {
   protected void buildAllCategoryButtons() {
     allCategoryButtons.clear();
     allDeleteButtons.clear();
-		if (area == null) {
-			return;
-		}
+    if (area == null) {
+      return;
+    }
 
     int x = area.left();
     int y = area.top();
-
-    Button allBtn = Button.builder(
-        Component.translatable("screen.command-gui.category.all"),
-        btn -> onCategoryButtonClick(null)
-    ).bounds(x, y, CATEGORY_TAB_WIDTH, CATEGORY_TAB_HEIGHT).build();
-    allBtn.active = (selectedCategoryId != null);
-    allCategoryButtons.add(allBtn);
-    allDeleteButtons.add(null); // "All" has no delete button
 
     for (CommandConfig.Category category : CommandConfig.getCategories()) {
       final String catId = category.id;
@@ -214,8 +206,21 @@ public class CustomCommandTab extends AbstractCommandTab {
 
   @Override
   protected void rebuildButtons() {
+    // The base class removes the old command buttons from the parent screen but NOT the extra
+    // action buttons built by onCommandButtonBuilt — without this, stale action icons linger at
+    // their old positions after a resize (fullscreen <-> windowed) or a scroll, overlapping the
+    // new rows ("window-sized buttons still visible").
+    removeOldExtraButtonsFromScreen();
     extraButtons.clear();
     super.rebuildButtons();
+  }
+
+  private void removeOldExtraButtonsFromScreen() {
+    if (parent instanceof CommandGUIScreen screen) {
+      for (Button button : extraButtons) {
+        screen.removeTabButton(button);
+      }
+    }
   }
 
   /**
@@ -224,6 +229,9 @@ public class CustomCommandTab extends AbstractCommandTab {
    */
   @Override
   protected void rebuildVisibleCategoryButtons() {
+    // Same stale-widget problem as rebuildButtons: the base class only removes the category
+    // buttons, not the paired delete buttons, so remove them explicitly before rebuilding.
+    removeOldDeleteButtonsFromScreen();
     visibleDeleteButtons.clear();
     super.rebuildVisibleCategoryButtons();
 
@@ -237,6 +245,14 @@ public class CustomCommandTab extends AbstractCommandTab {
         int y = area.top() + (i - startIndex) * (CATEGORY_TAB_HEIGHT + CATEGORY_TAB_GAP);
         delBtn.setY(y);
         visibleDeleteButtons.add(delBtn);
+      }
+    }
+  }
+
+  private void removeOldDeleteButtonsFromScreen() {
+    if (parent instanceof CommandGUIScreen screen) {
+      for (Button button : visibleDeleteButtons) {
+        screen.removeTabButton(button);
       }
     }
   }
@@ -258,9 +274,9 @@ public class CustomCommandTab extends AbstractCommandTab {
     CommandGUIScreen parentScreen = (CommandGUIScreen) parent;
     if (isFakePlayerCommand(entry)) {
       String categoryId = CommandConfig.findCommandCategory(name);
-      mc.setScreen(new AddFakePlayerCommandScreen(parentScreen, categoryId, name, entry));
+      mc.gui.setScreen(new AddFakePlayerCommandScreen(parentScreen, categoryId, name, entry));
     } else {
-      mc.setScreen(new EditCommandScreen(parentScreen, name, entry));
+      mc.gui.setScreen(new EditCommandScreen(parentScreen, name, entry));
     }
   }
 
@@ -300,7 +316,7 @@ public class CustomCommandTab extends AbstractCommandTab {
 			return;
 		}
     Minecraft mc = Minecraft.getInstance();
-    mc.setScreen(new MoveCategoryScreen((CommandGUIScreen) parent, name));
+    mc.gui.setScreen(new MoveCategoryScreen((CommandGUIScreen) parent, name));
   }
 
   private boolean isFakePlayerCommand(CommandConfig.CommandEntry entry) {
@@ -315,9 +331,18 @@ public class CustomCommandTab extends AbstractCommandTab {
   }
 
   private void onCategoryButtonClick(String categoryId) {
-		if (Objects.equals(selectedCategoryId, categoryId)) {
-			return;
-		}
+    if (Objects.equals(selectedCategoryId, categoryId)) {
+      // Clicking the active category again shows everything
+      notifyCategoryChange(() -> {
+        selectedCategoryId = null;
+        scrollOffset = 0;
+        buildFilteredCommands();
+        buildAllCategoryButtons();
+        rebuildVisibleCategoryButtons();
+        rebuildButtons();
+      });
+      return;
+    }
     notifyCategoryChange(() -> {
       selectedCategoryId = categoryId;
       scrollOffset = 0;
@@ -330,7 +355,7 @@ public class CustomCommandTab extends AbstractCommandTab {
 
   private void openAddCategoryScreen() {
     net.minecraft.client.Minecraft.getInstance()
-        .setScreen(new AddCategoryScreen((CommandGUIScreen) parent));
+        .gui.setScreen(new AddCategoryScreen((CommandGUIScreen) parent));
   }
 
   /**

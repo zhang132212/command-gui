@@ -2,7 +2,7 @@ package com.remrin.client.gui;
 
 import com.remrin.client.config.CommandConfig;
 import java.util.List;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.network.chat.Component;
 
@@ -82,7 +82,7 @@ public class AddCommandScreen extends BaseCommandEditorScreen {
   }
 
   @Override
-  protected int renderExtraLabel(GuiGraphics guiGraphics, int fieldX, int currentY) {
+  protected int renderExtraLabel(GuiGraphicsExtractor guiGraphics, int fieldX, int currentY) {
     return currentY;  // category is shown inline in the button; no separate label needed
   }
 

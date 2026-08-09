@@ -1,7 +1,7 @@
 package com.remrin.client.gui;
 
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
@@ -61,7 +61,7 @@ public class TextInputScreen extends BaseParentedScreen<Screen> {
     }
 
     if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
-      this.minecraft.setScreen(parent);
+      this.minecraft.gui.setScreen(parent);
       return true;
     }
 
@@ -71,20 +71,21 @@ public class TextInputScreen extends BaseParentedScreen<Screen> {
   private void executeCommand(String command) {
     Minecraft mc = Minecraft.getInstance();
     if (mc != null && mc.player != null) {
-      mc.setScreen(null);
+      mc.gui.setScreen(null);
       ChainedCommandExecutor.sendCommand(command);
     }
   }
 
   @Override
-  public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
-    super.render(guiGraphics, mouseX, mouseY, partialTick);
+  public void extractRenderState(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY,
+      float partialTick) {
+    super.extractRenderState(guiGraphics, mouseX, mouseY, partialTick);
 
     int centerX = this.width / 2;
     int centerY = this.height / 2;
 
-    guiGraphics.drawCenteredString(this.font, this.title, centerX, centerY - 40, 0xFFFFFFFF);
-    guiGraphics.drawCenteredString(this.font,
+    guiGraphics.centeredText(this.font, this.title, centerX, centerY - 40, 0xFFFFFFFF);
+    guiGraphics.centeredText(this.font,
         Component.translatable("screen.command-gui.enter_to_confirm"),
         centerX, centerY + 20, 0xFF888888);
   }
