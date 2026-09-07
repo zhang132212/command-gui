@@ -10,7 +10,7 @@
 | Fabric Loader | 0.19.3+ |
 | Fabric API | 0.156.0+26.2 |
 | Java | 25+ |
-| 模组版本 | `0.2.0-beta.64`（构建成功后自动递增 beta 序号） |
+| 模组版本 | `0.2.0-beta.95-perf3`（构建成功后自动递增 beta 序号） |
 | 许可证 | GPL-3.0 |
 
 项目包含两个 Fabric mod：
