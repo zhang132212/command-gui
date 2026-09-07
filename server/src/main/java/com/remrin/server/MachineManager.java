@@ -441,6 +441,18 @@ public final class MachineManager {
             return;
          }
 
+         // 模式异步切换序列或模式进程进行中禁止编辑（与 isRunning 对称，防编辑期间被 chain 异步改状态）
+         if (MachineModeChain.isActive(machineId)) {
+            sendMessage(player, "机器「" + machine.name + "」模式正在切换中，无法编辑");
+            return;
+         }
+         for (MachineConfig.ModeData busy : machine.modes) {
+            if (busy != null && MachineScheduler.isModeProcessRunning(machineId, busy.id)) {
+               sendMessage(player, "机器「" + machine.name + "」模式正在执行开关流程，无法编辑");
+               return;
+            }
+         }
+
          cleanupExpiredLocks();
          MachineManager.EditLock lock = editLocks.get(machineId);
          if (lock != null && !lock.editor().equals(name)) {
@@ -488,6 +500,15 @@ public final class MachineManager {
          return "机器「" + machine.name + "」正在被 " + lock.editor() + " 编辑，请稍后再操作";
       }
       return null;
+   }
+
+   /** 机器编辑锁是否被【指定持有者以外】的玩家占用（供异步路径（模式编排链）认锁）。 */
+   public static String editingLockedByOtherMachineId(String machineId, String self) {
+      MachineConfig.MachineData machine = MachineConfig.getMachine(machineId);
+      if (machine == null) {
+         return null;
+      }
+      return editingLockedByOtherMessage(machine, self);
    }
 
    private static void addMachine(ServerPlayer player, MinecraftServer server, JsonObject machineJson) {
