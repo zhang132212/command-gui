@@ -36,7 +36,6 @@ import net.minecraft.world.level.block.state.properties.Property.Value;
 
 public final class MachineManager {
    private static final Gson GSON = new GsonBuilder().create();
-   private static final long EDIT_LOCK_TTL_MS = 900000L;
    private static final Map<String, MachineManager.EditLock> editLocks = new HashMap<>();
    private static String lastStateSignature = "";
 
@@ -102,37 +101,46 @@ public final class MachineManager {
          sendMessage(player, "机器不存在: " + machineId);
       } else if (!canToggle(player, machine)) {
          sendMessage(player, "你没有权限操作机器「" + machine.name + "」");
-      } else if (MachineScheduler.isRunning(machine.id)) {
-         sendMessage(player, "机器「" + machine.name + "」正在开机/关机中，请稍候");
-      } else if (machine.detection != null && machine.detection.enabled) {
-         int tick = server.getTickCount();
-         int lockRemaining = MachineScheduler.switchLockRemaining(machine.id, tick);
-         if (lockRemaining > 0) {
-            sendMessage(player, "机器「" + machine.name + "」开机/关机之后有（剩余 " + lockRemaining + " tick）冷却时间，请稍后重试");
-            MachineMod.LOGGER
-               .info("Machine '{}' toggle rejected by {}: switch interval ({} left)", new Object[]{machine.id, player.getGameProfile().name(), lockRemaining});
-         } else {
-            MachineDetector.DetectionResult detection = MachineDetector.evaluateDetailed(machine, server, true);
-            MachineDetector.MachineState detected = detection.state();
-            if (detected == MachineDetector.MachineState.ABNORMAL) {
-               sendMessage(player, "机器「" + machine.name + "」处于异常状态，无法开关：" + (detection.reason() != null ? detection.reason() : "检测方块异常"));
-            } else {
-               if (detected == MachineDetector.MachineState.ON) {
-                  MachineScheduler.start(machine, machine.offTimeline, player.getGameProfile().name(), true);
-               } else if (detected == MachineDetector.MachineState.OFF) {
-                  bootMachine(player, machine);
-               } else if (MachineScheduler.isRunning(machine.id)) {
-                  MachineScheduler.start(machine, machine.offTimeline, player.getGameProfile().name(), true);
-               } else {
-                  bootMachine(player, machine);
-               }
-
-               MachineScheduler.recordSwitchTick(machine.id, tick);
-               broadcastSync(server.getPlayerList());
-            }
-         }
       } else {
-         sendMessage(player, "机器「" + machine.name + "」未配置开关机检测，无法开关");
+         String editingBlock = editingLockedByOtherMessage(machine, player.getGameProfile().name());
+         if (editingBlock != null) {
+            sendMessage(player, editingBlock);
+            return;
+         }
+         if (MachineScheduler.isRunning(machine.id)) {
+            sendMessage(player, "机器「" + machine.name + "」正在开机/关机中，请稍候");
+            return;
+         }
+         if (machine.detection != null && machine.detection.enabled) {
+            int tick = server.getTickCount();
+            int lockRemaining = MachineScheduler.switchLockRemaining(machine.id, tick);
+            if (lockRemaining > 0) {
+               sendMessage(player, "机器「" + machine.name + "」开机/关机之后有（剩余 " + lockRemaining + " tick）冷却时间，请稍后重试");
+               MachineMod.LOGGER
+                  .info("Machine '{}' toggle rejected by {}: switch interval ({} left)", new Object[]{machine.id, player.getGameProfile().name(), lockRemaining});
+            } else {
+               MachineDetector.DetectionResult detection = MachineDetector.evaluateDetailed(machine, server, true);
+               MachineDetector.MachineState detected = detection.state();
+               if (detected == MachineDetector.MachineState.ABNORMAL) {
+                  sendMessage(player, "机器「" + machine.name + "」处于异常状态，无法开关：" + (detection.reason() != null ? detection.reason() : "检测方块异常"));
+               } else {
+                  if (detected == MachineDetector.MachineState.ON) {
+                     MachineScheduler.start(machine, machine.offTimeline, player.getGameProfile().name(), true);
+                  } else if (detected == MachineDetector.MachineState.OFF) {
+                     bootMachine(player, machine);
+                  } else if (MachineScheduler.isRunning(machine.id)) {
+                     MachineScheduler.start(machine, machine.offTimeline, player.getGameProfile().name(), true);
+                  } else {
+                     bootMachine(player, machine);
+                  }
+
+                  MachineScheduler.recordSwitchTick(machine.id, tick);
+                  broadcastSync(server.getPlayerList());
+               }
+            }
+         } else {
+            sendMessage(player, "机器「" + machine.name + "」未配置开关机检测，无法开关");
+         }
       }
    }
 
@@ -280,6 +288,11 @@ public final class MachineManager {
       } else if (!canToggle(player, machine)) {
          sendMessage(player, "你没有权限操作机器「" + machine.name + "」");
       } else {
+         String editingBlock = editingLockedByOtherMessage(machine, player.getGameProfile().name());
+         if (editingBlock != null) {
+            sendMessage(player, editingBlock);
+            return;
+         }
          for (MachineConfig.ModeData busy : machine.modes) {
             if (MachineScheduler.isModeProcessRunning(machine.id, busy.id)) {
                sendMessage(player, "机器「" + machine.name + "」模式正在执行开机/关机流程，请稍候再切换");
@@ -455,9 +468,26 @@ public final class MachineManager {
       }
    }
 
+   /** 编辑锁兜底超时：60 分钟。正常流程由锁主显式释放（保存/关闭/断线）；客户端会每 10 分钟续期；
+    *  子编辑器（时间线/模式等）停留时父屏 tick 暂停，因此阈值要足够宽松避免误清活跃编辑。 */
+   private static final long EDIT_LOCK_TTL_MS = 3600000L;
+
    private static void cleanupExpiredLocks() {
       long now = System.currentTimeMillis();
-      editLocks.entrySet().removeIf(entry -> now - entry.getValue().acquiredAt() > 900000L);
+      editLocks.entrySet().removeIf(entry -> now - entry.getValue().acquiredAt() > EDIT_LOCK_TTL_MS);
+   }
+
+   /**
+    * 机器是否正被【其他】玩家编辑（编辑锁互斥）。
+    * 返回被编辑时给请求者的提示文本；无他人编辑时返回 null。
+    * 锁在自己名下（或无人持锁）视为可操作。
+    */
+   private static String editingLockedByOtherMessage(MachineConfig.MachineData machine, String requester) {
+      MachineManager.EditLock lock = editLocks.get(machine.id);
+      if (lock != null && !lock.editor().equals(requester)) {
+         return "机器「" + machine.name + "」正在被 " + lock.editor() + " 编辑，请稍后再操作";
+      }
+      return null;
    }
 
    private static void addMachine(ServerPlayer player, MinecraftServer server, JsonObject machineJson) {
@@ -712,7 +742,9 @@ public final class MachineManager {
    }
 
    private static String buildSyncJson(ServerPlayer viewer) {
-      cleanupExpiredLocks();
+      // 注意：不要在这里 cleanupExpiredLocks()——sync 是全服周期广播触发的，
+      // 若在此清理会把仍在编辑（只是子屏停留未 tick 续期）的玩家的锁误删。
+      // 过期锁只在 editSession(open)（有人尝试抢锁）与超长兜底（见 cleanupExpiredLocks 阈值）时清理。
       JsonObject root = new JsonObject();
       root.addProperty("canEdit", canEdit(viewer));
       root.addProperty("canConfig", isFullEditor(viewer));

@@ -30,6 +30,7 @@ public class MachineEditorScreen extends BaseParentedScreen<CommandGUIScreen> {
    private boolean pendingDraftPrompt = false;
    private String draftTime = "";
    private boolean initializing = false;
+   private long lastLockRenewAt = 0L;
    private final boolean isNewMachine;
    private final boolean isEditor;
    private final boolean isConfigEditor;
@@ -344,6 +345,16 @@ public class MachineEditorScreen extends BaseParentedScreen<CommandGUIScreen> {
    @Override
    public void tick() {
       super.tick();
+      // 编辑锁续期：服务端编辑锁约 15 分钟无活动即被清理（见 MachineManager.cleanupExpiredLocks）。
+      // 长时间停留在本编辑器（或从子编辑器返回后 tick 恢复）时，每 10 分钟重发一次 editSession(open)，
+      // 刷新服务端锁的 acquiredAt，避免被周期广播误清后他人抢占同一台机器的编辑权。
+      if (!this.isNewMachine && this.machine.id != null && !this.machine.id.isEmpty()) {
+         long now = System.currentTimeMillis();
+         if (now - this.lastLockRenewAt > 600000L) {
+            this.lastLockRenewAt = now;
+            MachineNetworkManager.sendEditSession(this.machine.id, true);
+         }
+      }
       if (this.reloadAfterDraftDelete && MachineNetworkManager.getSyncVersion() != this.syncVersionAtOpen) {
          this.reloadAfterDraftDelete = false;
          MachineModels.MachineData fresh = MachineNetworkManager.getMachine(this.machine.id);

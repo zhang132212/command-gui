@@ -390,11 +390,14 @@ public class MachineSwitchTab extends AbstractCommandTab {
 
       MutableComponent label = Component.literal(name + suffix).withColor(color);
       boolean switchCooling = inCooldown(this.switchCooldownUntil.get(machine.id));
-      boolean blocked = locked || switchCooling;
+      boolean editedByOther = this.isLockedByOther(machine);
+      boolean blocked = locked || switchCooling || editedByOther;
       String switchTooltip = this.buildSwitchTooltip(machine).getString()
          + "\n"
          + Component.translatable("screen.command-gui.machine.left_toggle_right_edit").getString();
-      if (transition) {
+      if (editedByOther) {
+         switchTooltip = switchTooltip + "\n§e" + machine.editingBy + " 正在编辑，无法开关/切换模式/删除";
+      } else if (transition) {
          switchTooltip = switchTooltip + "\n§e" + ("off".equals(machine.transition) ? "正在关机中，无法编辑/切换模式" : "正在开机中，无法编辑/切换模式");
       }
       MachineSwitchTab.MachineSwitchButton switchBtn = new MachineSwitchTab.MachineSwitchButton(left, y, switchWidth, h, label, b -> {
@@ -457,6 +460,9 @@ public class MachineSwitchTab extends AbstractCommandTab {
 
    private void openModesScreen(MachineModels.MachineData machine) {
       if (machine.running) {
+         return;
+      }
+      if (this.isLockedByOther(machine)) {
          return;
       }
 
