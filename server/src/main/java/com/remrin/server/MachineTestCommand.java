@@ -83,6 +83,26 @@ public final class MachineTestCommand {
       );
       root.then(Commands.literal("machine").then(Commands.literal("list").executes(MachineTestCommand::machineList)));
       root.then(
+         Commands.literal("stop")
+            .then(Commands.argument("machine", StringArgumentType.word()).executes(MachineTestCommand::stopMachine))
+      );
+      root.then(Commands.literal("timeline").executes(MachineTestCommand::timelineDump));
+      root.then(Commands.literal("traceclear").executes(MachineTestCommand::traceClear));
+      root.then(Commands.literal("sched").executes(MachineTestCommand::schedDump));
+      root.then(
+         Commands.literal("run")
+            .then(
+               Commands.argument("player", StringArgumentType.word())
+                  .then(
+                     Commands.argument("machine", StringArgumentType.word())
+                        .then(
+                           Commands.literal("on").executes(c -> runTimeline(c, false))
+                        )
+                        .then(Commands.literal("off").executes(c -> runTimeline(c, true)))
+                  )
+            )
+      );
+      root.then(
          Commands.literal("action")
             .then(
                Commands.argument("player", StringArgumentType.word())
@@ -94,7 +114,48 @@ public final class MachineTestCommand {
 
    // ---------- handlers ----------
 
-   private static int lockList(CommandContext<CommandSourceStack> ctx) {
+   private static int timelineDump(CommandContext<CommandSourceStack> ctx) {
+      var trace = MachineScheduler.dumpExecTrace();
+      if (trace.isEmpty()) {
+         ctx.getSource().sendSuccess(() -> Component.literal("执行时间线: (空)"), false);
+      } else {
+         String out = "执行时间线 (最近 " + trace.size() + " 条):\n" + String.join("\n", trace);
+         ctx.getSource().sendSuccess(() -> Component.literal(out), false);
+      }
+      return 1;
+   }
+
+   private static int traceClear(CommandContext<CommandSourceStack> ctx) {
+      MachineScheduler.clearExecTrace();
+      ctx.getSource().sendSuccess(() -> Component.literal("执行时间线已清空"), false);
+      return 1;
+   }
+
+   private static int schedDump(CommandContext<CommandSourceStack> ctx) {
+      ctx.getSource().sendSuccess(() -> Component.literal(MachineScheduler.dumpRuntimeState()), false);
+      return 1;
+   }
+
+   private static int stopMachine(CommandContext<CommandSourceStack> ctx) {
+      String machineId = ctx.getArgument("machine", String.class);
+      MachineScheduler.stop(machineId);
+      ctx.getSource().sendSuccess(() -> Component.literal("已停止机器时序: " + machineId), false);
+      return 1;
+   }
+
+   private static int runTimeline(CommandContext<CommandSourceStack> ctx, boolean off) {
+      String playerName = ctx.getArgument("player", String.class);
+      String machineId = ctx.getArgument("machine", String.class);
+      MachineConfig.MachineData machine = MachineConfig.getMachine(machineId);
+      if (machine == null) {
+         ctx.getSource().sendFailure(Component.literal("机器不存在: " + machineId));
+         return 0;
+      }
+      String trigger = playerName.equals("-") ? "" : playerName;
+      MachineScheduler.start(machine, off ? machine.offTimeline : machine.onTimeline, trigger, off);
+      ctx.getSource().sendSuccess(() -> Component.literal("已启动 " + machineId + " " + (off ? "关机" : "开机") + " 时间线 (trigger=" + (trigger.isEmpty() ? "console" : trigger) + ")"), false);
+      return 1;
+   }   private static int lockList(CommandContext<CommandSourceStack> ctx) {
       String dump = MachineManager.debugLocksDump();
       ctx.getSource().sendSuccess(() -> Component.literal(dump), false);
       return 1;

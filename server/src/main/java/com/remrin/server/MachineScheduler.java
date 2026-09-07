@@ -25,6 +25,30 @@ public final class MachineScheduler {
    private static final Map<String, Integer> lastSwitchTick = new HashMap<>();
    private static final Map<String, Integer> lastModeSwitchTick = new HashMap<>();
 
+   /** 测试用：命令执行时间线（环形缓冲，记录 tick 级执行顺序，/cgtest timeline 读取）。 */
+   private static final java.util.ArrayDeque<String> execTrace = new java.util.ArrayDeque<>();
+   private static final int EXEC_TRACE_CAP = 500;
+
+   public static void clearExecTrace() {
+      execTrace.clear();
+   }
+
+   public static List<String> dumpExecTrace() {
+      return new ArrayList<>(execTrace);
+   }
+
+   private static void recordExec(String key, String command) {
+      int tick = -1;
+      MinecraftServer server = MachineMod.getCurrentServer();
+      if (server != null) {
+         tick = server.getTickCount();
+      }
+      execTrace.addLast("tick=" + tick + " | " + key + " | " + command);
+      if (execTrace.size() > EXEC_TRACE_CAP) {
+         execTrace.removeFirst();
+      }
+   }
+
    private MachineScheduler() {
    }
 
@@ -275,6 +299,41 @@ public final class MachineScheduler {
       return runtime != null && runtime.isOffTimeline;
    }
 
+   /** 测试用：导出全部 runtime 内部状态（/cgtest sched 读取）。 */
+   public static String dumpRuntimeState() {
+      if (runtimes.isEmpty()) {
+         return "scheduler: (无运行中的时序)";
+      }
+      StringBuilder sb = new StringBuilder("scheduler runtimes (").append(runtimes.size()).append("):");
+      for (MachineScheduler.Runtime rt : runtimes.values()) {
+         sb.append("\n  [")
+            .append(rt.key)
+            .append("] stepIndex=")
+            .append(rt.stepIndex)
+            .append("/")
+            .append(rt.steps.size())
+            .append(" waitTicks=")
+            .append(rt.waitTicks)
+            .append(" cmdWait=")
+            .append(rt.commandWaitTicks)
+            .append(" pending=")
+            .append(rt.pending.size())
+            .append(" loops=")
+            .append(rt.completedLoops)
+            .append(" loopCount=")
+            .append(rt.timeline != null ? rt.timeline.loopCount : 0)
+            .append(" finished=")
+            .append(rt.finished)
+            .append(" awaitBot=")
+            .append(rt.awaitBot)
+            .append(" trigger=")
+            .append(rt.triggerPlayer)
+            .append(" isOff=")
+            .append(rt.isOffTimeline);
+      }
+      return sb.toString();
+   }
+
    public static void recordSwitchTick(String machineId, int tick) {
       lastSwitchTick.put(machineId, tick);
    }
@@ -409,16 +468,20 @@ public final class MachineScheduler {
          int result = server.getCommands().getDispatcher().execute(server.getCommands().getDispatcher().parse(stripLeadingSlash(command), source));
          if (result > 0) {
             MachineMod.LOGGER.info("Machine command executed: {}", command);
+            recordExec(runtime.key, "OK   " + command);
             return MachineScheduler.CommandResult.SUCCESS;
          } else {
             MachineMod.LOGGER.warn("Machine command no-op (no permission or invalid): {}", command);
+            recordExec(runtime.key, "NOOP " + command);
             return MachineScheduler.CommandResult.NO_OP;
          }
       } catch (CommandSyntaxException var5) {
          MachineMod.LOGGER.warn("Machine command REJECTED (no permission or invalid command): {} - {}", command, var5.getMessage());
+         recordExec(runtime.key, "REJ  " + command);
          return MachineScheduler.CommandResult.REJECTED;
       } catch (Exception var6) {
          MachineMod.LOGGER.warn("Failed to execute machine command '{}': {}", command, var6.getMessage());
+         recordExec(runtime.key, "ERR  " + command);
          return MachineScheduler.CommandResult.REJECTED;
       }
    }
