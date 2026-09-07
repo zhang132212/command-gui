@@ -151,6 +151,15 @@ public final class MachineModeChain {
             MachineConfig.MachineData machine = MachineConfig.getMachine(machineId);
             MachineModeChain.Chain chain = entry.getValue();
             if (machine != null && !chain.steps.isEmpty()) {
+               // 编辑锁认锁（每 tick 检查，含 active 等待期）：机器正被【其他】玩家编辑时，
+               // 取消本切换序列，避免异步 start/stop 改状态破坏编辑者正在看的配置。
+               String lockBlock = MachineManager.editingLockedByOtherMachineId(machineId, chain.triggerPlayer);
+               if (lockBlock != null) {
+                  MachineManager.broadcastSystem("机器「" + machine.name + "」" + lockBlock + "，模式切换序列已取消");
+                  MachineMod.LOGGER.info("Chain for machine '{}' cancelled: edit lock held by other player", machineId);
+                  it.remove();
+                  continue;
+               }
                if (chain.activeModeId != null) {
                   if (!chain.activeCompleted) {
                      continue;
