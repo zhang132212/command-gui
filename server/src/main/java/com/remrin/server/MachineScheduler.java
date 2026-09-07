@@ -107,6 +107,22 @@ public final class MachineScheduler {
 
                      runtime.finished = true;
                      runtime.pending.clear();
+                   } else if (result == MachineScheduler.CommandResult.NO_OP && !isSpawnCommand(pending.command)) {
+                      // NOOP 且非 spawn：目标假人不存在/无法操作（如被其他玩家 kill）。
+                      // 中止时间线并明确报错，避免后续指令全部静默吞掉、机器"假完成"。
+                      MachineMod.LOGGER.warn("Machine '{}': command no-op'd (fake player '{}' likely removed), aborting: {}",
+                         new Object[]{runtime.machine.id, pending.botName, pending.command});
+                      runtime.hadFailures = true;
+                      runtime.failureMessage = pending.command;
+                      runtime.failedReason = "假人 " + pending.botName + " 不存在或无法操作（可能已被移除/击杀）";
+                      int hashIndex = runtime.key.indexOf(35);
+                      if (hashIndex >= 0) {
+                         MachineManager.onModeCommandFailed(runtime.machine, runtime.key.substring(hashIndex + 1), runtime.isOffTimeline, runtime.triggerPlayer, pending.command, runtime.failedReason);
+                      } else {
+                         MachineManager.onSwitchCommandFailed(runtime.machine, runtime.isOffTimeline, runtime.triggerPlayer, pending.command, runtime.failedReason);
+                      }
+                      runtime.finished = true;
+                      runtime.pending.clear();
                   } else {
                      botLastTick.computeIfAbsent(runtime.machine.id, k -> new HashMap<>()).put(pending.botName, tick);
                      runtime.commandWaitTicks = delayAfter;
