@@ -45,12 +45,21 @@ public final class MachineConfig {
 
    private static void migrateLegacySteps() {
       for (MachineConfig.MachineData machine : configData.machines) {
+         if (machine == null) {
+            continue;
+         }
          migrateTimeline(machine.onTimeline);
          migrateTimeline(machine.offTimeline);
 
-         for (MachineConfig.ModeData mode : machine.modes) {
-            migrateTimeline(mode.onTimeline);
-            migrateTimeline(mode.offTimeline);
+         // 防御: 单台机器 modes 缺失(null)不应拖垮整份配置加载(旧版配置/手改损坏场景)
+         if (machine.modes != null) {
+            for (MachineConfig.ModeData mode : machine.modes) {
+               if (mode == null) {
+                  continue;
+               }
+               migrateTimeline(mode.onTimeline);
+               migrateTimeline(mode.offTimeline);
+            }
          }
       }
    }
@@ -88,12 +97,19 @@ public final class MachineConfig {
 
    private static void normalizeDelays() {
       for (MachineConfig.MachineData machine : configData.machines) {
+         if (machine == null) {
+            continue;
+         }
          normalizeTimeline(machine.onTimeline);
          normalizeTimeline(machine.offTimeline);
 
-         for (MachineConfig.ModeData mode : machine.modes) {
-            normalizeTimeline(mode.onTimeline);
-            normalizeTimeline(mode.offTimeline);
+         if (machine.modes != null) {
+            for (MachineConfig.ModeData mode : machine.modes) {
+               if (mode != null) {
+                  normalizeTimeline(mode.onTimeline);
+                  normalizeTimeline(mode.offTimeline);
+               }
+            }
          }
       }
    }
@@ -125,10 +141,17 @@ public final class MachineConfig {
 
    private static void migrateDetectionKeys() {
       for (MachineConfig.MachineData machine : configData.machines) {
+         if (machine == null) {
+            continue;
+         }
          migrateDetection(machine.detection);
 
-         for (MachineConfig.ModeData mode : machine.modes) {
-            migrateDetection(mode.detection);
+         if (machine.modes != null) {
+            for (MachineConfig.ModeData mode : machine.modes) {
+               if (mode != null) {
+                  migrateDetection(mode.detection);
+               }
+            }
          }
       }
    }
