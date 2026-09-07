@@ -145,9 +145,14 @@ CommandGUIScreen                            MachineMod
                                             └─ MachineAdminCommand
 ```
 
-## 对照范围与已知限制
+## 仓库状态
 
-本 README 的差异基线是 GitHub 仓库当前可获取的旧版快照，而不是某个未发布的 PR 分支。当前源码目录本身没有 Git remote，因此无法在本地直接创建并推送到 `xgenya/command-gui`；提交 PR 需要先将本目录放入 Git 仓库、配置 fork/remote 和 GitHub 凭据。
+本仓库（`zhang132212/command-gui`）为 [xgenya/command-gui](https://github.com/xgenya/command-gui) 的 fork，当前仅发布 mod 源码本体：
+- 客户端 mod `command-gui`（src/）
+- 服务端 mod `command-gui-server`（server/）
+- 构建配置（Gradle / GitHub Actions）
+
+`devtools/` 网页调优框架仍在本地开发，设计完善后再另行发布（本仓库 `.gitignore` 已排除）。
 
 ## 许可证
 
