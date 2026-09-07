@@ -13,11 +13,10 @@ import java.util.Map;
 import net.fabricmc.loader.api.FabricLoader;
 
 /**
- * 开发期 GUI 微调层。
+ * 运行时 GUI 外观参数层。
  *
- * <p>游戏启动时会读取 {@code config/command-gui/gui-tuning.json}。该文件由
- * {@code devtools/} 中的网页开发框架生成和维护，因此调整 GUI 尺寸、间距、颜色等
- * 参数不需要再修改源码、重新构建或反复替换 jar。</p>
+ * <p>游戏启动时会读取 {@code config/command-gui/gui-tuning.json}，用于覆盖
+ * GUI 尺寸、间距、颜色等默认参数；未配置该文件时回退到源码内默认值。</p>
  */
 public final class GuiTuning {
    public static final String FILE_NAME = "gui-tuning.json";

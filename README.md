@@ -20,29 +20,13 @@
 
 ## 相对旧版的主要变化
 
-### 1. GUI 调优从“改源码”变为可视化配置
+### 1. GUI 外观参数支持运行时配置
 
-当前版新增 `GuiTuning` 调优层和 `devtools/` DevStudio：
+当前版新增 `GuiTuning` 调优层：
 
 - GUI 的尺寸、间距、颜色等参数集中从 `config/command-gui/gui-tuning.json` 读取。
 - 默认值仍保留在 Java 源码中；没有调优文件时，行为回退到源码默认值。
-- DevStudio 提供浏览器预览、参数编辑、文案编辑、预设编辑以及构建部署功能。
 - GUI 调优通常只需部署 JSON 并重新打开界面，不必每次修改 Java、重新打包或替换 jar。
-- `devtools/backup/pre-tuning-layer/` 保存了接入调优层前的 GUI 源码，便于回退和对照。
-
-启动 DevStudio：
-
-```bat
-devtools\start-devstudio.bat
-```
-
-或：
-
-```bash
-python devtools/server.py
-```
-
-浏览器打开 `http://127.0.0.1:8765`。详细说明见 [`devtools/README.md`](devtools/README.md)。
 
 ### 2. GUI 布局与交互全面整理
 
@@ -83,7 +67,6 @@ python devtools/server.py
 - 当前客户端和服务端共用根目录版本号，服务端产物仍为独立 jar。
 - `build.gradle` 增加成功构建后的 beta 版本自动递增任务；如不希望自动修改 `gradle.properties`，请在构建前移除或禁用 `build.finalizedBy bumpVersion`。
 - 语言文件继续提供 `en_us` 与 `zh_cn`；预设指令位于 `src/main/resources/assets/command-gui/presets/`。
-- 开发工具、调优 schema、网页预览资源和调优前备份均纳入源码包。
 
 ## 功能概览
 
@@ -132,7 +115,7 @@ build/libs/command-gui-<version>.jar
 server/build/libs/server-<version>.jar
 ```
 
-建议使用 DevStudio 的“构建并安装到 mods”完成构建、备份旧 jar 和部署。构建任务会自动递增 `gradle.properties` 中的 beta 序号，请提交前确认版本号是否符合预期。
+构建任务会自动递增 `gradle.properties` 中的 beta 序号，请提交前确认版本号是否符合预期。
 
 ## 配置与开发
 
@@ -142,7 +125,6 @@ server/build/libs/server-<version>.jar
 | 客户端设置 | `config/command-gui/settings.json` |
 | GUI 调优 | `config/command-gui/gui-tuning.json` |
 | 服务端机器 | `config/command-gui-server/machines.json` |
-| GUI 参数 schema | `devtools/tuning-schema.json` |
 | 中英文文案 | `src/main/resources/assets/command-gui/lang/` |
 | 预设指令 | `src/main/resources/assets/command-gui/presets/` |
 

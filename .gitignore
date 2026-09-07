@@ -38,3 +38,8 @@ hs_err_*.log
 replay_*.log
 *.hprof
 *.jfr
+
+# devtools (not ready for release, kept local only)
+devtools/
+start-devstudio.bat
+
