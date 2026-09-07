@@ -1,7 +1,8 @@
 package com.remrin.client.gui;
 
-import com.remrin.client.machine.MachineModels.MachineData;
-import com.remrin.client.machine.MachineModels.ModeData;
+import com.google.gson.Gson;
+import com.remrin.client.config.SettingsConfig;
+import com.remrin.client.machine.MachineModels;
 import com.remrin.client.machine.MachineNetworkManager;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -10,556 +11,768 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.Tooltip;
+import net.minecraft.client.gui.components.Button.OnPress;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 
-/**
- * Machine switch tab, shown only when the connected server supports machine switches.
- * <p>
- * The left sidebar lists the machine categories (默认 plus the distinct categories of the saved
- * machines) and an add-machine {@code +} button (for editors). Rows are single-column (one machine
- * per row) so each row can host the switch button, the mode chips and the edit / delete actions.
- * Mode chips are clicked to mark a pending change (highlighted amber) and the footer "确定" button
- * applies all pending mode changes at once via {@link MachineNetworkManager#sendSetModes}. The
- * switch itself is one-click and always reflects the machine's actual running state.
- * <p>
- * Toggling a machine does not close the GUI — this is a switch panel.
- */
 public class MachineSwitchTab extends AbstractCommandTab {
+   private static final int ACTION_BTN_WIDTH = 14;
+   private static final int MODES_BTN_W = 48;
+   private static final int REFRESH_BTN_W = 28;
+   private static final int EDIT_BTN_W = 28;
+   private static final int DELETE_BTN_W = 28;
+   private static final int ACTION_CLUSTER_WIDTH = 77;
+   private static final int MAX_CLUSTER_WIDTH = 135;
+   private static final ItemStack EDIT_ICON = new ItemStack(Items.WRITABLE_BOOK);
+   private static final int CATEGORY_COLUMN_MARGIN = 4;
+   private static final ItemStack DELETE_ICON = new ItemStack(Items.LAVA_BUCKET);
+   private static final ItemStack REFRESH_ICON = new ItemStack(Items.CLOCK);
+   private static final ItemStack MODES_ICON = new ItemStack(Items.IRON_PICKAXE);
+   private final List<MachineModels.MachineData> filteredMachines = new ArrayList<>();
+   private final List<Button> extraButtons = new ArrayList<>();
+   private Button addCategoryButton = null;
+   private String selectedCategoryId = null;
+   private MachineSwitchTab.MachineFilter filter = MachineSwitchTab.MachineFilter.ALL;
+   private static final long TICK_MS = 50L;
+   private final Map<String, Long> switchCooldownUntil = new HashMap<>();
 
-  private static final int ACTION_BTN_WIDTH = 14;
-  private static final int CAT_DEL_BTN_WIDTH = 14;
+   @Override
+   protected int sidebarOffset() {
+      return GuiTuning.getInt("MachineSwitchTab.SIDEBAR_OFFSET", 8);
+   }
 
-  private static final ItemStack EDIT_ICON = new ItemStack(Items.WRITABLE_BOOK);
-
-  /**
-   * Shifts the whole sidebar right so the category delete (×) buttons have clean room; the
-   * command rows absorb the shift (there is slack between the switch and the action cluster).
-   */
-  @Override
-  protected int sidebarOffset() {
-    return 8;
-  }
-
-  /**
-   * The machine sidebar is wider than the default: it extends to roughly a quarter of the tab
-   * area, giving the category buttons room to breathe.
-   */
-  @Override
-  protected int categoryTabWidth() {
-    if (area == null) {
-      return CATEGORY_TAB_WIDTH;
-    }
-    return Math.max(CATEGORY_TAB_WIDTH, area.width() / 4);
-  }
-
-  /**
-   * Horizontal margin between the sidebar's edges and the centered category button column.
-   * Keep small so the buttons are as long as possible while the column stays centered between
-   * the window's left edge and the sidebar's right edge.
-   */
-  private static final int CATEGORY_COLUMN_MARGIN = 4;
-
-  /**
-   * Left edge of the category button column. The column is centered between the game window's
-   * left edge and the sidebar's right edge: the distance to the window's left border equals the
-   * distance to the sidebar's right border.
-   */
-  private int categoryColumnX() {
-    int sidebarRight = area.left() + sidebarOffset() + categoryTabWidth();
-    return Math.max(0, (sidebarRight - categoryColumnWidth()) / 2);
-  }
-
-  /** Width of the centered category button column. */
-  private int categoryColumnWidth() {
-    return categoryTabWidth() - CATEGORY_COLUMN_MARGIN * 2;
-  }
-  private static final ItemStack DELETE_ICON = new ItemStack(Items.LAVA_BUCKET);
-  private static final ItemStack REFRESH_ICON = new ItemStack(Items.CLOCK);
-  private static final ItemStack MODES_ICON = new ItemStack(Items.IRON_PICKAXE);
-
-  /** Currently visible machines (after search / category filtering). */
-  private final List<MachineData> filteredMachines = new ArrayList<>();
-  /** Action buttons (modes / refresh / edit / delete), parallel to visible machine rows. */
-  private final List<Button> extraButtons = new ArrayList<>();
-  /**
-   * Category delete (×) buttons, PARALLEL to {@link #allCategoryButtons} (null when a category has
-   * no delete button). Kept in a separate list so each × is positioned on the SAME row as its
-   * category button (the base layout gives every sidebar entry its own row).
-   */
-  private final List<Button> allCategoryDeleteButtons = new ArrayList<>();
-  /** Currently visible delete buttons (same rows as {@link #categoryButtons}). */
-  private final List<Button> visibleCategoryDeleteButtons = new ArrayList<>();
-  /**
-   * Selected category filter: {@code null} = all machines, {@code ""} = the default category
-   * (machines without a category), otherwise the exact category string.
-   */
-  private String selectedCategoryId = null;
-
-  public MachineSwitchTab(Screen parent) {
-    super(parent);
-    buildFilteredCommands();
-  }
-
-  @Override
-  public Component getTabTitle() {
-    return Component.translatable("screen.command-gui.tab.machine");
-  }
-
-  @Override
-  protected int getFilteredCommandCount() {
-    return filteredMachines.size();
-  }
-
-  @Override
-  protected void buildFilteredCommands() {
-    filteredMachines.clear();
-    String search = searchText;
-    for (MachineData machine : MachineNetworkManager.getMachines()) {
-      if (!matchesCategory(machine)) {
-        continue;
+   @Override
+   protected int categoryTabWidth() {
+      if (this.area == null) {
+         return this.categoryMinWidth();
       }
-      if (search.isEmpty() ||
-          machine.name.toLowerCase().contains(search) ||
-          machine.description.toLowerCase().contains(search)) {
-        filteredMachines.add(machine);
+      return Math.max(this.categoryMinWidth(), this.area.width() / this.categoryWidthDivisor());
+   }
+
+   private int categoryColumnX() {
+      int sidebarRight = this.area.left() + this.sidebarOffset() + this.categoryTabWidth();
+      return Math.max(0, (sidebarRight - this.categoryColumnWidth()) / 2);
+   }
+
+   private int categoryColumnWidth() {
+      return this.categoryTabWidth() - this.categoryInnerMargin();
+   }
+
+
+   private int categoryMinWidth() {
+      return GuiTuning.getInt("MachineSwitchTab.CATEGORY_MIN_WIDTH", 50);
+   }
+
+   private int categoryWidthDivisor() {
+      return GuiTuning.getInt("MachineSwitchTab.CATEGORY_WIDTH_DIVISOR", 4);
+   }
+
+   private int categoryInnerMargin() {
+      return GuiTuning.getInt("MachineSwitchTab.CATEGORY_INNER_MARGIN", 8);
+   }
+
+   private int categoryBottomReserve() {
+      return GuiTuning.getInt("MachineSwitchTab.CATEGORY_BOTTOM_RESERVE", 18);
+   }
+
+   private int maxClusterWidth() {
+      return GuiTuning.getInt("MachineSwitchTab.MAX_CLUSTER_WIDTH", 135);
+   }
+
+   private int clusterGap() {
+      return GuiTuning.getInt("MachineSwitchTab.CLUSTER_GAP", 1);
+   }
+
+   public void setMachineFilter(MachineSwitchTab.MachineFilter filter) {
+      this.filter = filter != null ? filter : MachineSwitchTab.MachineFilter.ALL;
+      this.rebuildRows();
+   }
+
+   public MachineSwitchTab.MachineFilter getMachineFilter() {
+      return this.filter;
+   }
+
+   public MachineSwitchTab(Screen parent) {
+      super(parent);
+      this.buildFilteredCommands();
+   }
+
+   public Component getTabTitle() {
+      return Component.translatable("screen.command-gui.tab.machine");
+   }
+
+   @Override
+   protected int getFilteredCommandCount() {
+      return this.filteredMachines.size();
+   }
+
+   @Override
+   protected void buildFilteredCommands() {
+      this.filteredMachines.clear();
+      String search = this.searchText;
+
+      for (MachineModels.MachineData machine : MachineNetworkManager.getMachines()) {
+         if (this.matchesCategory(machine)
+            && (this.filter != MachineSwitchTab.MachineFilter.ON || "on".equals(machine.detected))
+            && (this.filter != MachineSwitchTab.MachineFilter.OFF || "off".equals(machine.detected))
+            && (search.isEmpty() || machine.name.toLowerCase().contains(search) || machine.description.toLowerCase().contains(search))) {
+            this.filteredMachines.add(machine);
+         }
       }
-    }
-  }
+   }
 
-  private boolean matchesCategory(MachineData machine) {
-    String category = machine.category == null ? "" : machine.category;
-    if (selectedCategoryId == null) {
-      return true;
-    }
-    return category.equals(selectedCategoryId);
-  }
-
-  /**
-   * Builds the sidebar: 默认, one button per distinct category (in order of first appearance), and
-   * an add-machine {@code +} button at the bottom for editors.
-   */
-  @Override
-  protected void buildAllCategoryButtons() {
-    allCategoryButtons.clear();
-    allCategoryDeleteButtons.clear();
-    if (area == null) {
-      return;
-    }
-
-    int x = categoryColumnX();
-    int y = area.top();
-    // Delete buttons are only visible to OP players (server-side machine categories are shared,
-    // unlike the per-player custom / fake player configs).
-    boolean canDeleteCategories = MachineNetworkManager.canConfig();
-    int columnWidth = categoryColumnWidth();
-
-    Button defaultBtn = Button.builder(
-        Component.translatable("screen.command-gui.category.default"),
-        btn -> onCategoryButtonClick("")
-    ).bounds(x, y, columnWidth, CATEGORY_TAB_HEIGHT).build();
-    defaultBtn.active = !"".equals(selectedCategoryId);
-    allCategoryButtons.add(defaultBtn);
-    allCategoryDeleteButtons.add(null);
-
-    Set<String> seen = new LinkedHashSet<>();
-    for (MachineData machine : MachineNetworkManager.getMachines()) {
-      String category = machine.category == null ? "" : machine.category.trim();
-      if (!category.isEmpty()) {
-        seen.add(category);
+   private boolean matchesCategory(MachineModels.MachineData machine) {
+      String category = machine.category == null ? "" : machine.category;
+      if (this.selectedCategoryId == null) {
+         return true;
       }
-    }
-    for (String category : seen) {
-      // Category button + its × must fit the column width: the button narrows by the delete
-      // button's space so the pair's left and right edges align with the default button.
-      int catWidth = canDeleteCategories ? columnWidth - CAT_DEL_BTN_WIDTH - 1 : columnWidth;
-      var font = net.minecraft.client.Minecraft.getInstance().font;
-      Button catBtn = Button.builder(
-          Component.literal(font.plainSubstrByWidth(category, catWidth - 4)),
-          btn -> onCategoryButtonClick(category)
-      ).bounds(x, y, catWidth, CATEGORY_TAB_HEIGHT).build();
-      catBtn.active = !category.equals(selectedCategoryId);
-      // The button text is truncated to fit; the tooltip always shows the full category name.
-      catBtn.setTooltip(Tooltip.create(Component.literal(category)));
-      allCategoryButtons.add(catBtn);
-      if (canDeleteCategories) {
-        Button delBtn = Button.builder(
-            Component.literal("×"),
-            btn -> MachineNetworkManager.sendClearCategory(category)
-        ).bounds(x + catWidth + 1, y, CAT_DEL_BTN_WIDTH, CATEGORY_TAB_HEIGHT).build();
-        delBtn.setTooltip(Tooltip.create(Component.translatable(
-            "screen.command-gui.machine.delete_category", category)));
-        allCategoryDeleteButtons.add(delBtn);
-      } else {
-        allCategoryDeleteButtons.add(null);
+      return category.equals(this.selectedCategoryId);
+   }
+
+   @Override
+   protected void buildAllCategoryButtons() {
+      this.allCategoryButtons.clear();
+      if (this.area != null) {
+         int x = this.categoryColumnX();
+         int y = this.area.top();
+         boolean canDeleteCategories = MachineNetworkManager.canConfig();
+         int columnWidth = this.categoryColumnWidth();
+         DarkSelectButton defaultBtn = new DarkSelectButton(
+            x, y, columnWidth, this.tunedCategoryTabHeight(), Component.translatable("screen.command-gui.category.default"), btn -> this.onCategoryButtonClick("")
+         );
+         defaultBtn.setDarkSelected(() -> Objects.equals(this.selectedCategoryId, ""), -1);
+         this.allCategoryButtons.add(defaultBtn);
+         Set<String> seen = new LinkedHashSet<>();
+
+         for (MachineModels.MachineData machine : MachineNetworkManager.getMachines()) {
+            String category = machine.category == null ? "" : machine.category.trim();
+            if (!category.isEmpty()) {
+               seen.add(category);
+            }
+         }
+
+         for (String category : SettingsConfig.getStringList("machine_categories")) {
+            if (!category.isBlank()) {
+               seen.add(category);
+            }
+         }
+
+         for (String category : seen) {
+            Font font = Minecraft.getInstance().font;
+            DarkSelectButton catBtn = new DarkSelectButton(
+               x, y, columnWidth, this.tunedCategoryTabHeight(), Component.literal(font.plainSubstrByWidth(category, columnWidth - 4)), btn -> this.onCategoryButtonClick(category)
+            );
+            catBtn.setDarkSelected(() -> Objects.equals(this.selectedCategoryId, category), -1);
+            if (canDeleteCategories) {
+               catBtn.setOnRightClick(() -> this.openEditMachineCategoryScreen(category));
+               String tip = category + "\n" + Component.translatable("screen.command-gui.category_right_click_edit").getString();
+               catBtn.setTooltip(Tooltip.create(Component.literal(tip)));
+            }
+
+            this.allCategoryButtons.add(catBtn);
+         }
+
+         if (this.addCategoryButton != null && this.parent instanceof CommandGUIScreen screen) {
+            screen.removeTabButton(this.addCategoryButton);
+         }
+
+         if (MachineNetworkManager.canEdit()) {
+            this.addCategoryButton = Button.builder(
+                  Component.literal("+"), btn -> Minecraft.getInstance().gui.setScreen(new AddMachineCategoryScreen((CommandGUIScreen)this.parent))
+               )
+               .bounds(x, 0, columnWidth, this.tunedCategoryTabHeight())
+               .build();
+            this.addCategoryButton.setTooltip(Tooltip.create(Component.translatable("screen.command-gui.machine.add_category_tip")));
+         } else {
+            this.addCategoryButton = null;
+         }
       }
-    }
+   }
 
-    if (MachineNetworkManager.canEdit()) {
-      Button addBtn = Button.builder(
-          Component.literal("+"),
-          btn -> net.minecraft.client.Minecraft.getInstance().gui.setScreen(
-              new MachineEditorScreen((CommandGUIScreen) parent, null))
-      ).bounds(x, y, columnWidth, CATEGORY_TAB_HEIGHT).build();
-      addBtn.setTooltip(Tooltip.create(
-          Component.translatable("screen.command-gui.machine.add_title")));
-      allCategoryButtons.add(addBtn);
-      allCategoryDeleteButtons.add(null);
-    }
-  }
-
-  /**
-   * Positions the delete buttons on the SAME rows as their category buttons, mirroring the custom
-   * tab's sidebar pattern.
-   */
-  @Override
-  protected void rebuildVisibleCategoryButtons() {
-    removeOldCategoryDeleteButtonsFromScreen();
-    visibleCategoryDeleteButtons.clear();
-    super.rebuildVisibleCategoryButtons();
-    if (area == null) {
-      return;
-    }
-    int startIndex = getCategoryScrollOffset();
-    int visibleCount = getVisibleCategoryCount();
-    int endIndex = Math.min(startIndex + visibleCount, allCategoryDeleteButtons.size());
-    for (int i = startIndex; i < endIndex; i++) {
-      Button delBtn = allCategoryDeleteButtons.get(i);
-      if (delBtn != null) {
-        int y = area.top() + (i - startIndex) * (CATEGORY_TAB_HEIGHT + CATEGORY_TAB_GAP);
-        delBtn.setY(y);
-        visibleCategoryDeleteButtons.add(delBtn);
+   public int getSwitchX() {
+      if (this.area != null) {
+         return this.getCommandAreaLeft();
       }
-    }
-  }
-
-  private void removeOldCategoryDeleteButtonsFromScreen() {
-    if (parent instanceof CommandGUIScreen screen) {
-      for (Button button : visibleCategoryDeleteButtons) {
-        screen.removeTabButton(button);
-      }
-    }
-  }
-
-  /** Returns the visible category buttons plus their paired delete buttons. */
-  @Override
-  public List<Button> getCategoryButtons() {
-    List<Button> all = new ArrayList<>(categoryButtons);
-    all.addAll(visibleCategoryDeleteButtons);
-    return all;
-  }
-
-  @Override
-  protected void reRegisterCategoryButtons() {
-    super.reRegisterCategoryButtons();
-    if (parent instanceof CommandGUIScreen screen) {
-      for (Button button : visibleCategoryDeleteButtons) {
-        screen.addTabButton(button);
-      }
-    }
-  }
-
-  private void onCategoryButtonClick(String categoryId) {
-    if (Objects.equals(selectedCategoryId, categoryId)) {
-      // Clicking the active category again shows everything
-      notifyCategoryChange(() -> {
-        selectedCategoryId = null;
-        scrollOffset = 0;
-        buildFilteredCommands();
-        buildAllCategoryButtons();
-        rebuildVisibleCategoryButtons();
-        rebuildButtons();
-      });
-      return;
-    }
-    notifyCategoryChange(() -> {
-      selectedCategoryId = categoryId;
-      scrollOffset = 0;
-      buildFilteredCommands();
-      buildAllCategoryButtons();
-      rebuildVisibleCategoryButtons();
-      rebuildButtons();
-    });
-  }
-
-  /**
-   * Not used: {@link #rebuildButtons()} builds the single-column rows directly.
-   */
-  @Override
-  protected Button buildCommandButton(int index, int x, int y, int width, int height) {
-    return null;
-  }
-
-  /**
-   * Single-column row layout: each machine gets one full-width row with the switch button, its
-   * mode chips and (for editors) the edit / delete icons.
-   */
-  @Override
-  protected void rebuildButtons() {
-    // Remove the previous widgets from the parent screen FIRST, otherwise stale buttons linger at
-    // their old positions after a refresh (they would overlap the new rows).
-    CommandGUIScreen parentScreen = (CommandGUIScreen) parent;
-    for (Button button : commandButtons) {
-      parentScreen.removeTabButton(button);
-    }
-    for (Button button : extraButtons) {
-      parentScreen.removeTabButton(button);
-    }
-    extraButtons.clear();
-    commandButtons.clear();
-    if (area == null) {
-      return;
-    }
-
-    int left = getCommandAreaLeft();
-    int right = area.right();
-    int visibleRows = Math.max(1, area.height() / ITEM_HEIGHT);
-    int start = Math.min(scrollOffset, Math.max(0, filteredMachines.size() - visibleRows));
-    scrollOffset = start;
-
-    for (int i = 0; i < visibleRows; i++) {
-      int index = start + i;
-      if (index >= filteredMachines.size()) {
-        break;
-      }
-      int y = area.top() + i * ITEM_HEIGHT;
-      buildRow(index, left, right, y);
-    }
-  }
-
-  private void buildRow(int index, int left, int right, int y) {
-    MachineData machine = filteredMachines.get(index);
-    int h = ITEM_HEIGHT - 2;
-    boolean canEdit = MachineNetworkManager.canEdit();
-    int x = left;
-
-    // Switch button: reflects the DETECTION BLOCK state at the configured position (the machine
-    // status the block indicates). Clicking shuts down when the block shows ON (⏸) and boots when
-    // it shows OFF (▶); the button itself only changes when the block state changes, not directly
-    // on click. During the switch lock window the button is disabled.
-    var font = net.minecraft.client.Minecraft.getInstance().font;
-    int switchWidth = Math.min(200, Math.max(100, font.width(machine.name) + 44));
-    boolean detectionEnabled = machine.detection != null && machine.detection.enabled;
-    String detected = machine.detected;
-    net.minecraft.network.chat.MutableComponent label;
-    boolean locked = false;
-    if (detectionEnabled && "abnormal".equals(detected)) {
-      label = Component.literal("⚠ " + machine.name).withColor(0xFFFF5555);
-      locked = true;
-    } else if (detectionEnabled && "on".equals(detected)) {
-      label = Component.literal("⏸ " + machine.name).withColor(0xFF55FF55);
-    } else if (detectionEnabled) {
-      label = Component.literal("▶ " + machine.name).withColor(0xFFFFFFFF);
-    } else if (machine.running) {
-      label = Component.literal("⏸ " + machine.name).withColor(0xFF55FF55);
-    } else {
-      label = Component.literal("▶ " + machine.name).withColor(0xFFFFFFFF);
-    }
-    boolean switchCooling = inCooldown(switchCooldownUntil.get(machine.id));
-    Button switchBtn = Button.builder(label, b -> toggleMachine(machine))
-        .bounds(x, y, switchWidth, h)
-        .tooltip(Tooltip.create(buildTooltip(machine)))
-        .build();
-    if (locked || switchCooling) {
-      switchBtn.active = false;
-    }
-    commandButtons.add(switchBtn);
-
-    // Right-side action cluster, right-aligned: [modes ⛏] [refresh 🕐] [edit ✎] [delete ✖]
-    List<Button> cluster = new ArrayList<>();
-    if (machine.modes != null && !machine.modes.isEmpty()) {
-      ItemIconButton modesBtn = new ItemIconButton(
-          0, y, ACTION_BTN_WIDTH, h,
-          MODES_ICON,
-          Component.translatable("screen.command-gui.machine.modes_select"),
-          btn -> openModesScreen(machine));
-      cluster.add(modesBtn);
-    }
-    if (detectionEnabled) {
-      ItemIconButton refreshBtn = new ItemIconButton(
-          0, y, ACTION_BTN_WIDTH, h,
-          REFRESH_ICON,
-          Component.translatable("screen.command-gui.machine.refresh_detection"),
-          btn -> MachineNetworkManager.sendRefreshDetection(machine.id));
-      cluster.add(refreshBtn);
-    }
-    if (canEdit) {
-      boolean editLocked = isLockedByOther(machine);
-      Tooltip lockTooltip = editLocked
-          ? Tooltip.create(Component.translatable(
-              "screen.command-gui.machine.editing_by", machine.editingBy))
-          : null;
-      ItemIconButton editButton = new ItemIconButton(
-          0, y, ACTION_BTN_WIDTH, h,
-          EDIT_ICON,
-          Component.translatable("screen.command-gui.action.edit"),
-          btn -> editMachine(machine));
-      if (editLocked) {
-        editButton.active = false;
-        editButton.setTooltip(lockTooltip);
-      }
-      cluster.add(editButton);
-      ItemIconButton deleteButton = new ItemIconButton(
-          0, y, ACTION_BTN_WIDTH, h,
-          DELETE_ICON,
-          Component.translatable("screen.command-gui.action.delete"),
-          btn -> deleteMachine(machine));
-      if (editLocked) {
-        deleteButton.active = false;
-        deleteButton.setTooltip(lockTooltip);
-      }
-      cluster.add(deleteButton);
-    }
-    int clusterTotal = cluster.size() * ACTION_BTN_WIDTH + Math.max(0, cluster.size() - 1);
-    int bx = right - clusterTotal;
-    for (Button button : cluster) {
-      button.setX(bx);
-      extraButtons.add(button);
-      bx += ACTION_BTN_WIDTH + 1;
-    }
-  }
-
-  private void openModesScreen(MachineData machine) {
-    net.minecraft.client.Minecraft.getInstance().gui.setScreen(
-        new MachineModesScreen((CommandGUIScreen) parent, machine));
-  }
-
-  /**
-   * Whether another player currently holds the hard edit lock on this machine.
-   */
-  private boolean isLockedByOther(MachineData machine) {
-    if (machine.editingBy == null || machine.editingBy.isEmpty()) {
-      return false;
-    }
-    var player = net.minecraft.client.Minecraft.getInstance().player;
-    return player == null || !machine.editingBy.equals(player.getName().getString());
-  }
-
-  @Override
-  public List<Button> getButtons() {
-    List<Button> all = new ArrayList<>(commandButtons);
-    all.addAll(extraButtons);
-    return all;
-  }
-
-  @Override
-  public int getMaxScroll() {
-    if (area == null || filteredMachines.isEmpty()) {
       return 0;
-    }
-    int visibleRows = Math.max(1, area.height() / ITEM_HEIGHT);
-    return Math.max(0, filteredMachines.size() - visibleRows);
-  }
+   }
 
-  /**
-   * The machine list is laid out as a SINGLE column (one machine per row, see
-   * {@link #rebuildButtons()}), so the total row count equals the filtered machine count. The
-   * base class computes 3-column rows, which would make the scrollbar think the content fits and
-   * refuse to draw a draggable thumb.
-   */
-  @Override
-  public int getTotalRowCount() {
-    return Math.max(1, filteredMachines.size());
-  }
-
-  public void refresh() {
-    this.scrollOffset = 0;
-    buildFilteredCommands();
-    buildAllCategoryButtons();
-    rebuildVisibleCategoryButtons();
-    rebuildButtons();
-  }
-
-  /**
-   * Rebuilds the visible rows after a state-only sync, preserving the scroll position and any
-   * pending mode selections.
-   */
-  public void rebuildRows() {
-    buildFilteredCommands();
-    rebuildButtons();
-  }
-
-  public boolean isEmpty() {
-    return filteredMachines.isEmpty();
-  }
-
-  private Component buildTooltip(MachineData machine) {
-    StringBuilder sb = new StringBuilder();
-    if (machine.description != null && !machine.description.isEmpty()) {
-      sb.append(machine.description);
-      sb.append("\n");
-    }
-    if (machine.editingBy != null && !machine.editingBy.isEmpty()) {
-      sb.append("§e✎ ").append(machine.editingBy).append(" 正在编辑\n");
-    }
-    sb.append("§7Bots: ").append(String.join(", ", machine.bots)).append("\n");
-    boolean detectionEnabled = machine.detection != null && machine.detection.enabled;
-    if (detectionEnabled) {
-      sb.append(switch (machine.detected) {
-        case "on" -> "§a检测: 开机";
-        case "off" -> "§f检测: 关机";
-        case "abnormal" -> "§c检测: 异常（无法开关）";
-        default -> "§7检测: 未知";
-      }).append("\n");
-      sb.append("§8").append(machine.detection.blockId).append(" @ ")
-          .append(machine.detection.x).append(" ").append(machine.detection.y)
-          .append(" ").append(machine.detection.z);
-    } else {
-      sb.append(machine.running ? "§a运行中" : "§8已停止");
-    }
-    return Component.literal(sb.toString());
-  }
-
-  // ── Switch lock window ───────────────────────────────────────────
-
-  private static final long TICK_MS = 50L;
-  /** machineId -> millis until the switch may be toggled again (local estimate of the server lock). */
-  private final Map<String, Long> switchCooldownUntil = new HashMap<>();
-
-  private static boolean inCooldown(Long until) {
-    return until != null && System.currentTimeMillis() < until;
-  }
-
-  /**
-   * Re-registers the current button set with the parent screen. Required after direct rebuilds
-   * because {@link #rebuildButtons()} removes the old widgets from the screen but does not add
-   * the new ones back.
-   */
-  private void reRegisterAll() {
-    if (parent instanceof CommandGUIScreen screen) {
-      for (Button button : getCategoryButtons()) {
-        screen.addTabButton(button);
+   @Override
+   protected int getVisibleCategoryCount() {
+      if (this.area == null) {
+         return 0;
+      } else {
+         int rowHeight = this.tunedCategoryRowHeight();
+         if (this.addCategoryButton == null) {
+            return this.area.height() / rowHeight;
+         }
+         return Math.max(1, (this.area.height() - this.categoryBottomReserve()) / rowHeight);
       }
-      for (Button button : getButtons()) {
-        screen.addTabButton(button);
+   }
+
+   public int getCategoryColumnX() {
+      return this.categoryColumnX();
+   }
+
+   public int getSwitchWidth() {
+      if (this.area == null) {
+         return 100;
+      } else {
+         int rowWidth = this.area.right() - this.getCommandAreaLeft();
+         return Math.max(100, rowWidth - this.maxClusterWidth() - this.tunedCategoryScrollbarWidth());
       }
-    }
-  }
+   }
 
-  // ── Actions ─────────────────────────────────────────────────────
+   public int getModesX() {
+      if (this.area != null) {
+         return this.area.right() - this.maxClusterWidth();
+      }
+      return 0;
+   }
 
-  private void toggleMachine(MachineData machine) {
-    switchCooldownUntil.put(machine.id,
-        System.currentTimeMillis() + (long) machine.switchInterval * TICK_MS);
-    MachineNetworkManager.sendToggle(machine.id);
-  }
+   public String getSelectedCategoryIdForNew() {
+      if (this.selectedCategoryId != null && !this.selectedCategoryId.isEmpty()) {
+         return this.selectedCategoryId;
+      }
+      return null;
+   }
 
-  private void editMachine(MachineData machine) {
-    // Defensive lock check before opening the editor: if another player holds the hard edit lock,
-    // do not even open the editing screen (the row button is disabled too, but a race could slip
-    // through). The server also rejects the edit session / save.
-    if (isLockedByOther(machine)) {
-      return;
-    }
-    net.minecraft.client.Minecraft.getInstance().gui.setScreen(
-        new MachineEditorScreen((CommandGUIScreen) parent, machine));
-  }
+   @Override
+   protected void rebuildVisibleCategoryButtons() {
+      super.rebuildVisibleCategoryButtons();
+      if (this.area != null) {
+         if (this.addCategoryButton != null) {
+            this.addCategoryButton.setX(this.categoryColumnX());
+            this.addCategoryButton.setY(this.area.bottom() - this.categoryBottomReserve());
+            this.addCategoryButton.setWidth(this.categoryColumnWidth());
+         }
+      }
+   }
 
-  private void deleteMachine(MachineData machine) {
-    MachineNetworkManager.sendDelete(machine.id);
-  }
+   @Override
+   public List<Button> getCategoryButtons() {
+      List<Button> all = new ArrayList<>(this.categoryButtons);
+      if (this.addCategoryButton != null) {
+         all.add(this.addCategoryButton);
+      }
+
+      return all;
+   }
+
+   @Override
+   protected void reRegisterCategoryButtons() {
+      super.reRegisterCategoryButtons();
+      if (this.parent instanceof CommandGUIScreen screen && this.addCategoryButton != null) {
+         screen.addTabButton(this.addCategoryButton);
+      }
+   }
+
+   private void onCategoryButtonClick(String categoryId) {
+      if (Objects.equals(this.selectedCategoryId, categoryId)) {
+         this.notifyCategoryChange(() -> {
+            this.selectedCategoryId = null;
+            this.scrollOffset = 0;
+            this.buildFilteredCommands();
+            this.buildAllCategoryButtons();
+            this.rebuildVisibleCategoryButtons();
+            this.rebuildButtons();
+         });
+      } else {
+         this.notifyCategoryChange(() -> {
+            this.selectedCategoryId = categoryId;
+            this.scrollOffset = 0;
+            this.buildFilteredCommands();
+            this.buildAllCategoryButtons();
+            this.rebuildVisibleCategoryButtons();
+            this.rebuildButtons();
+         });
+      }
+   }
+
+   private void openEditMachineCategoryScreen(String category) {
+      if (category != null && !category.isEmpty() && MachineNetworkManager.canConfig()) {
+         Minecraft.getInstance().gui.setScreen(new EditMachineCategoryScreen((CommandGUIScreen)this.parent, category));
+      }
+   }
+
+   @Override
+   protected Button buildCommandButton(int index, int x, int y, int width, int height) {
+      return null;
+   }
+
+   @Override
+   protected void rebuildButtons() {
+      CommandGUIScreen parentScreen = (CommandGUIScreen)this.parent;
+
+      for (Button button : this.commandButtons) {
+         parentScreen.removeTabButton(button);
+      }
+
+      for (Button button : this.extraButtons) {
+         parentScreen.removeTabButton(button);
+      }
+
+      this.extraButtons.clear();
+      this.commandButtons.clear();
+      if (this.area != null) {
+         int left = this.getCommandAreaLeft();
+         int right = this.area.right();
+         int visibleRows = Math.max(1, this.area.height() / this.tunedItemHeight());
+         int start = Math.min(this.scrollOffset, Math.max(0, this.filteredMachines.size() - visibleRows));
+         this.scrollOffset = start;
+         int rowStep = this.area.height() / visibleRows;
+         int remainder = this.area.height() % visibleRows;
+
+         for (int i = 0; i < visibleRows; i++) {
+            int index = start + i;
+            if (index >= this.filteredMachines.size()) {
+               break;
+            }
+
+            int y = this.area.top() + i * rowStep + Math.min(i, remainder);
+            this.buildRow(index, left, right, y, rowStep);
+         }
+      }
+   }
+
+   private void buildRow(int index, int left, int right, int y, int rowHeight) {
+      MachineModels.MachineData machine = this.filteredMachines.get(index);
+      int h = rowHeight - this.tunedItemVerticalPad();
+      boolean canEdit = MachineNetworkManager.canEdit();
+      Font font = Minecraft.getInstance().font;
+      int switchWidth = this.getSwitchWidth();
+      boolean detectionEnabled = machine.detection != null && machine.detection.enabled;
+      String detected = machine.detected;
+      boolean transition = machine.running;
+      boolean locked = false;
+      String suffix;
+      int color;
+      if (this.hasLocalDraft(machine)) {
+         suffix = "（未保存）";
+         color = -22016;
+      } else if (!detectionEnabled) {
+         suffix = "（未配置检测）";
+         color = -7829368;
+         locked = true;
+      } else if (transition) {
+         suffix = "off".equals(machine.transition) ? "（正在关机...）" : "（正在开机...）";
+         color = -22016;
+         locked = true;
+      } else if ("abnormal".equals(detected)) {
+         suffix = "（异常）";
+         color = -43691;
+         locked = true;
+      } else if ("on".equals(detected)) {
+         suffix = "（已开机）";
+         color = -11141291;
+      } else {
+         suffix = "（已关机）";
+         color = -1;
+      }
+
+      int textMaxW = switchWidth * 2 / 3;
+      int nameMaxW = Math.max(20, textMaxW - font.width(suffix));
+      String name = font.plainSubstrByWidth(machine.name, nameMaxW);
+      if (font.width(machine.name) > nameMaxW) {
+         name = name + "...";
+      }
+
+      MutableComponent label = Component.literal(name + suffix).withColor(color);
+      boolean switchCooling = inCooldown(this.switchCooldownUntil.get(machine.id));
+      boolean blocked = locked || switchCooling;
+      String switchTooltip = this.buildSwitchTooltip(machine).getString()
+         + "\n"
+         + Component.translatable("screen.command-gui.machine.left_toggle_right_edit").getString();
+      if (transition) {
+         switchTooltip = switchTooltip + "\n§e" + ("off".equals(machine.transition) ? "正在关机中，无法编辑/切换模式" : "正在开机中，无法编辑/切换模式");
+      }
+      MachineSwitchTab.MachineSwitchButton switchBtn = new MachineSwitchTab.MachineSwitchButton(left, y, switchWidth, h, label, b -> {
+         if (!blocked) {
+            this.toggleMachine(machine);
+         }
+      }, () -> this.editMachine(machine));
+      switchBtn.setTooltip(Tooltip.create(Component.literal(switchTooltip)));
+      switchBtn.active = !transition;
+      switchBtn.setVisualDisabled(blocked);
+      switchBtn.setTextColor(color);
+      this.commandButtons.add(switchBtn);
+      List<Button> cluster = new ArrayList<>();
+      MachineSwitchTab.ModesRowButton modesBtn = new MachineSwitchTab.ModesRowButton(
+         0,
+         y,
+         GuiTuning.getInt("MachineSwitchTab.MODES_BTN_W", MODES_BTN_W),
+         h,
+         Component.translatable("screen.command-gui.machine.modes_short_btn"),
+         btn -> this.openModesScreen(machine),
+         () -> this.openModesListScreen(machine)
+      );
+      modesBtn.setDarkSelected(() -> machine.modes == null || machine.modes.isEmpty(), -1);
+      modesBtn.active = machine.modes != null && !machine.modes.isEmpty() && !transition;
+      String modesTip = (machine.modes != null && !machine.modes.isEmpty()
+               ? Component.translatable("screen.command-gui.machine.modes_select")
+               : Component.translatable("screen.command-gui.machine.no_modes_tip"))
+            .getString()
+         + "\n"
+         + Component.translatable("screen.command-gui.machine.right_click_mode_list").getString();
+      modesBtn.setTooltip(Tooltip.create(Component.literal(modesTip)));
+      cluster.add(modesBtn);
+      DarkSelectButton refreshBtn = new DarkSelectButton(
+         0, y, GuiTuning.getInt("MachineSwitchTab.REFRESH_BTN_W", REFRESH_BTN_W), h, Component.translatable("screen.command-gui.machine.refresh_short"), btn -> MachineNetworkManager.sendRefreshDetection(machine.id)
+      );
+      refreshBtn.setDarkSelected(() -> !detectionEnabled, -1);
+      refreshBtn.setTooltip(
+         Tooltip.create(
+            detectionEnabled
+               ? Component.translatable("screen.command-gui.machine.refresh_detection")
+               : Component.translatable("screen.command-gui.machine.no_detection_refresh_tip")
+         )
+      );
+      cluster.add(refreshBtn);
+      int clusterTotal = 0;
+
+      for (Button button : cluster) {
+         clusterTotal += button.getWidth();
+      }
+
+      clusterTotal += Math.max(0, cluster.size() - 1) * this.clusterGap();
+      int bx = right - clusterTotal;
+
+      for (Button button : cluster) {
+         button.setX(bx);
+         this.extraButtons.add(button);
+         bx += button.getWidth() + this.clusterGap();
+      }
+   }
+
+   private void openModesScreen(MachineModels.MachineData machine) {
+      if (machine.running) {
+         return;
+      }
+
+      Minecraft.getInstance().gui.setScreen(new MachineModesScreen((CommandGUIScreen)this.parent, machine));
+   }
+
+   private void openModesListScreen(MachineModels.MachineData machine) {
+      if (!machine.running && !this.isLockedByOther(machine)) {
+         MachineEditorScreen host = new MachineEditorScreen((CommandGUIScreen)this.parent, machine);
+         Minecraft.getInstance().gui.setScreen(new ModesEditorScreen(host, machine.modes, machine.bots, () -> {
+         }));
+      }
+   }
+
+   private boolean isLockedByOther(MachineModels.MachineData machine) {
+      if (machine.editingBy != null && !machine.editingBy.isEmpty()) {
+         LocalPlayer player = Minecraft.getInstance().player;
+         return player == null || !machine.editingBy.equals(player.getName().getString());
+      } else {
+         return false;
+      }
+   }
+
+   @Override
+   public List<Button> getButtons() {
+      List<Button> all = new ArrayList<>(this.commandButtons);
+      all.addAll(this.extraButtons);
+      return all;
+   }
+
+   @Override
+   public int getMaxScroll() {
+      if (this.area != null && !this.filteredMachines.isEmpty()) {
+         int visibleRows = Math.max(1, this.area.height() / this.tunedItemHeight());
+         return Math.max(0, this.filteredMachines.size() - visibleRows);
+      } else {
+         return 0;
+      }
+   }
+
+   @Override
+   public int getTotalRowCount() {
+      return Math.max(1, this.filteredMachines.size());
+   }
+
+   public void refresh() {
+      this.scrollOffset = 0;
+      this.buildFilteredCommands();
+      this.buildAllCategoryButtons();
+      this.rebuildVisibleCategoryButtons();
+      this.rebuildButtons();
+   }
+
+   public void rebuildRows() {
+      this.buildFilteredCommands();
+      this.rebuildButtons();
+   }
+
+   public boolean isEmpty() {
+      return this.filteredMachines.isEmpty();
+   }
+
+   private Component buildTooltip(MachineModels.MachineData machine) {
+      boolean detectionEnabled = machine.detection != null && machine.detection.enabled;
+      if (!detectionEnabled) {
+         return Component.translatable("screen.command-gui.machine.no_detection_tooltip");
+      } else {
+         StringBuilder sb = new StringBuilder();
+         if (machine.description != null && !machine.description.isEmpty()) {
+            sb.append(machine.description);
+            sb.append("\n");
+         }
+
+         if (machine.editingBy != null && !machine.editingBy.isEmpty()) {
+            sb.append("§e✎ ").append(machine.editingBy).append(" 正在编辑\n");
+         }
+
+         sb.append("§7Bots: ").append(String.join(", ", machine.bots)).append("\n");
+         String var4 = machine.detected;
+
+         sb.append(switch (var4) {
+            case "on" -> "§a检测: 开机";
+            case "off" -> "§f检测: 关机";
+            case "abnormal" -> "§c检测: 异常（无法开关）";
+            default -> "§7检测: 未知";
+         }).append("\n");
+         sb.append("§8")
+            .append(machine.detection.blockId)
+            .append(" @ ")
+            .append(machine.detection.x)
+            .append(" ")
+            .append(machine.detection.y)
+            .append(" ")
+            .append(machine.detection.z);
+         return Component.literal(sb.toString());
+      }
+   }
+
+   private Component buildSwitchTooltip(MachineModels.MachineData machine) {
+      Component base = this.buildTooltip(machine);
+      return (Component)(!this.hasLocalDraft(machine) ? base : Component.literal(base.getString() + this.draftHints(machine)));
+   }
+
+   private boolean hasLocalDraft(MachineModels.MachineData machine) {
+      return machine.id != null && !machine.id.isEmpty() && DraftStore.exists("machine-" + machine.id);
+   }
+
+   private String draftHints(MachineModels.MachineData machine) {
+      String json = DraftStore.load("machine-" + machine.id);
+      if (json == null) {
+         return "\n§e机器开关未保存";
+      } else {
+         try {
+            MachineModels.MachineData draft = (MachineModels.MachineData)new Gson().fromJson(json, MachineModels.MachineData.class);
+            if (draft == null) {
+               return "\n§e机器开关未保存";
+            } else {
+               StringBuilder sb = new StringBuilder();
+               if (!sameModes(machine, draft)) {
+                  sb.append("\n§e模式开关流程未保存");
+               }
+
+               if (!sameMachineConfig(machine, draft)) {
+                  sb.append("\n§e机器开关未保存");
+               }
+
+               if (sb.length() == 0) {
+                  sb.append("\n§e机器开关未保存");
+               }
+
+               return sb.toString();
+            }
+         } catch (Exception var5) {
+            return "\n§e机器开关未保存";
+         }
+      }
+   }
+
+   private static boolean sameModes(MachineModels.MachineData a, MachineModels.MachineData b) {
+      List<MachineModels.ModeData> ma = a.modes == null ? List.of() : a.modes;
+      List<MachineModels.ModeData> mb = b.modes == null ? List.of() : b.modes;
+      if (ma.size() != mb.size()) {
+         return false;
+      } else {
+         for (int i = 0; i < ma.size(); i++) {
+            MachineModels.ModeData x = ma.get(i);
+            MachineModels.ModeData y = mb.get(i);
+            if (!Objects.equals(x.id, y.id)
+               || !Objects.equals(x.name, y.name)
+               || !Objects.equals(x.singleSelect, y.singleSelect)
+               || !sameTimeline(x.onTimeline, y.onTimeline)
+               || !sameTimeline(x.offTimeline, y.offTimeline)) {
+               return false;
+            }
+         }
+
+         return true;
+      }
+   }
+
+   private static boolean sameMachineConfig(MachineModels.MachineData a, MachineModels.MachineData b) {
+      return Objects.equals(a.name, b.name)
+         && Objects.equals(a.description, b.description)
+         && Objects.equals(a.category, b.category)
+         && a.switchInterval == b.switchInterval
+         && sameTimeline(a.onTimeline, b.onTimeline)
+         && sameTimeline(a.offTimeline, b.offTimeline)
+         && sameDetection(a.detection, b.detection);
+   }
+
+   private static boolean sameDetection(MachineModels.DetectionData a, MachineModels.DetectionData b) {
+      return a != null && b != null
+         ? a.enabled == b.enabled
+            && Objects.equals(a.dimension, b.dimension)
+            && a.x == b.x
+            && a.y == b.y
+            && a.z == b.z
+            && Objects.equals(a.blockId, b.blockId)
+            && Objects.equals(a.property, b.property)
+            && Objects.equals(a.onValues, b.onValues)
+            && Objects.equals(a.offValues, b.offValues)
+            && Objects.equals(a.ignoreValues, b.ignoreValues)
+         : a == b;
+   }
+
+   private static boolean sameTimeline(MachineModels.Timeline a, MachineModels.Timeline b) {
+      if (a != null && b != null) {
+         if (a.steps == null != (b.steps == null)) {
+            return false;
+         } else if (a.steps == null) {
+            return true;
+         } else if (a.steps.size() != b.steps.size()) {
+            return false;
+         } else {
+            for (int i = 0; i < a.steps.size(); i++) {
+               MachineModels.Step sa = a.steps.get(i);
+               MachineModels.Step sb = b.steps.get(i);
+               if (sa != null && sb != null) {
+                  if (sa.delay != sb.delay
+                     || sa.commandDelay != sb.commandDelay
+                     || sa.bot != sb.bot
+                     || !Objects.equals(sa.kind, sb.kind)
+                     || !Objects.equals(sa.description, sb.description)
+                     || !Objects.equals(sa.commands, sb.commands)) {
+                     return false;
+                  }
+               } else if (sa != sb) {
+                  return false;
+               }
+            }
+
+            return true;
+         }
+      } else {
+         return a == b;
+      }
+   }
+
+   private static boolean inCooldown(Long until) {
+      return until != null && System.currentTimeMillis() < until;
+   }
+
+   private void reRegisterAll() {
+      if (this.parent instanceof CommandGUIScreen screen) {
+         for (Button button : this.getCategoryButtons()) {
+            screen.addTabButton(button);
+         }
+
+         for (Button button : this.getButtons()) {
+            screen.addTabButton(button);
+         }
+      }
+   }
+
+   private void toggleMachine(MachineModels.MachineData machine) {
+      this.switchCooldownUntil.put(machine.id, System.currentTimeMillis() + (long)machine.switchInterval * 50L);
+      MachineNetworkManager.sendToggle(machine.id);
+   }
+
+   private void editMachine(MachineModels.MachineData machine) {
+      if (!machine.running && !this.isLockedByOther(machine)) {
+         Minecraft.getInstance().gui.setScreen(new MachineEditorScreen((CommandGUIScreen)this.parent, machine));
+      }
+   }
+
+   public static enum MachineFilter {
+      ALL,
+      ON,
+      OFF;
+   }
+
+   private final class MachineSwitchButton extends Button {
+      private final Runnable onRightClick;
+      private boolean visualDisabled;
+      private int textColor;
+
+      MachineSwitchButton(int x, int y, int width, int height, Component message, OnPress onPress, Runnable onRightClick) {
+         super(x, y, width, height, message, onPress, DEFAULT_NARRATION);
+         this.visualDisabled = false;
+         this.textColor = -1;
+         this.onRightClick = onRightClick;
+      }
+
+      void setVisualDisabled(boolean disabled) {
+         this.visualDisabled = disabled;
+      }
+
+      void setTextColor(int color) {
+         this.textColor = color;
+      }
+
+      public boolean mouseClicked(MouseButtonEvent mouseEvent, boolean focused) {
+         if (mouseEvent.button() == 1 && this.active && this.visible && this.isMouseOver(mouseEvent.x(), mouseEvent.y())) {
+            this.onRightClick.run();
+            return true;
+         } else {
+            return super.mouseClicked(mouseEvent, focused);
+         }
+      }
+
+      protected void extractContents(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY, float partialTick) {
+         Font font = Minecraft.getInstance().font;
+         if (this.visualDisabled) {
+            guiGraphics.blitSprite(
+               RenderPipelines.GUI_TEXTURED,
+               Identifier.parse("minecraft:widget/button_disabled"),
+               this.getX(),
+               this.getY(),
+               this.getWidth(),
+               this.getHeight(),
+               -1
+            );
+         } else {
+            this.extractDefaultSprite(guiGraphics);
+         }
+
+         guiGraphics.centeredText(font, this.getMessage(), this.getX() + this.getWidth() / 2, this.getY() + (this.getHeight() - 8) / 2, this.textColor);
+      }
+   }
+
+   private final class ModesRowButton extends DarkSelectButton {
+      private final Runnable onRightClick;
+
+      ModesRowButton(int x, int y, int width, int height, Component message, OnPress onPress, Runnable onRightClick) {
+         super(x, y, width, height, message, onPress);
+         this.onRightClick = onRightClick;
+      }
+
+      @Override
+      public boolean mouseClicked(MouseButtonEvent mouseEvent, boolean focused) {
+         if (mouseEvent.button() == 1 && this.active && this.visible && this.isMouseOver(mouseEvent.x(), mouseEvent.y())) {
+            this.onRightClick.run();
+            return true;
+         } else {
+            return super.mouseClicked(mouseEvent, focused);
+         }
+      }
+   }
 }

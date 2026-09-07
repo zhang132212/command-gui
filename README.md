@@ -1,264 +1,172 @@
-# Command-GUI（命令面板）
+# Command-GUI
 
-> **版本** 0.2.0-beta.2 · **目标** Minecraft 26.2 · **加载器** Fabric Loader 0.19.3+ · **许可证** GPL-3.0
+> 基于 Fabric 26.2 的命令面板、假人管理与机器开关模组。本文以旧版仓库 [`xgenya/command-gui`](https://github.com/xgenya/command-gui) 为基线，说明当前源码包相对旧版的变化。
 
-一个面向 Fabric 26.2 的「机器开关」与命令管理模组集。整个项目由两个独立 mod 组成：
+## 版本信息
 
-| Mod | 端 | 说明 |
-|---|---|---|
-| `command-gui` | 客户端 | 命令面板 GUI、自定义指令库、假人管理、**机器开关界面** |
-| `command-gui-server` | 服务端 | **机器开关系统**：机器/模式/检测/模式编排/白名单/时间线调度 |
-
----
-
-## 目录
-
-- [一、功能特性](#一功能特性)
-- [二、安装与部署](#二安装与部署)
-- [三、快速开始](#三快速开始)
-- [四、机器开关系统详解](#四机器开关系统详解)
-- [五、权限体系](#五权限体系)
-- [六、配置文件](#六配置文件)
-- [七、架构总览](#七架构总览)
-- [九、构建](#九构建)
-- [十、许可证](#十许可证)
-
----
-
-## 一、功能特性
-
-### 客户端（command-gui）
-
-- **命令面板**：按 `C` 打开，标签页组织（自定义 / 假人管理 / 预设 / 机器开关）
-- **自定义指令库**：分类管理、多指令链（按顺序执行）、描述、动态占位符（`{player}` `{player_all}` `{player_fake}` `{name}` `{number}` `{time}` `{coords}`）
-- **假人管理**：批量生成、定时生成/移除、动作指令（攻击/使用/潜行/骑乘/停止等）
-- **预设指令**：原版 + Carpet 常用指令分组
-- **机器开关界面**：
-  - 每行：开关按钮（⏸/▶/⚠ 三态）、⛏ 模式选择、🕐 刷新检测、✎ 编辑、✖ 删除
-  - 分类侧边栏（约四分之一宽，支持 × 删除分类，仅 OP 可见）
-  - 模式选择界面：**单选 = 单选器**（开机亮起不可点、点关机模式切换）、**多选 = 取反**（点一下翻转状态）、检测状态锁定、chip 网格滚动条
-- **统一滚动条**：所有可滚动列表（机器列表 / 模式列表 / 开关机流程 / 多模式配置 / 假人列表 / 玩家选择器 / 模式 chip 网格）使用同一款 12px 滚动条（灰色滑块 + 描边），**内容不足时显示全高灰色滑块**，支持滚轮 + 拖拽；多模式配置的启动/停止两列各带独立滚动条
-- **命令编辑器占位符补全**：编辑指令时 `{player}` 等占位符**绿色高亮**、Tab 可补全（不影响聊天栏/命令方块的原版行为）
-- **全屏/窗口自适应**：任意切换全屏 ↔ 窗口，布局自动重排、无按钮残留（底部工具栏 44px 安全区、右侧 16px 边距）
-
-### 服务端（command-gui-server）
-
-- **机器开关**：每台机器可配置开机/关机流程（时间线）、假人列表、权限、检测方块
-- **时间线调度器**：按 tick 推进步骤、指令队列（每 tick 一条）、循环次数（0/一次、-1/永久、N/N 次）
-- **模式**：独立于开关的附加流程；**必须配置检测**（方块状态即模式开关）；单选（互斥单选器）/多选（取反）；流程中禁止切换、完成后冷却并提示、中途错误即时报错
-- **模式编排**：多模式同时切换时按预设顺序 + 间隔执行；**先走完单选逻辑再走多选逻辑**（各段先停后启）
-- **方块检测**：拉杆/红石灯等方块状态作为机器开关状态；**不依赖区块加载**（直读 .mca + 内存快照）
-- **开关间隔（锁定窗口）**：开机/关机后 N tick 内禁止再次切换（默认 20t，防误触）
-- **编辑白名单**：`/machineadmin` 授权非 OP 玩家编辑机器
-- **执行权限模型**：机器/模式的每条指令**以触发玩家的身份执行**（谁点开关/模式按钮就是谁在打指令），**不可能发生权限提升**；触发玩家离线（如检测方块自动关机）时以无权限执行。开机前对第一条指令做权限预检，无权限直接拒绝并提示，而不是静默跑空
-
----
-
-## 二、安装与部署
-
-1. 安装 Fabric Loader ≥ 0.19.3 与 Fabric API（服务端、客户端都需要）
-2. 客户端 mods 放入：`command-gui-0.2.0-beta.2.jar`
-3. 服务端 mods 放入：`command-gui-server-0.2.0-beta.2.jar`
-4. 如需假人管理请安装 Carpet（本项目在 26.2 下测试用的 carpet 版本为 `fabric-carpet-26.2+v260616.jar`）
-
-> 提示：`/player spawn` 指令来自 Carpet，机器/模式的流程指令依赖 Carpet 的假人系统。
-
----
-
-## 三、快速开始
-
-1. 在服务端放好 `command-gui-server`，启动后会自动创建 `config/command-gui-server/machines.json`
-2. 客户端进服后按 `C` 打开面板，切到「服务器机器开关」标签页
-3. OP 点击侧边栏底部 `+` 添加机器：
-   - 填机器名称、分类（可选）、Bots（假人名单）
-   - 配置「开机流程」与「关机流程」（第一步必须是 `/player {bot} spawn ...`）
-   - 可选配置「检测方块」（拉杆/红石灯等）作为开关状态来源
-4. 点开关按钮：▶ 开机、⏸ 关机、⚠ 异常锁定（点 🕐 可强制刷新检测）
-5. 点 ⛏ 进入模式选择：点选模式（变黑 + 琥珀为待选）→ 确定生效
-
----
-
-## 四、机器开关系统详解
-
-### 1. 机器（Machine）
-
-- `id`：唯一标识（重名自动加后缀）
-- `bots`：该机器管理的假人名单（步骤按下标引用）
-- `onTimeline` / `offTimeline`：开机 / 关机流程
-  - `loopCount`：0 = 跑一次、-1 = 永久循环、N = 跑 N 次
-  - 每个步骤：`delay`（距上一步的 tick 数）、`bot`（假人下标）、`commands`（可多条，按顺序执行）
-- `switchInterval`：开关锁定窗口（tick，默认 20）
-- `detection`：检测方块配置（详见下文）
-- `category`：分类（空 = 默认）
-
-### 2. 开关与检测
-
-开关按钮的 ⏸/▶ 状态**来源于检测方块**（配置了检测时）：
-
-| 检测结果 | 按钮 | 点击行为 |
-|---|---|---|
-| 方块属性命中 onValues | ⏸（绿） | 执行关机流程 |
-| 方块属性命中 offValues | ▶（白） | 执行开机流程 |
-| 方块缺失/属性异常 | ⚠（红，锁定） | 不可点击 |
-
-未配置检测时，按钮显示脚本运行状态（运行中 ⏸ / 停止 ▶），点击按实际状态切换。
-
-**检测不依赖区块加载**，三级读取：
-1. 区块已加载 → 直接读内存（权威）
-2. 区块未加载 → 读「区块卸载快照」（`MachineBlockCache`：区块卸载瞬间把检测方块状态写进内存）
-3. 都没有 → 直读 `.mca` 区域文件
-
-服务端每秒对比一次状态签名，检测方块状态在游戏里变化后按钮自动刷新；🕐 按钮可强制立即重读。
-
-### 3. 模式（Mode）
-
-- 独立的开机/关机流程对，与开关互不影响
-- **模式必须配置开关检测**（方块状态即模式开关）：方块命中 onValues = 开机、offValues = 关机、异常 = 锁定——保存时强制校验，未配置无法保存
-- `singleSelect`（☑ 勾选）：**单选模式（单选器）**—— 开机（方块 ON）的模式在面板上亮起且不可点击；点一个关机模式 → **先按配置的关机顺序/间隔关掉方块 ON 的互斥模式** → **再按配置的启动顺序/间隔开点击的模式**
-- 未勾选的模式（多选）：**点击 = 取反**（点一下翻转状态：开变关、关变开），与单选互不影响
-- 模式可配 `switchInterval`（0 = 跟随机器）
-- 模式流程**不支持循环**（始终跑一次，保证编排链可推进）
-- **切换规则**：开机/关机流程执行中禁止再次切换；流程走完后提示「模式已切换」并进入切换冷却（开关间隔 tick）；中途指令错误/无权限立即停止并给执行者报错
-
-### 4. 模式编排（多模式配置）
-
-模式列表 → 左下「多模式配置」：
-
-- **启动顺序/间隔**：多个模式同时开启时，按设定顺序逐个启动，间隔 = 上一个模式**开机流程跑完**后 N tick
-- **停止顺序/间隔**：同样规则；可勾选「停止时以启动配置为准」复用启动配置
-- 单选替换：新模式启动前，旧单选先走关机流程，再等（启动间隔 + 停止间隔）后开机
-- **整体执行顺序**：一次切换同时涉及单选与多选时，**单选整体走完**（单选 stop → 单选 start）**再走多选**（多选 stop → 多选 start）——各段内部严格按配置的顺序与 tick 间隔
-- 模式编辑器「**沿用开机流程**」勾选项：勾上自动把机器开机流程导入该模式的开启流程（一次性复制，之后可继续编辑）
-
-### 5. 分类
-
-- 机器可填 `category` 分类；侧边栏按分类过滤
-- OP 可点 × 删除分类（该分类下所有机器回到默认分类）
-- 非 OP 不可见 ×（服务端配置是共享的，个人标签页无需限制）
-
-### 6. 开关间隔（锁定窗口）
-
-每次开机/关机后，`switchInterval` tick 内禁止再次切换（客户端置灰 + 服务端拒绝并提示剩余 tick）。防连点误操作。
-
-### 7. 测试机器（测试服）
-
-测试服（`test_26.2`）预置多台压力测试机器：
-
-- **滚动压力-开关机**（`scroll_machine`）：开机流程 18 步 / 关机流程 15 步，用于测试时间线滚动条
-- **滚动压力-模式**（`scroll_modes`）：25 个模式，用于测试模式列表与多模式配置双滚动条
-- 另有：多 bot 互测、多模式编排、循环+锁定+检测、左右键变体、权限测试、模式检测显示等（机器名以 `multi_`/`loop_`/`perm_`/`mode_` 等开头）
-
-> 测试服由 MCDReforged 托管，改 `machines.json` 后需重启生效（`!!restart 5`）。
-
----
-
-## 五、权限体系
-
-| 角色 | 能力 |
+| 项目 | 当前源码 |
 |---|---|
-| OP（权限等级 ≥2） | 全部：编辑机器、删除分类、管理白名单、查看权限配置 |
-| 白名单（`/machineadmin add <玩家>`） | 创建/编辑/删除机器，但**看不到**权限等级/允许玩家配置行 |
-| 普通玩家 | 仅按机器配置的 `permissionLevel` / `allowedPlayers` 执行开关与模式操作 |
+| Minecraft | 26.2 |
+| Fabric Loader | 0.19.3+ |
+| Fabric API | 0.156.0+26.2 |
+| Java | 25+ |
+| 模组版本 | `0.2.0-beta.64`（构建成功后自动递增 beta 序号） |
+| 许可证 | GPL-3.0 |
 
-- `/machineadmin add|remove|list <玩家>`：管理编辑白名单（仅 OP）
-- 机器级权限：`allowedPlayers` 非空时以此为准，否则按 `permissionLevel`（0-4）
+项目包含两个 Fabric mod：
 
-### 执行权限（重要设计）
+- `command-gui`：客户端命令面板、自定义指令、预设指令、假人管理和机器开关 GUI。
+- `command-gui-server`：服务端机器、模式、检测、时间线调度和权限系统。
 
-机器/模式流程里的每条指令，**都按触发玩家本人的权限执行**：
+## 相对旧版的主要变化
 
-- 打开机器的玩家用 `player.createCommandSourceStack()` 作为指令源 —— 脚本能做的事**不超过该玩家手动执行的上限**，服务端不引入任何全局执行权限，天然免疫恶意脚本提权
-- 触发玩家离线时（例如检测方块自动关机、定时器触发），指令源降级为 **无权限（`PermissionSet.NO_PERMISSIONS`）**，任何需要权限的指令都会被拒绝
-- **开机前预检**：第一条指令（spawn）会先用触发玩家的权限解析一次，解析失败（权限不足/指令不存在）直接拒绝开机并提示原因，不会出现"点了开机但什么都没发生"
-- **执行结果语义**：指令被拒绝（`CommandSyntaxException`）＝ 流程立即中止 + 向触发玩家报错；返回 0 但无异常（如 carpet 对不存在假人的 `stop`/`kill`）＝ 正常，不中断流程
-- 细节坑：`CommandDispatcher.parse` 不接受前导 `/`（执行前剥掉）；`withMaximumPermission` 是并集（不减权限），替换权限必须用 `withPermission`
+### 1. GUI 调优从“改源码”变为可视化配置
 
----
+当前版新增 `GuiTuning` 调优层和 `devtools/` DevStudio：
 
-## 六、配置文件
+- GUI 的尺寸、间距、颜色等参数集中从 `config/command-gui/gui-tuning.json` 读取。
+- 默认值仍保留在 Java 源码中；没有调优文件时，行为回退到源码默认值。
+- DevStudio 提供浏览器预览、参数编辑、文案编辑、预设编辑以及构建部署功能。
+- GUI 调优通常只需部署 JSON 并重新打开界面，不必每次修改 Java、重新打包或替换 jar。
+- `devtools/backup/pre-tuning-layer/` 保存了接入调优层前的 GUI 源码，便于回退和对照。
 
-### 客户端 `config/command-gui/settings.json`
+启动 DevStudio：
 
-```json
-{
-  "show_vanilla_commands": true,
-  "show_carpet_commands": true,
-  "show_fakeplayer_tab": true
-}
+```bat
+devtools\start-devstudio.bat
 ```
 
-### 服务端 `config/command-gui-server/machines.json`
-
-```json
-{
-  "machines": [
-    {
-      "id": "demo",
-      "name": "示例机器",
-      "category": "",
-      "bots": ["bot1"],
-      "permissionLevel": 2,
-      "allowedPlayers": [],
-      "switchInterval": 20,
-      "onTimeline": { "loopCount": 0, "steps": [ { "delay": 0, "bot": 0, "commands": ["/player {bot} spawn at ..."] } ] },
-      "offTimeline": { "loopCount": 0, "steps": [] },
-      "modeOrder": [], "modeInterval": 0,
-      "stopModeOrder": [], "stopModeInterval": 0, "stopFollowsStart": false,
-      "modes": [
-        { "id": "mode_1", "name": "工作", "singleSelect": true, "switchInterval": 0,
-          "onTimeline": { "steps": [...] }, "offTimeline": { "steps": [...] },
-          "detection": null }
-      ],
-      "detection": { "enabled": true, "dimension": "minecraft:overworld", "x": 0, "y": 0, "z": 0,
-        "blockId": "minecraft:lever", "property": "powered",
-        "onValues": ["true"], "offValues": ["false"] },
-      "revision": 1
-    }
-  ],
-  "editorWhitelist": []
-}
-```
-
----
-
-## 七、架构总览
-
-```
-客户端（command-gui）                服务端（command-gui-server）
-┌───────────────────────────────┐        ┌──────────────────────────────────┐
-│ CommandGUIScreen（标签页）      │        │ MachineMod（入口）               │
-│  ├ 自定义 / 假人 / 预设        │  网络   │  ├ MachineConfig（配置持久化）    │
-│  └ 机器开关 MachineSwitchTab ──┼─JSON──▶│  ├ MachineManager（动作/权限/同步）│
-│       │                        │        │  ├ MachineScheduler（tick 调度） │
-│       ├ MachineEditorScreen    │        │  ├ MachineModeChain（模式编排链） │
-│       ├ MachineModesScreen     │        │  ├ MachineDetector（方块检测）    │
-│       └ MachineNetworkManager  │        │  ├ MachineBlockCache（卸载快照）  │
-│                                 │        │  ├ BlockStateFileReader（.mca） │
-└───────────────────────────────┘        │  └ MachineAdminCommand（白名单） │
-                                          └──────────────────────────────────┘
-```
-
-- **协议**：Fabric 自定义网络包（`command-gui-server:machines` / `:action` / `:block-query`），载荷为 JSON 字符串
-- **同步**：服务端推送完整机器列表 + 运行时状态（running / detected / editingBy / canEdit / canConfig）；客户端按「结构版本」区分全量刷新与原地状态刷新
-- **调度**：服务端每 tick 推进运行中的时间线；每条指令经过「假人 bot 门闩」（同一假人同一 tick 只能执行一条）与「时间线队列」（每条间隔 1 tick）
-- **检测**：内存（已加载）→ 卸载快照（`CHUNK_UNLOAD` 事件写入）→ .mca 直读
-
----
-
-## 九、构建
+或：
 
 ```bash
-# 需要 JDK 25（本项目用 F:\java\temurin25-win 或系统 JDK 25）
-./gradlew build
-# 产物：
-#   build/libs/command-gui-0.2.0-beta.2.jar
-#   server/build/libs/command-gui-server-0.2.0-beta.2.jar
+python devtools/server.py
 ```
 
-> 国内网络建议在 `~/.gradle/init.gradle` 配置阿里云镜像（本项目已使用）；首次构建需下载 Gradle 9.5.0 发行版（约 140MB）。
+浏览器打开 `http://127.0.0.1:8765`。详细说明见 [`devtools/README.md`](devtools/README.md)。
 
----
+### 2. GUI 布局与交互全面整理
 
-## 十、许可证
+相较旧版，当前版补充或重构了以下 GUI 基础能力：
 
-[GPL-3.0](LICENSE)
+- 统一的父子页面导航、返回确认和未保存草稿处理。
+- 自定义指令支持快捷入口、分类选择/编辑/移动和分类侧栏。
+- 指令编辑器增加占位符处理、数字输入、步骤宿主和更明确的保存/取消流程。
+- 新增统一的按钮、复选框、标记控件、滚动条和图标控件。
+- 主界面、命令网格、机器编辑器、模式编辑器、时间线、多模式配置、检测页面和假人页面适配窗口/全屏切换。
+- 滚动列表支持滚轮和拖拽；内容不足时仍保持一致的滚动条表现。
+- 命令建议 mixin 与占位符建议 mixin 分离，避免影响聊天栏和命令方块的原版补全行为。
+
+### 3. 假人管理状态同步更完整
+
+当前版新增服务端 `FakePlayerStateTracker`，在 Carpet 可用时读取假人的动作包状态，并同步：
+
+- 攻击、使用、跳跃的持续动作；
+- 攻击/使用间隔动作及间隔 tick；
+- 潜行和疾跑状态。
+
+该功能通过运行时反射兼容 Carpet：未安装 Carpet 或 Carpet API 不匹配时自动降级，不会阻止服务端启动。客户端仍可使用批量生成、定时生成/移除和动作控制页面。
+
+### 4. 原有机器开关系统继续扩展并与 GUI 对齐
+
+当前版保留旧版的双 mod 架构，并完善了客户端与服务端的数据同步和编辑流程：
+
+- 机器支持开机/关机时间线、多个假人、循环次数和每步延迟。
+- 模式支持单选/多选、独立开关检测、冷却间隔和模式编排。
+- 检测状态按区块内存、卸载快照和 `.mca` 文件逐级读取，区块未加载时仍可查询。
+- 指令按触发玩家身份执行；离线/自动触发时不会继承管理员权限。
+- 开机前进行首条指令权限预检，失败会反馈并中止流程。
+- 服务端增加编辑锁、配置 revision 和网络同步，减少多人同时编辑造成的覆盖。
+- 增加机器分类、分类管理、编辑白名单和未保存退出确认。
+
+### 5. 构建与资源组织调整
+
+- 当前客户端和服务端共用根目录版本号，服务端产物仍为独立 jar。
+- `build.gradle` 增加成功构建后的 beta 版本自动递增任务；如不希望自动修改 `gradle.properties`，请在构建前移除或禁用 `build.finalizedBy bumpVersion`。
+- 语言文件继续提供 `en_us` 与 `zh_cn`；预设指令位于 `src/main/resources/assets/command-gui/presets/`。
+- 开发工具、调优 schema、网页预览资源和调优前备份均纳入源码包。
+
+## 功能概览
+
+### 客户端
+
+- 按 `C` 打开命令面板（键位以当前客户端配置为准）。
+- 自定义指令分类、描述、多指令链和占位符：`{player}`、`{player_all}`、`{player_fake}`、`{name}`、`{number}`、`{time}`、`{coords}` 等。
+- 原版和 Carpet 预设指令。
+- 假人批量生成、定时任务、攻击/使用/潜行/骑乘/停止等动作控制。
+- 机器开关、模式、检测、时间线和多模式配置页面。
+
+### 服务端
+
+- 机器与模式配置持久化到 `config/command-gui-server/machines.json`。
+- 每 tick 推进时间线，并按队列执行指令。
+- 检测拉杆、红石灯等方块状态，显示开、关或异常锁定状态。
+- 机器权限等级、允许玩家列表、编辑白名单和 `/machineadmin` 管理命令。
+- 开关冷却、防重复点击、流程错误中止和客户端状态同步。
+
+## 安装
+
+1. 安装 Minecraft 26.2、Fabric Loader 0.19.3+、Fabric API 和 Java 25+。
+2. 将客户端产物放入客户端实例的 `mods/`：`command-gui-<version>.jar`。
+3. 将服务端产物放入服务端实例的 `mods/`：`command-gui-server-<version>.jar`。
+4. 需要假人功能时安装与 Minecraft 26.2 匹配的 Carpet 版本。
+5. 启动服务端和客户端；首次启动会创建相关配置文件。
+
+## 从源码构建
+
+Windows：
+
+```bat
+gradlew.bat build
+```
+
+Linux/macOS：
+
+```bash
+./gradlew build
+```
+
+产物位于：
+
+```text
+build/libs/command-gui-<version>.jar
+server/build/libs/server-<version>.jar
+```
+
+建议使用 DevStudio 的“构建并安装到 mods”完成构建、备份旧 jar 和部署。构建任务会自动递增 `gradle.properties` 中的 beta 序号，请提交前确认版本号是否符合预期。
+
+## 配置与开发
+
+| 内容 | 位置 |
+|---|---|
+| 自定义指令 | `config/command-gui/presets/custom.json` |
+| 客户端设置 | `config/command-gui/settings.json` |
+| GUI 调优 | `config/command-gui/gui-tuning.json` |
+| 服务端机器 | `config/command-gui-server/machines.json` |
+| GUI 参数 schema | `devtools/tuning-schema.json` |
+| 中英文文案 | `src/main/resources/assets/command-gui/lang/` |
+| 预设指令 | `src/main/resources/assets/command-gui/presets/` |
+
+GUI 参数调整后重新打开 GUI 即可验证；语言资源包调整后可使用 `F3+T` 重载资源。Java 逻辑或资源正式发布前仍需重新构建。
+
+## 架构
+
+```text
+客户端 command-gui                         服务端 command-gui-server
+CommandGUIScreen                            MachineMod
+├─ CustomCommandTab                         ├─ MachineConfig
+├─ FakePlayerTab                 网络同步   ├─ MachineManager
+├─ PresetCommandTab              <───────>  ├─ MachineScheduler
+└─ MachineSwitchTab                        ├─ MachineModeChain
+   ├─ MachineEditorScreen                   ├─ MachineDetector
+   ├─ MachineModesScreen                    ├─ MachineBlockCache
+   └─ MachineNetworkManager                 ├─ FakePlayerStateTracker
+                                            └─ MachineAdminCommand
+```
+
+## 对照范围与已知限制
+
+本 README 的差异基线是 GitHub 仓库当前可获取的旧版快照，而不是某个未发布的 PR 分支。当前源码目录本身没有 Git remote，因此无法在本地直接创建并推送到 `xgenya/command-gui`；提交 PR 需要先将本目录放入 Git 仓库、配置 fork/remote 和 GitHub 凭据。
+
+## 许可证
+
+本项目使用 [GPL-3.0](LICENSE) 许可证。

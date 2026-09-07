@@ -1,520 +1,591 @@
 package com.remrin.client.gui;
 
-import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import com.remrin.client.machine.MachineModels.DetectionData;
+import com.remrin.client.machine.MachineModels;
 import com.remrin.client.machine.MachineNetworkManager;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Map.Entry;
+import java.util.Set;
+import java.util.function.Consumer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.components.Checkbox;
 import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
+import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
-import org.lwjgl.glfw.GLFW;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import org.joml.Matrix3x2fStack;
 
-/**
- * Block-state detection config screen for a machine. The player enters coordinates (or picks the
- * block under their feet) and queries the server, which reads the block from memory or directly
- * from the region files. The screen then shows the block's property values, each assignable to the
- * ON / OFF categories via a 3-state cycle button (everything else counts as ABNORMAL).
- * <p>
- * Edits a working copy of the detection config; "保存" commits it to the machine being edited.
- */
 public class DetectionScreen extends BaseParentedScreen<Screen> {
+   private static final String[] DIMENSIONS = new String[]{"minecraft:overworld", "minecraft:the_nether", "minecraft:the_end"};
+   private static final String[] DIMENSION_KEYS = new String[]{
+      "screen.command-gui.machine.detection_dim_overworld", "screen.command-gui.machine.detection_dim_nether", "screen.command-gui.machine.detection_dim_end"
+   };
+   private static final int VALUE_ROW_HEIGHT = 16;
+   private static final int VALUE_TOP = 150;
+   private static final int VALUE_ROWS = 5;
+   private final MachineModels.DetectionData working;
+   private final MachineModels.DetectionData initialSnapshot;
+   private final Consumer<MachineModels.DetectionData> onApply;
+   private String errorMessage = "";
+   private String xText = "";
+   private String yText = "";
+   private String zText = "";
+   private EditBox xField;
+   private EditBox yField;
+   private EditBox zField;
+   private final List<DarkSelectButton> dimensionButtons = new ArrayList<>();
+   private final List<Button> valueButtons = new ArrayList<>();
+   private boolean searched = false;
+   private ItemStack foundIcon = ItemStack.EMPTY;
+   private final List<DetectionScreen.PropertyValue> allValueRows = new ArrayList<>();
+   private boolean found = false;
+   private String blockId = "";
+   private final Map<String, List<String>> properties = new LinkedHashMap<>();
+   private final Map<String, String> currentValues = new HashMap<>();
+   private String selectedProperty = "";
+   private int valueScroll = 0;
+   private ScrollbarHandle valueScrollbar = null;
+   private boolean draggingValueScrollbar = false;
+   private double valueScrollbarGrabOffset = 0.0;
+   private long queryToken = 0L;
+   private static long queryCounter = 0L;
 
-  private static final String[] DIMENSIONS = {
-      "minecraft:overworld", "minecraft:the_nether", "minecraft:the_end"
-  };
-  private static final int VALUE_ROW_HEIGHT = 16;
-  private static final int VALUE_TOP = 116;
-  private static final int VALUE_ROWS = 5;
-
-  private final DetectionData working;
-  private final java.util.function.Consumer<DetectionData> onApply;
-  private String errorMessage = "";
-  /** Live text backups so typed input survives screen re-init / resize. */
-  private String xText = "";
-  private String yText = "";
-  private String zText = "";
-
-  private EditBox xField;
-  private EditBox yField;
-  private EditBox zField;
-  private Button dimensionButton;
-  private Button propertyButton;
-  private Checkbox enabledCheckbox;
-  private final List<Button> valueButtons = new ArrayList<>();
-
-  // Query result state
-  private boolean found = false;
-  private String blockId = "";
-  private final Map<String, List<String>> properties = new LinkedHashMap<>();
-  private final Map<String, String> currentValues = new HashMap<>();
-  private String selectedProperty = "";
-  private int valueScroll = 0;
-  /** Token of the latest query, used to discard stale replies. */
-  private long queryToken = 0;
-  private static long queryCounter = 0;
-
-  /**
-   * Number of possible values of the selected property (0 when nothing is selected).
-   */
-  private int getValueCount() {
-    if (selectedProperty.isEmpty()) {
-      return 0;
-    }
-    return properties.getOrDefault(selectedProperty, List.of()).size();
-  }
-
-  /**
-   * Picks the property to detect: prefers a boolean (true/false) property such as
-   * {@code powered} / {@code lit} so powered/unpowered blocks select the meaningful state
-   * automatically; falls back to the first property.
-   */
-  private String pickPreferredProperty() {
-    String first = null;
-    for (Map.Entry<String, List<String>> entry : properties.entrySet()) {
-      if (first == null) {
-        first = entry.getKey();
+   private int getValueCount() {
+      if (this.selectedProperty.isEmpty()) {
+         return 0;
       }
-      List<String> values = entry.getValue();
-      if (values.size() == 2 && values.contains("true") && values.contains("false")) {
-        return entry.getKey();
-      }
-    }
-    return first != null ? first : "";
-  }
+      return this.properties.getOrDefault(this.selectedProperty, List.of()).size();
+   }
 
-  /**
-   * Opens the detection editor for a working copy of a detection config (machine or mode).
-   * {@code onApply} receives the committed detection config (or {@code null} when disabled).
-   */
-  public DetectionScreen(Screen parent, DetectionData initial,
-      java.util.function.Consumer<DetectionData> onApply) {
-    super(Component.translatable("screen.command-gui.machine.detection_title"), parent);
-    this.working = initial != null ? copy(initial) : new DetectionData();
-    if (initial == null) {
-      // A freshly created detection is enabled by default
+   private String pickPreferredProperty() {
+      String first = null;
+
+      for (Entry<String, List<String>> entry : this.properties.entrySet()) {
+         if (first == null) {
+            first = entry.getKey();
+         }
+
+         List<String> values = entry.getValue();
+         if (values.size() == 2 && values.contains("true") && values.contains("false")) {
+            return entry.getKey();
+         }
+      }
+
+      if (first != null) {
+         return first;
+      }
+      return "";
+   }
+
+   public DetectionScreen(Screen parent, MachineModels.DetectionData initial, Consumer<MachineModels.DetectionData> onApply) {
+      super(Component.translatable("screen.command-gui.machine.detection_title"), parent);
+      this.working = initial != null ? copy(initial) : new MachineModels.DetectionData();
       this.working.enabled = true;
-    }
-    this.onApply = onApply;
-    this.xText = String.valueOf(working.x);
-    this.yText = String.valueOf(working.y);
-    this.zText = String.valueOf(working.z);
-  }
+      this.initialSnapshot = copy(this.working);
+      this.onApply = onApply;
+      this.xText = String.valueOf(this.working.x);
+      this.yText = String.valueOf(this.working.y);
+      this.zText = String.valueOf(this.working.z);
+   }
 
-  @Override
-  protected void init() {
-    super.init();
+   protected void init() {
+      super.init();
+      int fieldX = (this.width - 360) / 2;
+      int dimBtnW = 70;
+      int dimY = 20;
 
-    int fieldX = (this.width - 360) / 2;
-    int fieldWidth = 110;
-
-    xField = new EditBox(this.font, fieldX, 24, fieldWidth, 18,
-        Component.translatable("screen.command-gui.machine.detection_x"));
-    xField.setMaxLength(10);
-    xField.setValue(xText);
-    xField.setResponder(text -> xText = text);
-    this.addRenderableWidget(xField);
-
-    yField = new EditBox(this.font, fieldX + fieldWidth + 8, 24, fieldWidth, 18,
-        Component.translatable("screen.command-gui.machine.detection_y"));
-    yField.setMaxLength(10);
-    yField.setValue(yText);
-    yField.setResponder(text -> yText = text);
-    this.addRenderableWidget(yField);
-
-    zField = new EditBox(this.font, fieldX + (fieldWidth + 8) * 2, 24, fieldWidth, 18,
-        Component.translatable("screen.command-gui.machine.detection_z"));
-    zField.setMaxLength(10);
-    zField.setValue(zText);
-    zField.setResponder(text -> zText = text);
-    this.addRenderableWidget(zField);
-
-    dimensionButton = Button.builder(buildDimensionLabel(), btn -> cycleDimension())
-        .bounds(fieldX, 50, 100, 18).build();
-    this.addRenderableWidget(dimensionButton);
-
-    this.addRenderableWidget(Button.builder(
-        Component.translatable("screen.command-gui.machine.detection_pick"),
-        btn -> pickBlockUnderFeet()
-    ).bounds(fieldX + 104, 50, 70, 18).build());
-
-    this.addRenderableWidget(Button.builder(
-        Component.translatable("screen.command-gui.machine.detection_copy"),
-        btn -> copyCurrentPosition()
-    ).bounds(fieldX + 178, 50, 70, 18).build());
-
-    this.addRenderableWidget(Button.builder(
-        Component.translatable("screen.command-gui.machine.detection_find"),
-        btn -> findBlock()
-    ).bounds(fieldX + 252, 50, 50, 18).build());
-
-    propertyButton = Button.builder(buildPropertyLabel(), btn -> cycleProperty())
-        .bounds(fieldX, 92, 200, 18).build();
-    this.addRenderableWidget(propertyButton);
-
-    rebuildValueButtons();
-
-    // Auto-query the saved coordinates so an existing detection config is pre-filled and can be
-    // saved / left without requiring a fresh manual query
-    if (working.isConfigured()) {
-      findBlock();
-    }
-
-    int barY = this.height - 22;
-    int barWidth = Math.min(70, 100);
-    int barStartX = fieldX + (360 - barWidth * 2 - 8) / 2;
-    this.addRenderableWidget(Button.builder(
-        Component.translatable("screen.command-gui.save"),
-        btn -> saveAndClose()
-    ).bounds(barStartX, barY, barWidth, 18).build());
-
-    // Back always leaves: the detection validation (block found / mapping) can be a dead end
-    // (e.g. the block cannot be found), so it must never trap the player in this screen.
-    this.addRenderableWidget(Button.builder(
-        Component.translatable("screen.command-gui.back"),
-        btn -> backAndClose()
-    ).bounds(barStartX + barWidth + 8, barY, barWidth, 18).build());
-
-    // Enable checkbox, bottom-left
-    enabledCheckbox = Checkbox.builder(
-        Component.translatable("screen.command-gui.machine.detection_enable"),
-        this.font
-    ).pos(fieldX, barY + 1).selected(working.enabled)
-        .onValueChange((checkbox, selected) -> working.enabled = selected)
-        .build();
-    this.addRenderableWidget(enabledCheckbox);
-  }
-
-  // ── Actions ─────────────────────────────────────────────────────
-
-  private void cycleDimension() {
-    int index = 0;
-    for (int i = 0; i < DIMENSIONS.length; i++) {
-      if (DIMENSIONS[i].equals(working.dimension)) {
-        index = i;
-        break;
+      for (int i = 0; i < DIMENSIONS.length; i++) {
+         int idx = i;
+         DarkSelectButton btn = new DarkSelectButton(
+            fieldX + i * (dimBtnW + 4), dimY, dimBtnW, 18, Component.translatable(DIMENSION_KEYS[i]), b -> this.working.dimension = DIMENSIONS[idx]
+         );
+         btn.setDarkSelected(() -> this.working.dimension.equals(DIMENSIONS[idx]), -1);
+         this.dimensionButtons.add(btn);
+         this.addRenderableWidget(btn);
       }
-    }
-    working.dimension = DIMENSIONS[(index + 1) % DIMENSIONS.length];
-    dimensionButton.setMessage(buildDimensionLabel());
-  }
 
-  /**
-   * Fills the coordinates with the block under the player's feet and queries it immediately.
-   */
-  private void pickBlockUnderFeet() {
-    Minecraft mc = Minecraft.getInstance();
-    if (mc.player == null) {
-      return;
-    }
-    BlockPos pos = mc.player.blockPosition().below();
-    fillCoordinates(pos);
-  }
-
-  /**
-   * Fills the coordinates with the player's current position (the block at their feet level) and
-   * queries it immediately.
-   */
-  private void copyCurrentPosition() {
-    Minecraft mc = Minecraft.getInstance();
-    if (mc.player == null) {
-      return;
-    }
-    fillCoordinates(mc.player.blockPosition());
-  }
-
-  private void fillCoordinates(BlockPos pos) {
-    xField.setValue(String.valueOf(pos.getX()));
-    yField.setValue(String.valueOf(pos.getY()));
-    zField.setValue(String.valueOf(pos.getZ()));
-    working.dimension = Minecraft.getInstance().player.level().dimension().identifier().toString();
-    dimensionButton.setMessage(buildDimensionLabel());
-    findBlock();
-  }
-
-  private void findBlock() {
-    int x = parseInt(xField.getValue(), working.x);
-    int y = parseInt(yField.getValue(), working.y);
-    int z = parseInt(zField.getValue(), working.z);
-    working.x = x;
-    working.y = y;
-    working.z = z;
-    errorMessage = "";
-    found = false;
-    properties.clear();
-    currentValues.clear();
-    selectedProperty = "";
-    rebuildValueButtons();
-    queryToken = ++queryCounter;
-    MachineNetworkManager.setBlockQueryCallback(this::onQueryResult);
-    MachineNetworkManager.sendBlockQuery(working.dimension, x, y, z, queryToken);
-  }
-
-  private void onQueryResult(String json) {
-    try {
-      JsonObject result = JsonParser.parseString(json).getAsJsonObject();
-      // Discard stale replies from an older query
-      if (result.has("token") && result.get("token").getAsLong() != queryToken) {
-        return;
+      int coordY = 48;
+      int fieldWidth = 82;
+      int labelW = 10;
+      int gap = 2;
+      int xFieldX = fieldX + labelW + gap;
+      int yLabelX = xFieldX + fieldWidth + gap;
+      int yFieldX = yLabelX + labelW + gap;
+      int zLabelX = yFieldX + fieldWidth + gap;
+      int zFieldX = zLabelX + labelW + gap;
+      int findX = zFieldX + fieldWidth + gap;
+      this.xField = new EditBox(this.font, xFieldX, coordY, fieldWidth, 18, Component.translatable("screen.command-gui.machine.detection_x"));
+      this.xField.setMaxLength(10);
+      this.xField.setValue(this.xText);
+      this.xField.setResponder(text -> this.xText = text);
+      this.addRenderableWidget(this.xField);
+      this.yField = new EditBox(this.font, yFieldX, coordY, fieldWidth, 18, Component.translatable("screen.command-gui.machine.detection_y"));
+      this.yField.setMaxLength(10);
+      this.yField.setValue(this.yText);
+      this.yField.setResponder(text -> this.yText = text);
+      this.addRenderableWidget(this.yField);
+      this.zField = new EditBox(this.font, zFieldX, coordY, fieldWidth, 18, Component.translatable("screen.command-gui.machine.detection_z"));
+      this.zField.setMaxLength(10);
+      this.zField.setValue(this.zText);
+      this.zField.setResponder(text -> this.zText = text);
+      this.addRenderableWidget(this.zField);
+      this.addRenderableWidget(
+         Button.builder(Component.translatable("screen.command-gui.machine.detection_find"), btn -> this.findBlock())
+            .bounds(findX, coordY, 360 - (findX - fieldX), 18)
+            .build()
+      );
+      this.addRenderableWidget(
+         Button.builder(Component.translatable("screen.command-gui.machine.detection_pick"), btn -> this.pickBlockUnderFeet())
+            .bounds(fieldX, 78, 90, 18)
+            .build()
+      );
+      this.rebuildValueButtons();
+      if (this.working.isConfigured()) {
+         this.findBlock();
       }
-      if (!result.has("found") || !result.get("found").getAsBoolean()) {
-        errorMessage = Component.translatable(
-            "screen.command-gui.machine.detection_not_found").getString();
-        rebuildValueButtons();
-        return;
+
+      int barY = this.height - 22;
+      int barWidth = Math.min(70, 100);
+      int barStartX = fieldX + (360 - barWidth * 2 - 8) / 2;
+      this.addRenderableWidget(
+         Button.builder(Component.translatable("screen.command-gui.save"), btn -> this.saveAndClose()).bounds(barStartX, barY, barWidth, 18).build()
+      );
+      this.addRenderableWidget(
+         Button.builder(Component.translatable("screen.command-gui.back"), btn -> this.backAndClose())
+            .bounds(barStartX + barWidth + 8, barY, barWidth, 18)
+            .build()
+      );
+   }
+
+   private void pickBlockUnderFeet() {
+      Minecraft mc = Minecraft.getInstance();
+      if (mc.player != null) {
+         BlockPos pos = mc.player.blockPosition().below();
+         this.fillCoordinates(pos);
       }
-      blockId = result.get("blockId").getAsString();
-      working.blockId = blockId;
-      properties.clear();
-      JsonObject props = result.has("properties") ? result.getAsJsonObject("properties")
-          : new JsonObject();
-      for (String key : props.keySet()) {
-        List<String> values = new ArrayList<>();
-        for (JsonElement element : props.getAsJsonArray(key)) {
-          values.add(element.getAsString());
-        }
-        properties.put(key, values);
+   }
+
+   private void fillCoordinates(BlockPos pos) {
+      this.xField.setValue(String.valueOf(pos.getX()));
+      this.yField.setValue(String.valueOf(pos.getY()));
+      this.zField.setValue(String.valueOf(pos.getZ()));
+      this.working.dimension = Minecraft.getInstance().player.level().dimension().identifier().toString();
+      this.findBlock();
+   }
+
+   private void findBlock() {
+      this.searched = true;
+      this.foundIcon = ItemStack.EMPTY;
+      int x = parseInt(this.xField.getValue(), this.working.x);
+      int y = parseInt(this.yField.getValue(), this.working.y);
+      int z = parseInt(this.zField.getValue(), this.working.z);
+      this.working.x = x;
+      this.working.y = y;
+      this.working.z = z;
+      this.errorMessage = "";
+      this.found = false;
+      this.properties.clear();
+      this.allValueRows.clear();
+      this.currentValues.clear();
+      this.selectedProperty = "";
+      this.rebuildValueButtons();
+      this.queryToken = ++queryCounter;
+      MachineNetworkManager.setBlockQueryCallback(this::onQueryResult);
+      MachineNetworkManager.sendBlockQuery(this.working.dimension, x, y, z, this.queryToken);
+   }
+
+   private void onQueryResult(String json) {
+      try {
+         JsonObject result = JsonParser.parseString(json).getAsJsonObject();
+         if (result.has("token") && result.get("token").getAsLong() != this.queryToken) {
+            return;
+         }
+
+         if (!result.has("found") || !result.get("found").getAsBoolean()) {
+            this.errorMessage = Component.translatable("screen.command-gui.machine.detection_not_found").getString();
+            this.rebuildValueButtons();
+            return;
+         }
+
+         this.blockId = result.get("blockId").getAsString();
+         this.working.blockId = this.blockId;
+
+         try {
+            Identifier id = Identifier.parse(this.blockId);
+            Block block = (Block)BuiltInRegistries.BLOCK.getValue(id);
+            this.foundIcon = block != null && block != Blocks.AIR ? new ItemStack(block.asItem()) : ItemStack.EMPTY;
+         } catch (Exception var9) {
+            this.foundIcon = ItemStack.EMPTY;
+         }
+
+         this.properties.clear();
+         JsonObject props = result.has("properties") ? result.getAsJsonObject("properties") : new JsonObject();
+
+         for (String key : props.keySet()) {
+            List<String> values = new ArrayList<>();
+
+            for (JsonElement element : props.getAsJsonArray(key)) {
+               values.add(element.getAsString());
+            }
+
+            this.properties.put(key, values);
+         }
+
+         this.allValueRows.clear();
+
+         for (Entry<String, List<String>> entry : this.properties.entrySet()) {
+            for (String value : entry.getValue()) {
+               this.allValueRows.add(new DetectionScreen.PropertyValue(entry.getKey(), value));
+            }
+         }
+
+         this.currentValues.clear();
+         JsonObject current = result.has("current") ? result.getAsJsonObject("current") : new JsonObject();
+
+         for (String key : current.keySet()) {
+            this.currentValues.put(key, current.get(key).getAsString());
+         }
+
+         if (this.properties.containsKey(this.working.property)) {
+            this.selectedProperty = this.working.property;
+         } else {
+            this.selectedProperty = this.pickPreferredProperty();
+            this.working.property = this.selectedProperty;
+         }
+
+         if (this.properties.isEmpty()) {
+            this.errorMessage = Component.translatable("screen.command-gui.machine.detection_single_state").getString();
+         } else {
+            this.errorMessage = "";
+         }
+
+         this.valueScroll = 0;
+         this.found = true;
+         Set<String> existingOn = new HashSet<>(this.working.onValues);
+         Set<String> existingOff = new HashSet<>(this.working.offValues);
+         Set<String> existingIgnore = new HashSet<>(this.working.ignoreValues);
+         this.working.onValues.clear();
+         this.working.offValues.clear();
+         this.working.ignoreValues.clear();
+
+         for (DetectionScreen.PropertyValue row : this.allValueRows) {
+            String key = row.property() + "=" + row.value();
+            if (existingOn.contains(key)) {
+               this.working.onValues.add(key);
+            } else if (existingOff.contains(key)) {
+               this.working.offValues.add(key);
+            } else if (existingIgnore.contains(key)) {
+               this.working.ignoreValues.add(key);
+            } else {
+               this.working.ignoreValues.add(key);
+            }
+         }
+      } catch (Exception var10) {
+         this.errorMessage = Component.translatable("screen.command-gui.machine.detection_not_found").getString();
       }
-      currentValues.clear();
-      JsonObject current = result.has("current") ? result.getAsJsonObject("current")
-          : new JsonObject();
-      for (String key : current.keySet()) {
-        currentValues.put(key, current.get(key).getAsString());
-      }
-      // Keep the previous property when it still exists, otherwise pick the preferred one
-      // (boolean properties like powered/lit win, so lever detection works out of the box)
-      if (properties.containsKey(working.property)) {
-        selectedProperty = working.property;
+
+      this.rebuildValueButtons();
+   }
+
+   private void cycleValueCategory(DetectionScreen.PropertyValue row) {
+      String key = row.property() + "=" + row.value();
+      this.working.property = row.property();
+      this.selectedProperty = row.property();
+      if (this.working.onValues.contains(key)) {
+         this.working.onValues.remove(key);
+         this.working.offValues.add(key);
+      } else if (this.working.offValues.contains(key)) {
+         this.working.offValues.remove(key);
+         this.working.ignoreValues.add(key);
+      } else if (this.working.ignoreValues.contains(key)) {
+         this.working.ignoreValues.remove(key);
       } else {
-        selectedProperty = pickPreferredProperty();
-        working.property = selectedProperty;
+         this.working.onValues.add(key);
       }
-      if (properties.isEmpty()) {
-        errorMessage = Component.translatable(
-            "screen.command-gui.machine.detection_single_state").getString();
+
+      this.rebuildValueButtons();
+   }
+
+   private void rebuildValueButtons() {
+      for (Button button : this.valueButtons) {
+         this.removeWidget(button);
+      }
+
+      this.valueButtons.clear();
+      int maxScroll = Math.max(0, this.allValueRows.size() - 5);
+      this.valueScroll = Math.min(this.valueScroll, maxScroll);
+      int fieldX = (this.width - 360) / 2;
+
+      for (int i = 0; i < 5; i++) {
+         int index = this.valueScroll + i;
+         if (index >= this.allValueRows.size()) {
+            break;
+         }
+
+         DetectionScreen.PropertyValue row = this.allValueRows.get(index);
+         String value = row.value();
+         int y = 150 + i * 16;
+         String currentValue = this.currentValues.get(row.property());
+         String currentMark = value.equals(currentValue) ? "● " : "  ";
+         String labelText = row.property() + ":" + value;
+         Button valueLabel = Button.builder(Component.literal(currentMark + labelText), btn -> {
+         }).bounds(fieldX, y, 150, 14).build();
+         valueLabel.active = false;
+         valueLabel.setTooltip(Tooltip.create(Component.literal(row.property())));
+         this.valueButtons.add(valueLabel);
+         this.addRenderableWidget(valueLabel);
+         Button category = Button.builder(this.buildCategoryLabel(row), btn -> this.cycleValueCategory(row)).bounds(fieldX + 158, y, 90, 14).build();
+         category.setTooltip(Tooltip.create(Component.translatable("screen.command-gui.machine.detection_cycle_hint")));
+         this.valueButtons.add(category);
+         this.addRenderableWidget(category);
+      }
+   }
+
+   private Component buildCategoryLabel(DetectionScreen.PropertyValue row) {
+      String key = row.property() + "=" + row.value();
+      if (this.working.onValues.contains(key)) {
+         return Component.translatable("screen.command-gui.machine.detection_on").copy().withColor(-11141291);
+      } else if (this.working.offValues.contains(key)) {
+         return Component.translatable("screen.command-gui.machine.detection_off").copy().withColor(-1);
       } else {
-        errorMessage = "";
+         return this.working.ignoreValues.contains(key)
+            ? Component.translatable("screen.command-gui.machine.detection_ignore").copy().withColor(-7829368)
+            : Component.translatable("screen.command-gui.machine.detection_abnormal").copy().withColor(-43691);
       }
-      valueScroll = 0;
-      found = true;
-    } catch (Exception e) {
-      errorMessage = Component.translatable(
-          "screen.command-gui.machine.detection_not_found").getString();
-    }
-    rebuildValueButtons();
-    propertyButton.setMessage(buildPropertyLabel());
-  }
+   }
 
-  private void cycleProperty() {
-    if (properties.size() <= 1) {
-      return;
-    }
-    List<String> names = new ArrayList<>(properties.keySet());
-    int index = names.indexOf(selectedProperty);
-    selectedProperty = names.get((index + 1) % names.size());
-    working.property = selectedProperty;
-    valueScroll = 0;
-    rebuildValueButtons();
-    propertyButton.setMessage(buildPropertyLabel());
-  }
-
-  /**
-   * Cycles a value's category: abnormal -> ON -> OFF -> abnormal.
-   */
-  private void cycleValueCategory(String value) {
-    if (working.onValues.contains(value)) {
-      working.onValues.remove(value);
-      working.offValues.add(value);
-    } else if (working.offValues.contains(value)) {
-      working.offValues.remove(value);
-    } else {
-      working.onValues.add(value);
-    }
-    rebuildValueButtons();
-  }
-
-  private void rebuildValueButtons() {
-    for (Button button : valueButtons) {
-      this.removeWidget(button);
-    }
-    valueButtons.clear();
-
-    List<String> values = selectedProperty.isEmpty() ? List.of()
-        : properties.getOrDefault(selectedProperty, List.of());
-    int maxScroll = Math.max(0, values.size() - VALUE_ROWS);
-    valueScroll = Math.min(valueScroll, maxScroll);
-
-    int fieldX = (this.width - 360) / 2;
-    for (int i = 0; i < VALUE_ROWS; i++) {
-      int index = valueScroll + i;
-      if (index >= values.size()) {
-        break;
+   private void saveAndClose() {
+      this.errorMessage = "";
+      this.working.enabled = true;
+      if (this.found && !this.blockId.isEmpty() && !this.selectedProperty.isEmpty()) {
+         this.working.blockId = this.blockId;
+         this.working.property = this.selectedProperty;
       }
-      String value = values.get(index);
-      int y = VALUE_TOP + i * VALUE_ROW_HEIGHT;
-      String currentMark = value.equals(currentValues.get(selectedProperty)) ? "● " : "  ";
-      Button valueLabel = Button.builder(
-          Component.literal(currentMark + value), btn -> {
-          }
-      ).bounds(fieldX, y, 150, VALUE_ROW_HEIGHT - 2).build();
-      valueLabel.active = false;
-      valueButtons.add(valueLabel);
-      this.addRenderableWidget(valueLabel);
 
-      Button category = Button.builder(buildCategoryLabel(value),
-          btn -> cycleValueCategory(value)
-      ).bounds(fieldX + 158, y, 90, VALUE_ROW_HEIGHT - 2).build();
-      valueButtons.add(category);
-      this.addRenderableWidget(category);
-    }
-  }
+      if (!this.working.isConfigured()) {
+         this.errorMessage = Component.translatable("screen.command-gui.machine.detection_need_block").getString();
+      } else if (!this.working.onValues.isEmpty() && !this.working.offValues.isEmpty()) {
+         this.working.x = parseInt(this.xField.getValue(), this.working.x);
+         this.working.y = parseInt(this.yField.getValue(), this.working.y);
+         this.working.z = parseInt(this.zField.getValue(), this.working.z);
+         if (this.onApply != null && this.isModified()) {
+            this.onApply.accept(this.working);
+         }
 
-  private Component buildCategoryLabel(String value) {
-    if (working.onValues.contains(value)) {
-      return Component.translatable("screen.command-gui.machine.detection_on")
-          .copy().withColor(0xFF55FF55);
-    }
-    if (working.offValues.contains(value)) {
-      return Component.translatable("screen.command-gui.machine.detection_off")
-          .copy().withColor(0xFFFFFFFF);
-    }
-    return Component.translatable("screen.command-gui.machine.detection_abnormal")
-        .copy().withColor(0xFFFF5555);
-  }
-
-  private Component buildDimensionLabel() {
-    return Component.literal(working.dimension);
-  }
-
-  private Component buildPropertyLabel() {
-    if (selectedProperty.isEmpty()) {
-      return Component.translatable("screen.command-gui.machine.detection_property");
-    }
-    return Component.literal(selectedProperty + " (" + getValueCount() + "种状态)");
-  }
-
-  // ── Save ─────────────────────────────────────────────────────────
-
-  private void saveAndClose() {
-    errorMessage = "";
-    // Apply the fresh query results when available; otherwise keep the previously saved config
-    if (found && !blockId.isEmpty() && !selectedProperty.isEmpty()) {
-      working.blockId = blockId;
-      working.property = selectedProperty;
-    }
-    if (!working.isConfigured()) {
-      errorMessage = Component.translatable(
-          "screen.command-gui.machine.detection_need_block").getString();
-      return;
-    }
-    if (working.onValues.isEmpty() || working.offValues.isEmpty()) {
-      errorMessage = Component.translatable(
-          "screen.command-gui.machine.detection_need_mapping").getString();
-      return;
-    }
-    working.x = parseInt(xField.getValue(), working.x);
-    working.y = parseInt(yField.getValue(), working.y);
-    working.z = parseInt(zField.getValue(), working.z);
-    if (onApply != null) {
-      onApply.accept(working);
-    }
-    this.minecraft.gui.setScreen(parent);
-  }
-
-  /**
-   * Always leaves the screen, even when nothing is configured or the block was never found.
-   * The working copy is committed whenever it holds meaningful data (a prior detection existed
-   * or the current one is configured), so nothing configured is silently discarded.
-   */
-  private void backAndClose() {
-    if (working.isConfigured()) {
-      if (onApply != null) {
-        onApply.accept(working);
+         this.minecraft.gui.setScreen(this.parent);
+      } else {
+         this.errorMessage = Component.translatable("screen.command-gui.machine.detection_need_mapping").getString();
       }
-    }
-    this.minecraft.gui.setScreen(parent);
-  }
+   }
 
-  private static int parseInt(String text, int fallback) {
-    try {
-      return Integer.parseInt(text.trim());
-    } catch (NumberFormatException ignored) {
-      return fallback;
-    }
-  }
-
-  private static DetectionData copy(DetectionData source) {
-    DetectionData copy = new DetectionData();
-    copy.enabled = source.enabled;
-    copy.dimension = source.dimension;
-    copy.x = source.x;
-    copy.y = source.y;
-    copy.z = source.z;
-    copy.blockId = source.blockId;
-    copy.property = source.property;
-    copy.onValues = new ArrayList<>(source.onValues);
-    copy.offValues = new ArrayList<>(source.offValues);
-    return copy;
-  }
-
-  @Override
-  public boolean keyPressed(KeyEvent keyEvent) {
-    if (keyEvent.key() == GLFW.GLFW_KEY_ESCAPE) {
-      backAndClose();
-      return true;
-    }
-    return super.keyPressed(keyEvent);
-  }
-
-  @Override
-  public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
-    if (mouseY >= VALUE_TOP && mouseY < VALUE_TOP + VALUE_ROWS * VALUE_ROW_HEIGHT) {
-      int maxScroll = Math.max(0, getValueCount() - VALUE_ROWS);
-      if (scrollY > 0 && valueScroll > 0) {
-        valueScroll--;
-        rebuildValueButtons();
-      } else if (scrollY < 0 && valueScroll < maxScroll) {
-        valueScroll++;
-        rebuildValueButtons();
+   private void backAndClose() {
+      if (this.working.isConfigured() && this.onApply != null && this.isModified()) {
+         this.onApply.accept(this.working);
       }
-    }
-    return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
-  }
 
-  @Override
-  public void extractRenderState(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY,
-      float partialTick) {
-    super.extractRenderState(guiGraphics, mouseX, mouseY, partialTick);
+      this.minecraft.gui.setScreen(this.parent);
+   }
 
-    int fieldX = (this.width - 360) / 2;
-    guiGraphics.centeredText(this.font, this.title, this.width / 2, 4, 0xFFFFFFFF);
+   private static int parseInt(String text, int fallback) {
+      try {
+         return Integer.parseInt(text.trim());
+      } catch (NumberFormatException var3) {
+         return fallback;
+      }
+   }
 
-    guiGraphics.text(this.font,
-        Component.translatable("screen.command-gui.machine.detection_pos"), fieldX, 76, 0xFFAAAAAA);
-    guiGraphics.text(this.font,
-        Component.translatable("screen.command-gui.machine.detection_block", blockId.isEmpty()
-            ? "--" : blockId), fieldX + 100, 76, 0xFF55FF55);
+   private boolean isModified() {
+      return !sameDetection(this.working, this.initialSnapshot);
+   }
 
-    if (!found && errorMessage.isEmpty() && blockId.isEmpty()) {
-      guiGraphics.text(this.font,
-          Component.translatable("screen.command-gui.machine.detection_hint"),
-          fieldX, VALUE_TOP + 2, 0xFF888888);
-    }
+   private static boolean sameDetection(MachineModels.DetectionData a, MachineModels.DetectionData b) {
+      if (a == null || b == null) {
+         return a == b;
+      }
 
-    if (!errorMessage.isEmpty()) {
-      guiGraphics.text(this.font, Component.literal(errorMessage), fieldX, 202, 0xFFFF5555);
-    }
-  }
+      return a.enabled == b.enabled
+         && java.util.Objects.equals(a.dimension, b.dimension)
+         && a.x == b.x
+         && a.y == b.y
+         && a.z == b.z
+         && java.util.Objects.equals(a.blockId, b.blockId)
+         && java.util.Objects.equals(a.property, b.property)
+         && java.util.Objects.equals(a.onValues, b.onValues)
+         && java.util.Objects.equals(a.offValues, b.offValues)
+         && java.util.Objects.equals(a.ignoreValues, b.ignoreValues);
+   }
+
+   private static MachineModels.DetectionData copy(MachineModels.DetectionData source) {
+      MachineModels.DetectionData copy = new MachineModels.DetectionData();
+      copy.enabled = source.enabled;
+      copy.dimension = source.dimension;
+      copy.x = source.x;
+      copy.y = source.y;
+      copy.z = source.z;
+      copy.blockId = source.blockId;
+      copy.property = source.property;
+      copy.onValues = new ArrayList<>(source.onValues);
+      copy.offValues = new ArrayList<>(source.offValues);
+      copy.ignoreValues = new ArrayList<>(source.ignoreValues);
+      return copy;
+   }
+
+   private String blockDisplayName() {
+      if (this.blockId != null && !this.blockId.isEmpty()) {
+         try {
+            Identifier id = Identifier.parse(this.blockId);
+            Block block = (Block)BuiltInRegistries.BLOCK.getValue(id);
+            if (block != null && block != Blocks.AIR) {
+               return block.getName().getString();
+            }
+         } catch (Exception var3) {
+         }
+
+         return Component.translatable("screen.command-gui.machine.detection_unknown_block").getString();
+      } else {
+         return "--";
+      }
+   }
+
+   public boolean keyPressed(KeyEvent keyEvent) {
+      if (keyEvent.key() == 256) {
+         this.backAndClose();
+         return true;
+      } else {
+         return super.keyPressed(keyEvent);
+      }
+   }
+
+   public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+      if (mouseY >= 150.0 && mouseY < 230.0) {
+         int maxScroll = Math.max(0, this.allValueRows.size() - 5);
+         if (scrollY > 0.0 && this.valueScroll > 0) {
+            this.valueScroll--;
+            this.rebuildValueButtons();
+         } else if (scrollY < 0.0 && this.valueScroll < maxScroll) {
+            this.valueScroll++;
+            this.rebuildValueButtons();
+         }
+      }
+
+      return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
+   }
+
+   public boolean mouseClicked(MouseButtonEvent mouseEvent, boolean focused) {
+      if (mouseEvent.button() == 0 && this.valueScrollbar != null && this.valueScrollbar.contains(mouseEvent.x(), mouseEvent.y())) {
+         int maxScroll = Math.max(0, this.allValueRows.size() - 5);
+         int thumbTop = this.valueScrollbar.thumbTop(this.valueScroll, maxScroll, 5, Math.max(1, this.allValueRows.size()));
+         this.valueScrollbarGrabOffset = mouseEvent.y() - (double)thumbTop;
+         this.draggingValueScrollbar = true;
+         return true;
+      } else {
+         return super.mouseClicked(mouseEvent, focused);
+      }
+   }
+
+   public boolean mouseDragged(MouseButtonEvent mouseEvent, double dragX, double dragY) {
+      if (this.draggingValueScrollbar && this.valueScrollbar != null) {
+         int maxScroll = Math.max(0, this.allValueRows.size() - 5);
+         int offset = this.valueScrollbar.offsetFromY(mouseEvent.y(), this.valueScrollbarGrabOffset, maxScroll, 5, Math.max(1, this.allValueRows.size()));
+         this.valueScroll = Math.max(0, Math.min(offset, maxScroll));
+         this.rebuildValueButtons();
+         return true;
+      } else {
+         return super.mouseDragged(mouseEvent, dragX, dragY);
+      }
+   }
+
+   public boolean mouseReleased(MouseButtonEvent mouseEvent) {
+      this.draggingValueScrollbar = false;
+      return super.mouseReleased(mouseEvent);
+   }
+
+   public void extractRenderState(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY, float partialTick) {
+      super.extractRenderState(guiGraphics, mouseX, mouseY, partialTick);
+      int fieldX = (this.width - 360) / 2;
+      guiGraphics.centeredText(this.font, this.title, this.width / 2, 4, -1);
+      int fieldW = 82;
+      int gap = 2;
+      int labelW = 10;
+      int xFieldX = fieldX + labelW + gap;
+      int yLabelX = xFieldX + fieldW + gap;
+      int yFieldX = yLabelX + labelW + gap;
+      int zLabelX = yFieldX + fieldW + gap;
+      int zFieldX = zLabelX + labelW + gap;
+      guiGraphics.text(this.font, Component.translatable("screen.command-gui.machine.detection_x"), fieldX, 54, -5592406);
+      guiGraphics.text(this.font, Component.translatable("screen.command-gui.machine.detection_y"), yLabelX, 54, -5592406);
+      guiGraphics.text(this.font, Component.translatable("screen.command-gui.machine.detection_z"), zLabelX, 54, -5592406);
+      if (this.found && !this.foundIcon.isEmpty()) {
+         Matrix3x2fStack pose = guiGraphics.pose();
+         pose.pushMatrix();
+         pose.translate((float)fieldX + 96.0F, 80.0F);
+         pose.scale(1.0F, 1.0F);
+         guiGraphics.item(this.foundIcon, 0, 0);
+         pose.popMatrix();
+         String displayName = this.blockDisplayName();
+         String rawId = this.blockId.isEmpty() ? "--" : this.blockId;
+         int maxNameW = 236 - this.font.width(rawId) - 8;
+         String name = this.font.plainSubstrByWidth(displayName, Math.max(20, maxNameW));
+         guiGraphics.text(this.font, Component.literal(name), fieldX + 116, 84, -1);
+         guiGraphics.text(this.font, Component.literal(rawId), fieldX + 116 + this.font.width(name) + 8, 84, -7829368);
+      }
+
+      if (!this.searched) {
+         guiGraphics.text(this.font, Component.translatable("screen.command-gui.machine.detection_not_started"), fieldX, 110, -7829368);
+      } else if (!this.errorMessage.isEmpty()) {
+         guiGraphics.text(this.font, Component.literal(this.errorMessage), fieldX, 110, -43691);
+      } else if (this.found) {
+         int stateCount = this.totalStateCount();
+         Component status = stateCount == 2
+            ? Component.translatable("screen.command-gui.machine.detection_two_states")
+            : Component.translatable("screen.command-gui.machine.detection_n_states", new Object[]{stateCount});
+         guiGraphics.text(this.font, status, fieldX, 110, -11141291);
+         guiGraphics.text(this.font, Component.translatable("screen.command-gui.machine.detection_dot_meaning"), fieldX + 170, 110, -5592406);
+      }
+
+      if (this.found) {
+         int legendX = fieldX + 252;
+         guiGraphics.text(this.font, Component.translatable("screen.command-gui.machine.detection_legend_abnormal"), legendX, 152, -43691);
+         guiGraphics.text(this.font, Component.translatable("screen.command-gui.machine.detection_legend_on"), legendX, 168, -11141291);
+         guiGraphics.text(this.font, Component.translatable("screen.command-gui.machine.detection_legend_off"), legendX, 184, -1);
+         guiGraphics.text(this.font, Component.translatable("screen.command-gui.machine.detection_legend_ignore"), legendX, 200, -7829368);
+      }
+
+      int maxValueScroll = Math.max(0, this.allValueRows.size() - 5);
+      int sbX = fieldX + 360 - 12;
+      this.valueScrollbar = new ScrollbarHandle(sbX, 150, 12, 80);
+      boolean hovered = this.valueScrollbar.contains((double)mouseX, (double)mouseY);
+      this.valueScrollbar.render(guiGraphics, this.valueScroll, maxValueScroll, 5, Math.max(1, this.allValueRows.size()), hovered);
+   }
+
+   private int totalStateCount() {
+      int total = 1;
+
+      for (List<String> values : this.properties.values()) {
+         if (values != null && !values.isEmpty()) {
+            total *= values.size();
+         }
+      }
+
+      return total;
+   }
+
+   private static record PropertyValue(String property, String value) {
+   }
 }

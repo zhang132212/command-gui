@@ -2,80 +2,129 @@ package com.remrin.server;
 
 import com.remrin.server.config.MachineConfig;
 import com.remrin.server.net.MachinePayloads;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.UUID;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents.ServerStarted;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents.ServerStopping;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents.EndTick;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents.Disconnect;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents.Join;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerPlayer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/**
- * Server-side mod entry point for the machine switch system.
- * <p>
- * Responsibilities: load the machine config, register network payloads and handlers, push the
- * machine list to joining players, and drive the timeline scheduler on every server tick.
- */
 public class MachineMod implements ModInitializer {
+   private static boolean initialized = false;
+   public static final String MOD_ID = "command-gui-server";
+   public static final Logger LOGGER = LoggerFactory.getLogger("command-gui-server");
+   private static MinecraftServer currentServer;
+   private static String lastFakeStatesJson = "";
+   private static final Set<UUID> fakeStateSubscribers = new HashSet<>();
+   private static final Set<UUID> machineStateSubscribers = new HashSet<>();
 
-  public static final String MOD_ID = "command-gui-server";
-  public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
+   public static MinecraftServer getCurrentServer() {
+      return currentServer;
+   }
 
-  /**
-   * The currently running server, kept for broadcasting machine state changes from the scheduler.
-   */
-  private static MinecraftServer currentServer;
+   public static void subscribeFakeStates(ServerPlayer player, MinecraftServer server) {
+      fakeStateSubscribers.add(player.getUUID());
+      String snapshot = FakePlayerStateTracker.buildJson(server);
+      lastFakeStatesJson = snapshot;
+      ServerPlayNetworking.send(player, new MachinePayloads.FakePlayerStatesPayload(snapshot));
+   }
 
-  public static MinecraftServer getCurrentServer() {
-    return currentServer;
-  }
+   public static void unsubscribeFakeStates(ServerPlayer player) {
+      fakeStateSubscribers.remove(player.getUUID());
+   }
 
-  @Override
-  public void onInitialize() {
-    MachineConfig.load();
+   /** PERF: 机器状态订阅者（打开机器面板的玩家），用于给 tickStates 的周期检测加门闩。 */
+   public static void subscribeMachineStates(ServerPlayer player) {
+      machineStateSubscribers.add(player.getUUID());
+   }
 
-    // Payload types must be registered on both ends before any receivers are registered.
-    PayloadTypeRegistry.serverboundPlay().register(
-        MachinePayloads.ActionPayload.TYPE, MachinePayloads.ActionPayload.CODEC);
-    PayloadTypeRegistry.clientboundPlay().register(
-        MachinePayloads.SyncPayload.TYPE, MachinePayloads.SyncPayload.CODEC);
-    PayloadTypeRegistry.clientboundPlay().register(
-        MachinePayloads.BlockQueryResultPayload.TYPE, MachinePayloads.BlockQueryResultPayload.CODEC);
+   public static void unsubscribeMachineStates(ServerPlayer player) {
+      machineStateSubscribers.remove(player.getUUID());
+   }
 
-    ServerPlayNetworking.registerGlobalReceiver(
-        MachinePayloads.ActionPayload.TYPE,
-        (payload, context) -> MachineManager.handleAction(context.player(), context.server(),
-            payload));
+   public static boolean hasMachineStateSubscribers() {
+      return !machineStateSubscribers.isEmpty();
+   }
 
-    ServerPlayConnectionEvents.JOIN.register((listener, sender, server) -> {
-      currentServer = server;
-      MachineManager.syncTo(listener.getPlayer());
-    });
+   private static void registerPayload(Runnable registration) {
+      try {
+         registration.run();
+      } catch (IllegalArgumentException e) {
+      }
+   }
 
-    ServerPlayConnectionEvents.DISCONNECT.register((listener, server) ->
-        MachineManager.onPlayerDisconnect(listener.getPlayer().getGameProfile().name()));
+   public void onInitialize() {
+      init();
+   }
 
-    CommandRegistrationCallback.EVENT.register(MachineAdminCommand::register);
+   public static void init() {
+      if (initialized) {
+         return;
+      }
 
-    // Snapshot machine detection blocks into memory when their chunk unloads, so detection stays
-    // fresh even when the chunk is unloaded (and the region files may lag behind autosaves).
-    ServerChunkEvents.CHUNK_UNLOAD.register(MachineBlockCache::onChunkUnload);
+      initialized = true;
+      MachineConfig.load();
+      registerPayload(() -> PayloadTypeRegistry.serverboundPlay().register(MachinePayloads.ActionPayload.TYPE, MachinePayloads.ActionPayload.CODEC));
+      registerPayload(() -> PayloadTypeRegistry.clientboundPlay().register(MachinePayloads.SyncPayload.TYPE, MachinePayloads.SyncPayload.CODEC));
+      registerPayload(() -> PayloadTypeRegistry.clientboundPlay().register(MachinePayloads.BlockQueryResultPayload.TYPE, MachinePayloads.BlockQueryResultPayload.CODEC));
+      registerPayload(() -> PayloadTypeRegistry.clientboundPlay().register(MachinePayloads.FakePlayerStatesPayload.TYPE, MachinePayloads.FakePlayerStatesPayload.CODEC));
+      ServerPlayNetworking.registerGlobalReceiver(
+         MachinePayloads.ActionPayload.TYPE, (payload, context) -> MachineManager.handleAction(context.player(), context.server(), payload)
+      );
+      ServerPlayConnectionEvents.JOIN.register((Join)(listener, sender, server) -> {
+         currentServer = server;
+         MachineManager.syncTo(listener.getPlayer());
+      });
+      ServerPlayConnectionEvents.DISCONNECT.register((Disconnect)(listener, server) -> {
+         unsubscribeFakeStates(listener.getPlayer());
+         unsubscribeMachineStates(listener.getPlayer());
+         MachineManager.onPlayerDisconnect(listener.getPlayer().getGameProfile().name());
+      });
+      CommandRegistrationCallback.EVENT.register(MachineAdminCommand::register);
+      ServerChunkEvents.CHUNK_UNLOAD.register(MachineBlockCache::onChunkUnload);
+      ServerTickEvents.END_SERVER_TICK.register((EndTick)server -> {
+         currentServer = server;
+         MachineScheduler.tick(server);
+         MachineModeChain.tick(server);
+         MachineManager.tickStates(server);
+         if (!fakeStateSubscribers.isEmpty()) {
+            String fakeStates = FakePlayerStateTracker.buildJson(server);
+            if (!fakeStates.equals(lastFakeStatesJson)) {
+               lastFakeStatesJson = fakeStates;
+               MachinePayloads.FakePlayerStatesPayload payload = new MachinePayloads.FakePlayerStatesPayload(fakeStates);
 
-    ServerTickEvents.END_SERVER_TICK.register(server -> {
-      currentServer = server;
-      MachineScheduler.tick(server);
-      MachineModeChain.tick(server);
-      MachineManager.tickStates(server);
-    });
-
-    ServerLifecycleEvents.SERVER_STARTED.register(server -> MachineBlockCache.rebuild());
-
-    ServerLifecycleEvents.SERVER_STOPPING.register(server -> currentServer = null);
-
-    LOGGER.info("Command-GUI Server initialized!");
-  }
+               for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+                  if (fakeStateSubscribers.contains(player.getUUID())) {
+                     ServerPlayNetworking.send(player, payload);
+                  }
+               }
+            }
+         }
+      });
+      ServerLifecycleEvents.SERVER_STARTED.register((ServerStarted)server -> {
+         MachineBlockCache.rebuild();
+         MachineBlockCache.prime(server);
+      });
+      ServerLifecycleEvents.SERVER_STOPPING.register((ServerStopping)server -> {
+         currentServer = null;
+         lastFakeStatesJson = "";
+         fakeStateSubscribers.clear();
+         machineStateSubscribers.clear();
+      });
+      LOGGER.info("Command-GUI Server initialized!");
+   }
 }

@@ -1,107 +1,168 @@
 package com.remrin.server;
 
-import com.remrin.server.BlockStateFileReader.BlockStateEntry;
 import com.remrin.server.config.MachineConfig;
-import com.remrin.server.config.MachineConfig.DetectionData;
-import com.remrin.server.config.MachineConfig.MachineData;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.properties.Property;
+import net.minecraft.world.level.block.state.properties.Property.Value;
 import net.minecraft.world.level.chunk.LevelChunk;
 
-/**
- * Lightweight in-memory snapshot cache of machine detection blocks.
- * <p>
- * Watches the (small, fixed) set of positions that machines use as detection blocks. When a chunk
- * containing such a position unloads, the block's state is snapshotted into memory — it is fresh
- * (the chunk holds the authoritative state right up to unload) and does not require the chunk to
- * stay loaded or the region files to have flushed (autosave can lag minutes behind).
- * <p>
- * Memory usage is bounded by the number of detection positions (one per machine, typically a
- * handful): entries are overwritten on every unload and never accumulate. The watched set is
- * rebuilt whenever machines are added, edited or deleted.
- */
 public final class MachineBlockCache {
+   private static final Map<String, Set<BlockPos>> watchedPositions = new HashMap<>();
+   private static final Map<String, Map<BlockPos, BlockStateFileReader.BlockStateEntry>> cache = new HashMap<>();
 
-  /** dimension -> watched detection positions. */
-  private static final Map<String, Set<BlockPos>> watchedPositions = new HashMap<>();
-  /** dimension -> (position -> last known block state snapshot). */
-  private static final Map<String, Map<BlockPos, BlockStateEntry>> cache = new HashMap<>();
+   /** PERF: 磁盘读结果缓存，独立于上面的权威快照；entry 为 null 表示"确认读不到"的负缓存。 */
+   private record DiskEntry(BlockStateFileReader.BlockStateEntry entry, long time) {
+   }
 
-  private MachineBlockCache() {
-  }
+   private static final Map<String, Map<BlockPos, DiskEntry>> diskCache = new HashMap<>();
+   private static final long DISK_TTL_MS = 30_000L;
 
-  /**
-   * Rebuilds the watched position set from the current machine configs (machine switches and
-   * mode detections). Call after machines are added, edited or deleted (and once at server start).
-   */
-  public static void rebuild() {
-    watchedPositions.clear();
-    for (MachineData machine : MachineConfig.getMachines()) {
-      watch(machine.detection);
+   private static String dimOf(String dimension) {
+      return dimension != null ? dimension : "minecraft:overworld";
+   }
+
+   public static void putDiskResult(String dimension, int x, int y, int z, BlockStateFileReader.BlockStateEntry entry) {
+      diskCache.computeIfAbsent(dimOf(dimension), k -> new HashMap<>())
+         .put(new BlockPos(x, y, z), new DiskEntry(entry, System.currentTimeMillis()));
+   }
+
+   public static boolean hasFreshDisk(String dimension, int x, int y, int z) {
+      Map<BlockPos, DiskEntry> m = diskCache.get(dimOf(dimension));
+      if (m == null) {
+         return false;
+      }
+
+      DiskEntry e = m.get(new BlockPos(x, y, z));
+      return e != null && System.currentTimeMillis() - e.time() < DISK_TTL_MS;
+   }
+
+   public static BlockStateFileReader.BlockStateEntry getDisk(String dimension, int x, int y, int z) {
+      Map<BlockPos, DiskEntry> m = diskCache.get(dimOf(dimension));
+      DiskEntry e = m == null ? null : m.get(new BlockPos(x, y, z));
+      return e == null ? null : e.entry();
+   }
+
+   private MachineBlockCache() {
+   }
+
+   public static void rebuild() {
+      watchedPositions.clear();
+
+      for (MachineConfig.MachineData machine : MachineConfig.getMachines()) {
+         watch(machine.detection);
+         if (machine.modes != null) {
+            for (MachineConfig.ModeData mode : machine.modes) {
+               watch(mode.detection);
+            }
+         }
+      }
+   }
+
+
+   public static void prime(MinecraftServer server) {
+      for (Map.Entry<String, Set<BlockPos>> entry : watchedPositions.entrySet()) {
+         String dimension = entry.getKey();
+         ServerLevel level = server.getLevel(ResourceKey.create(Registries.DIMENSION, Identifier.parse(dimension)));
+         if (level == null) {
+            continue;
+         }
+
+         Map<BlockPos, BlockStateFileReader.BlockStateEntry> dimCache = cache.computeIfAbsent(dimension, k -> new HashMap<>());
+         for (BlockPos pos : entry.getValue()) {
+            if (level.hasChunkAt(pos)) {
+               dimCache.put(pos, snapshot(level.getBlockState(pos)));
+            }
+         }
+      }
+   }
+
+
+   public static void invalidate(MachineConfig.MachineData machine) {
+      if (machine == null) {
+         return;
+      }
+
+      invalidateDetection(machine.detection);
       if (machine.modes != null) {
-        for (com.remrin.server.config.MachineConfig.ModeData mode : machine.modes) {
-          watch(mode.detection);
-        }
+         for (MachineConfig.ModeData mode : machine.modes) {
+            invalidateDetection(mode.detection);
+         }
       }
-    }
-  }
+   }
 
-  private static void watch(DetectionData detection) {
-    if (detection == null || !detection.enabled) {
-      return;
-    }
-    String dimension = detection.dimension != null
-        ? detection.dimension
-        : "minecraft:overworld";
-    watchedPositions.computeIfAbsent(dimension, k -> new HashSet<>())
-        .add(new BlockPos(detection.x, detection.y, detection.z));
-  }
-
-  /**
-   * Snapshots the state of any watched detection blocks inside the unloaded chunk. Called from the
-   * {@code CHUNK_UNLOAD} event; the chunk's block states are still authoritative at this point.
-   */
-  public static void onChunkUnload(ServerLevel level, LevelChunk chunk) {
-    Set<BlockPos> watched = watchedPositions.get(level.dimension().identifier().toString());
-    if (watched == null || watched.isEmpty()) {
-      return;
-    }
-    int chunkX = chunk.getPos().x();
-    int chunkZ = chunk.getPos().z();
-    Map<BlockPos, BlockStateEntry> dimCache = cache.computeIfAbsent(
-        level.dimension().identifier().toString(), k -> new HashMap<>());
-    for (BlockPos pos : watched) {
-      if ((pos.getX() >> 4) == chunkX && (pos.getZ() >> 4) == chunkZ) {
-        dimCache.put(pos, snapshot(chunk.getBlockState(pos)));
+   private static void invalidateDetection(MachineConfig.DetectionData detection) {
+      if (detection == null || !detection.enabled) {
+         return;
       }
-    }
-  }
 
-  /**
-   * Returns the last snapshotted state of a detection block, or {@code null} when the chunk has
-   * not unloaded since the cache was built (e.g. right after a server restart).
-   */
-  public static BlockStateEntry get(String dimension, int x, int y, int z) {
-    Map<BlockPos, BlockStateEntry> dimCache = cache.get(dimension);
-    if (dimCache == null) {
-      return null;
-    }
-    return dimCache.get(new BlockPos(x, y, z));
-  }
+      String dimension = detection.dimension != null ? detection.dimension : "minecraft:overworld";
+      Map<BlockPos, BlockStateFileReader.BlockStateEntry> dimCache = cache.get(dimension);
+      if (dimCache != null) {
+         dimCache.remove(new BlockPos(detection.x, detection.y, detection.z));
+      }
 
-  private static BlockStateEntry snapshot(BlockState state) {
-    Map<String, String> properties = new HashMap<>();
-    for (Property.Value<?> value : state.getValues().toList()) {
-      properties.put(value.property().getName(), value.valueName());
-    }
-    return new BlockStateEntry(
-        BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(), properties);
-  }
+      Map<BlockPos, DiskEntry> dimDisk = diskCache.get(dimension);
+      if (dimDisk != null) {
+         dimDisk.remove(new BlockPos(detection.x, detection.y, detection.z));
+      }
+   }
+
+   private static void watch(MachineConfig.DetectionData detection) {
+      if (detection != null && detection.enabled) {
+         String dimension = detection.dimension != null ? detection.dimension : "minecraft:overworld";
+         watchedPositions.computeIfAbsent(dimension, k -> new HashSet<>()).add(new BlockPos(detection.x, detection.y, detection.z));
+      }
+   }
+
+   public static void onChunkUnload(ServerLevel level, LevelChunk chunk) {
+      Set<BlockPos> watched = watchedPositions.get(level.dimension().identifier().toString());
+      if (watched != null && !watched.isEmpty()) {
+         int chunkX = chunk.getPos().x();
+         int chunkZ = chunk.getPos().z();
+         Map<BlockPos, BlockStateFileReader.BlockStateEntry> dimCache = cache.computeIfAbsent(level.dimension().identifier().toString(), k -> new HashMap<>());
+
+         for (BlockPos pos : watched) {
+            if (pos.getX() >> 4 == chunkX && pos.getZ() >> 4 == chunkZ) {
+               BlockStateFileReader.BlockStateEntry entry = BlockStateFileReader.read(
+                  level.getServer(), level.dimension().identifier().toString(), pos.getX(), pos.getY(), pos.getZ()
+               );
+               if (entry == null) {
+                  entry = snapshot(chunk.getBlockState(pos));
+               }
+
+               if (entry != null) {
+                  dimCache.put(pos, entry);
+               }
+            }
+         }
+      }
+   }
+
+   public static BlockStateFileReader.BlockStateEntry get(String dimension, int x, int y, int z) {
+      Map<BlockPos, BlockStateFileReader.BlockStateEntry> dimCache = cache.get(dimension);
+      if (dimCache == null) {
+         return null;
+      }
+      return dimCache.get(new BlockPos(x, y, z));
+   }
+
+   private static BlockStateFileReader.BlockStateEntry snapshot(BlockState state) {
+      Map<String, String> properties = new HashMap<>();
+
+      for (Value<?> value : state.getValues().toList()) {
+         properties.put(value.property().getName(), value.valueName());
+      }
+
+      return new BlockStateFileReader.BlockStateEntry(BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(), properties);
+   }
 }

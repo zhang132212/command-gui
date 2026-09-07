@@ -1,7 +1,7 @@
 package com.remrin.client.gui;
 
-import com.remrin.client.machine.MachineModels.MachineData;
-import com.remrin.client.machine.MachineModels.ModeData;
+import com.remrin.client.machine.MachineDebug;
+import com.remrin.client.machine.MachineModels;
 import com.remrin.client.machine.MachineNetworkManager;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -9,397 +9,356 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.input.KeyEvent;
+import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
-import org.lwjgl.glfw.GLFW;
 
-/**
- * Per-machine mode selection screen. Shows the machine's modes as chips (pending selection turns
- * the chip dark + amber, like the masa-style toggles); clicking "确定" applies all pending mode
- * toggles at once via {@link MachineNetworkManager#sendSetModes}.
- * <p>
- * Single-select modes are mutually exclusive among themselves (multi-select modes are
- * unaffected); detection-enabled modes show their ⏸/▶/⚠ state and are locked while abnormal.
- * <p>
- * A "刷新检测" button forces the server to re-read the detection blocks and push a fresh sync;
- * the chip area is scrollable (mouse wheel + styled drag handle) when the machine has many modes.
- */
 public class MachineModesScreen extends BaseParentedScreen<CommandGUIScreen> {
+   private static final long TICK_MS = 50L;
+   private static final int CHIP_HEIGHT = 18;
+   private static final int CHIP_GAP = 6;
+   private static final int CHIPS_PER_ROW = 3;
+   private static final int GRID_TOP = 46;
+   private static final int GRID_BOTTOM_PAD = 8;
+   private static final int VISIBLE_ROWS = 6;
+   private final String machineId;
+   private final List<MachineModels.ModeData> modes = new ArrayList<>();
+   private final Set<String> pending = new HashSet<>();
+   private final Map<String, Long> modeCooldownUntil = new HashMap<>();
+   private final List<Button> chipButtons = new ArrayList<>();
+   private int listLeft;
+   private int listRight;
+   private int listBottom;
+   private int gridScrollOffset = 0;
+   private int chipWidth;
+   private ScrollbarHandle gridScrollbar = null;
+   private boolean draggingGridScrollbar = false;
+   private double gridScrollbarGrabOffset = 0.0;
+   private int lastSyncVersion = -1;
+   private boolean synced = false;
+   private boolean playerSelected = false;
 
-  private static final long TICK_MS = 50L;
-  private static final int CHIP_HEIGHT = 18;
-  private static final int CHIP_GAP = 6;
-  private static final int CHIPS_PER_ROW = 3;
-  /** Top of the chip grid (below the title / refresh bar). */
-  private static final int GRID_TOP = 46;
-  /** Bottom padding above the action bar. */
-  private static final int GRID_BOTTOM_PAD = 8;
-  /** Rows of chips always visible (scrollbar appears when more rows exist). */
-  private static final int VISIBLE_ROWS = 6;
+   public MachineModesScreen(CommandGUIScreen parent, MachineModels.MachineData machine) {
+      super(Component.translatable("screen.command-gui.machine.modes_select_title", new Object[]{machine.name}), parent);
+      this.machineId = machine.id;
+      if (machine.modes != null) {
+         this.modes.addAll(machine.modes);
 
-  private final String machineId;
-  private final List<ModeData> modes = new ArrayList<>();
-  private final Set<String> pending = new HashSet<>();
-  /** machineId#modeId -> millis until the mode may be toggled again (local estimate). */
-  private final Map<String, Long> modeCooldownUntil = new HashMap<>();
-  private final List<Button> chipButtons = new ArrayList<>();
-  private int listLeft;
-  private int listRight;
-  private int listBottom;
-  /** Scroll offset (rows) for the chip grid. */
-  private int gridScrollOffset = 0;
-  private int chipWidth;
-  private ScrollbarHandle gridScrollbar = null;
-  private boolean draggingGridScrollbar = false;
-  private double gridScrollbarGrabOffset = 0;
-  /** Last seen machine sync version; used to reload modes when a sync arrives. */
-  private int lastSyncVersion = -1;
-  /**
-   * Whether the server's fresh state has arrived. Until then the constructor snapshot may carry
-   * stale running flags, so every chip stays disabled (no interaction) to avoid acting on a wrong
-   * state.
-   */
-  private boolean synced = false;
-  /** True once the player clicked a chip; the sync refresh then never rewrites the selection. */
-  private boolean playerSelected = false;
-
-  public MachineModesScreen(CommandGUIScreen parent, MachineData machine) {
-    super(Component.translatable("screen.command-gui.machine.modes_select_title", machine.name),
-        parent);
-    this.machineId = machine.id;
-    if (machine.modes != null) {
-      this.modes.addAll(machine.modes);
-      // Radio-selector semantics: the currently running single-select mode is pre-marked as the
-      // selected ("lit") chip — it stays highlighted and cannot be clicked off; switching only
-      // happens by clicking one of its mutually-exclusive peers.
-      for (ModeData mode : machine.modes) {
-        if (mode.singleSelect && "on".equals(mode.detected)) {
-          pending.add(mode.id);
-        }
-      }
-      StringBuilder diag = new StringBuilder("[Modes.open] " + machine.id + ":");
-      for (ModeData mode : machine.modes) {
-        diag.append(" ").append(mode.id).append("(single=").append(mode.singleSelect)
-            .append(",running=").append(mode.running).append(")");
-      }
-      com.remrin.client.machine.MachineDebug.log(diag.toString());
-    }
-  }
-
-  @Override
-  protected void init() {
-    super.init();
-
-    // Ask the server for a fresh sync right away: the modes snapshot taken in the constructor may
-    // carry stale running flags (the server pushes state changes asynchronously), which would make
-    // running single-select chips look clickable. The arriving sync refreshes the chips below.
-    // Remember the version at open time so the FIRST arriving sync (which reflects the fresh
-    // state) is the one that unlocks the chips — not an already-cached old snapshot.
-    lastSyncVersion = MachineNetworkManager.getSyncVersion();
-    synced = false;
-    MachineNetworkManager.sendRequestSync();
-
-    int listWidth = Math.min(340, this.width - 40);
-    listLeft = (this.width - listWidth) / 2;
-    listRight = listLeft + listWidth;
-    listBottom = this.height - 30;
-    // Leave room for the 12px right-edge scrollbar (same width as the main screen's)
-    chipWidth = (listRight - listLeft - 16 - CHIP_GAP * (CHIPS_PER_ROW - 1)) / CHIPS_PER_ROW;
-
-    rebuildChips();
-
-    // Refresh detection button (top-right of the chip grid)
-    this.addRenderableWidget(Button.builder(
-        Component.translatable("screen.command-gui.machine.refresh_detection"),
-        b -> refreshDetection()
-    ).bounds(listRight - 100, 24, 100, 18).build());
-
-    // Action bar: confirm / back
-    int barY = this.height - 24;
-    int barWidth = Math.min(80, listWidth / 3);
-    int barStartX = listLeft + (listWidth - barWidth * 2 - 8) / 2;
-    this.addRenderableWidget(Button.builder(
-        Component.translatable("screen.command-gui.machine.confirm_modes"),
-        b -> applyPending()
-    ).bounds(barStartX, barY, barWidth, 18).build());
-    this.addRenderableWidget(Button.builder(
-        Component.translatable("screen.command-gui.back"),
-        b -> this.minecraft.gui.setScreen(parent)
-    ).bounds(barStartX + barWidth + 8, barY, barWidth, 18).build());
-  }
-
-  private void rebuildChips() {
-    for (Button button : chipButtons) {
-      this.removeWidget(button);
-    }
-    chipButtons.clear();
-
-    int totalRows = getTotalRows();
-    int maxRows = getMaxScroll();
-    gridScrollOffset = Math.max(0, Math.min(gridScrollOffset, maxRows));
-    int visibleRows = Math.min(VISIBLE_ROWS, totalRows);
-
-    var font = this.minecraft.font;
-    for (int i = gridScrollOffset * CHIPS_PER_ROW;
-        i < Math.min(modes.size(), (gridScrollOffset + visibleRows) * CHIPS_PER_ROW); i++) {
-      ModeData mode = modes.get(i);
-      int gridIndex = i - gridScrollOffset * CHIPS_PER_ROW;
-      int col = gridIndex % CHIPS_PER_ROW;
-      int row = gridIndex / CHIPS_PER_ROW;
-      int x = listLeft + col * (chipWidth + CHIP_GAP);
-      int y = GRID_TOP + row * (CHIP_HEIGHT + CHIP_GAP);
-
-      boolean modeDetectionEnabled = mode.detection != null && mode.detection.enabled;
-      String prefix = "";
-      int stateColor = 0xFFFFFFFF;
-      boolean chipLocked = false;
-      if (modeDetectionEnabled && "abnormal".equals(mode.detected)) {
-        prefix = "⚠ ";
-        stateColor = 0xFFFF5555;
-        chipLocked = true;
-      } else if (modeDetectionEnabled && "on".equals(mode.detected)) {
-        prefix = "⏸ ";
-        stateColor = 0xFF55FF55;
-      } else if (modeDetectionEnabled) {
-        prefix = "▶ ";
-      } else if (mode.running) {
-        prefix = "⏸ ";
-        stateColor = 0xFF55FF55;
-      } else {
-        prefix = "▶ ";
-      }
-      Component chipText = Component.literal(
-          font.plainSubstrByWidth(prefix + mode.name, chipWidth - 10));
-      DarkSelectButton chip = new DarkSelectButton(x, y, chipWidth, CHIP_HEIGHT, chipText,
-          b -> togglePending(mode));
-      chip.setDarkSelected(() -> pending.contains(mode.id), 0xFFFFAA00);
-      chip.setUnselectedTextColor(stateColor);
-      // A currently RUNNING single-select mode cannot be toggled off by clicking it — switching
-      // only happens by selecting one of its mutually-exclusive peers. A mode whose boot/shutdown
-      // process is still executing is also locked (the server rejects switches mid-process).
-      boolean singleSelectRunning = mode.singleSelect && "on".equals(mode.detected);
-      if (singleSelectRunning) {
-        chip.setTooltip(Tooltip.create(Component.translatable(
-            "screen.command-gui.machine.chip_single_running", mode.name)));
-      } else {
-        chip.setTooltip(Tooltip.create(Component.translatable(
-            "screen.command-gui.machine.chip_hint", mode.name)));
-      }
-      if (chipLocked || singleSelectRunning || mode.processing
-          || inCooldown(modeCooldownUntil.get(mode.id)) || !synced) {
-        chip.active = false;
-      }
-      com.remrin.client.machine.MachineDebug.log("[Modes.chip] " + machineId + " " + mode.id
-          + " single=" + mode.singleSelect + " running=" + mode.running
-          + " processing=" + mode.processing
-          + " locked=" + chipLocked + " cooldown=" + inCooldown(modeCooldownUntil.get(mode.id))
-          + " synced=" + synced + " active=" + chip.active);
-      chipButtons.add(chip);
-      this.addRenderableWidget(chip);
-    }
-  }
-
-  private int getTotalRows() {
-    return (modes.size() + CHIPS_PER_ROW - 1) / CHIPS_PER_ROW;
-  }
-
-  private int getMaxScroll() {
-    return Math.max(0, getTotalRows() - VISIBLE_ROWS);
-  }
-
-  private void scrollGrid(double delta) {
-    if (delta > 0 && gridScrollOffset > 0) {
-      gridScrollOffset--;
-      rebuildChips();
-    } else if (delta < 0 && gridScrollOffset < getMaxScroll()) {
-      gridScrollOffset++;
-      rebuildChips();
-    }
-  }
-
-  private void setGridScrollOffset(int offset) {
-    gridScrollOffset = Math.max(0, Math.min(offset, getMaxScroll()));
-    rebuildChips();
-  }
-
-  private boolean isOverGridScrollbar(double mouseX, double mouseY) {
-    if (gridScrollbar == null) {
-      return false;
-    }
-    return gridScrollbar.contains(mouseX, mouseY);
-  }
-
-  /**
-   * Asks the server to re-read the detection blocks; the resulting sync refresh re-populates the
-   * machines list, so this screen reloads its modes shortly after.
-   */
-  private void refreshDetection() {
-    MachineNetworkManager.sendRefreshDetection(machineId);
-    lastSyncVersion = MachineNetworkManager.getSyncVersion();
-  }
-
-  @Override
-  public void tick() {
-    super.tick();
-    // When the server's sync arrives (opened via requestSync, or refresh detection pushed a fresh
-    // machine list), reload the modes and rebuild the chips so the ⏸/▶/⚠ detection states and the
-    // running single-select lock are current.
-    int current = MachineNetworkManager.getSyncVersion();
-    if (lastSyncVersion >= 0 && current != lastSyncVersion) {
-      lastSyncVersion = current;
-      synced = true;
-      MachineData fresh = MachineNetworkManager.getMachine(machineId);
-      if (fresh != null && fresh.modes != null) {
-        modes.clear();
-        modes.addAll(fresh.modes);
-        // Re-mark the currently running single-select mode as the "lit" selection — unless the
-        // player already started their own selection (their clicks must not be overwritten).
-        if (!playerSelected) {
-          pending.clear();
-          for (ModeData mode : modes) {
+         for (MachineModels.ModeData mode : machine.modes) {
             if (mode.singleSelect && "on".equals(mode.detected)) {
-              pending.add(mode.id);
+               this.pending.add(mode.id);
             }
-          }
-        }
-        rebuildChips();
+         }
+
+         StringBuilder diag = new StringBuilder("[Modes.open] " + machine.id + ":");
+
+         for (MachineModels.ModeData modex : machine.modes) {
+            diag.append(" ").append(modex.id).append("(single=").append(modex.singleSelect).append(",running=").append(modex.running).append(")");
+         }
+
+         MachineDebug.log(diag.toString());
       }
-    }
-  }
+   }
 
-  private static boolean inCooldown(Long until) {
-    return until != null && System.currentTimeMillis() < until;
-  }
+   protected void init() {
+      super.init();
+      this.lastSyncVersion = MachineNetworkManager.getSyncVersion();
+      this.synced = false;
+      MachineNetworkManager.sendRequestSync();
+      int listWidth = Math.min(340, this.width - 40);
+      this.listLeft = (this.width - listWidth) / 2;
+      this.listRight = this.listLeft + listWidth;
+      this.listBottom = this.height - 30;
+      this.chipWidth = (this.listRight - this.listLeft - 16 - 12) / 3;
+      this.rebuildChips();
+      this.addRenderableWidget(
+         Button.builder(Component.translatable("screen.command-gui.machine.refresh_detection"), b -> this.refreshDetection())
+            .bounds(this.listRight - 100, 24, 100, 18)
+            .build()
+      );
+      int barY = this.height - 24;
+      int barWidth = Math.min(80, listWidth / 3);
+      int barStartX = this.listLeft + (listWidth - barWidth * 2 - 8) / 2;
+      this.addRenderableWidget(
+         Button.builder(Component.translatable("screen.command-gui.machine.confirm_modes"), b -> this.applyPending())
+            .bounds(barStartX, barY, barWidth, 18)
+            .build()
+      );
+      this.addRenderableWidget(
+         Button.builder(Component.translatable("screen.command-gui.back"), b -> this.minecraft.gui.setScreen(this.parent))
+            .bounds(barStartX + barWidth + 8, barY, barWidth, 18)
+            .build()
+      );
+   }
 
-  private void togglePending(ModeData clicked) {
-    // Radio-selector semantics: a RUNNING single-select mode is never toggleable by clicking it —
-    // the selection can only move to a mutually-exclusive peer. This guard runs even if the chip
-    // somehow is not visually disabled (e.g. a stale sync running flag). Modes whose boot/shutdown
-    // process is still executing are locked too (the server rejects switches mid-process).
-    if ((clicked.singleSelect && "on".equals(clicked.detected)) || clicked.processing) {
-      return;
-    }
-    playerSelected = true;
-    // Single-select modes are mutually exclusive: clicking one clears any other pending
-    // single-select mode (multi-select modes are unaffected).
-    if (clicked.singleSelect) {
-      for (ModeData mode : modes) {
-        if (mode.singleSelect && !mode.id.equals(clicked.id)) {
-          pending.remove(mode.id);
-        }
+   private void rebuildChips() {
+      for (Button button : this.chipButtons) {
+         this.removeWidget(button);
       }
-    }
-    if (!pending.add(clicked.id)) {
-      pending.remove(clicked.id);
-    }
-    rebuildChips();
-  }
 
-  private void applyPending() {
-    if (pending.isEmpty()) {
-      this.minecraft.gui.setScreen(parent);
-      return;
-    }
-    MachineData machine = MachineNetworkManager.getMachine(machineId);
-    if (machine == null) {
-      this.minecraft.gui.setScreen(parent);
-      return;
-    }
-    long now = System.currentTimeMillis();
-    int interval = machine.switchInterval;
-    for (ModeData mode : machine.modes) {
-      if (mode.switchInterval > 0) {
-        interval = mode.switchInterval;
-        break;
+      this.chipButtons.clear();
+      int totalRows = this.getTotalRows();
+      int maxRows = this.getMaxScroll();
+      this.gridScrollOffset = Math.max(0, Math.min(this.gridScrollOffset, maxRows));
+      int visibleRows = Math.min(6, totalRows);
+      Font font = this.minecraft.font;
+
+      for (int i = this.gridScrollOffset * 3; i < Math.min(this.modes.size(), (this.gridScrollOffset + visibleRows) * 3); i++) {
+         MachineModels.ModeData mode = this.modes.get(i);
+         int gridIndex = i - this.gridScrollOffset * 3;
+         int col = gridIndex % 3;
+         int row = gridIndex / 3;
+         int x = this.listLeft + col * (this.chipWidth + 6);
+         int y = 46 + row * 24;
+         boolean modeDetectionEnabled = mode.detection != null && mode.detection.enabled;
+         String suffix = "";
+         int stateColor = -1;
+         boolean chipLocked = false;
+         if (!modeDetectionEnabled) {
+            chipLocked = true;
+         } else if (mode.processing) {
+            suffix = "off".equals(mode.transition) ? "（正在关闭...）" : "（正在开启...）";
+            stateColor = -22016;
+            chipLocked = true;
+         } else {
+            String chipText = mode.detected;
+
+            suffix = switch (chipText) {
+               case "on" -> "（已开启）";
+               case "abnormal" -> "（异常）";
+               default -> "（已关闭）";
+            };
+            if ("abnormal".equals(mode.detected)) {
+               stateColor = -43691;
+               chipLocked = true;
+            } else if ("on".equals(mode.detected)) {
+               stateColor = -11141291;
+            }
+         }
+
+         Component chipText = Component.literal(font.plainSubstrByWidth(mode.name + suffix, this.chipWidth - 10));
+         DarkSelectButton chip = new DarkSelectButton(x, y, this.chipWidth, 18, chipText, b -> this.togglePending(mode));
+         if (!modeDetectionEnabled) {
+            chip.setDarkSelected(() -> true, -1);
+            chip.setTooltip(Tooltip.create(Component.translatable("screen.command-gui.machine.mode_no_detection", new Object[]{mode.name})));
+         } else if (chipLocked) {
+            chip.setDarkSelected(() -> true, -1);
+         } else {
+            chip.setDarkSelected(() -> this.pending.contains(mode.id), -22016);
+         }
+
+         chip.setUnselectedTextColor(stateColor);
+         boolean singleSelectRunning = mode.singleSelect && "on".equals(mode.detected);
+         if (singleSelectRunning) {
+            chip.setTooltip(Tooltip.create(Component.translatable("screen.command-gui.machine.chip_single_running", new Object[]{mode.name})));
+         } else if (modeDetectionEnabled) {
+            chip.setTooltip(Tooltip.create(Component.translatable("screen.command-gui.machine.chip_hint", new Object[]{mode.name})));
+         }
+
+         if (chipLocked || singleSelectRunning || mode.processing || inCooldown(this.modeCooldownUntil.get(mode.id)) || !this.synced) {
+            chip.active = false;
+         }
+
+         MachineDebug.log(
+            "[Modes.chip] "
+               + this.machineId
+               + " "
+               + mode.id
+               + " single="
+               + mode.singleSelect
+               + " running="
+               + mode.running
+               + " processing="
+               + mode.processing
+               + " locked="
+               + chipLocked
+               + " cooldown="
+               + inCooldown(this.modeCooldownUntil.get(mode.id))
+               + " synced="
+               + this.synced
+               + " active="
+               + chip.active
+         );
+         this.chipButtons.add(chip);
+         this.addRenderableWidget(chip);
       }
-    }
-    // The pending set IS the desired target state: every mode the player selected (amber chips)
-    // should run after the apply, everything else is shut down. The server converges the machine
-    // to this set — stopping the unselected running modes first (in the configured stop order),
-    // then starting the selected ones (in the configured start order).
-    for (String modeId : pending) {
-      modeCooldownUntil.put(modeId, now + interval * TICK_MS);
-    }
-    MachineNetworkManager.sendSetModes(machineId, new ArrayList<>(pending));
-    pending.clear();
-    this.minecraft.gui.setScreen(parent);
-  }
+   }
 
-  @Override
-  public boolean keyPressed(KeyEvent keyEvent) {
-    if (keyEvent.key() == GLFW.GLFW_KEY_ESCAPE) {
-      this.minecraft.gui.setScreen(parent);
-      return true;
-    }
-    return super.keyPressed(keyEvent);
-  }
+   private int getTotalRows() {
+      return (this.modes.size() + 3 - 1) / 3;
+   }
 
-  @Override
-  public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
-    if (getMaxScroll() > 0) {
-      scrollGrid(scrollY > 0 ? 1 : -1);
-      return true;
-    }
-    return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
-  }
+   private int getMaxScroll() {
+      return Math.max(0, this.getTotalRows() - 6);
+   }
 
-  @Override
-  public boolean mouseClicked(net.minecraft.client.input.MouseButtonEvent mouseEvent,
-      boolean focused) {
-    if (mouseEvent.button() == 0 && isOverGridScrollbar(mouseEvent.x(), mouseEvent.y())
-        && getMaxScroll() > 0 && gridScrollbar != null) {
-      int thumbTop = gridScrollbar.thumbTop(gridScrollOffset, getMaxScroll(), VISIBLE_ROWS,
-          getTotalRows());
-      gridScrollbarGrabOffset = mouseEvent.y() - thumbTop;
-      draggingGridScrollbar = true;
-      return true;
-    }
-    return super.mouseClicked(mouseEvent, focused);
-  }
+   private void scrollGrid(double delta) {
+      if (delta > 0.0 && this.gridScrollOffset > 0) {
+         this.gridScrollOffset--;
+         this.rebuildChips();
+      } else if (delta < 0.0 && this.gridScrollOffset < this.getMaxScroll()) {
+         this.gridScrollOffset++;
+         this.rebuildChips();
+      }
+   }
 
-  @Override
-  public boolean mouseDragged(net.minecraft.client.input.MouseButtonEvent mouseEvent,
-      double dragX, double dragY) {
-    if (draggingGridScrollbar && gridScrollbar != null) {
-      int offset = gridScrollbar.offsetFromY(mouseEvent.y(), gridScrollbarGrabOffset,
-          getMaxScroll(), VISIBLE_ROWS, getTotalRows());
-      setGridScrollOffset(offset);
-      return true;
-    }
-    return super.mouseDragged(mouseEvent, dragX, dragY);
-  }
+   private void setGridScrollOffset(int offset) {
+      this.gridScrollOffset = Math.max(0, Math.min(offset, this.getMaxScroll()));
+      this.rebuildChips();
+   }
 
-  @Override
-  public boolean mouseReleased(net.minecraft.client.input.MouseButtonEvent mouseEvent) {
-    draggingGridScrollbar = false;
-    return super.mouseReleased(mouseEvent);
-  }
+   private boolean isOverGridScrollbar(double mouseX, double mouseY) {
+      if (this.gridScrollbar == null) {
+         return false;
+      }
+      return this.gridScrollbar.contains(mouseX, mouseY);
+   }
 
-  @Override
-  public void extractRenderState(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY,
-      float partialTick) {
-    super.extractRenderState(guiGraphics, mouseX, mouseY, partialTick);
+   private void refreshDetection() {
+      MachineNetworkManager.sendRefreshDetection(this.machineId);
+      this.lastSyncVersion = MachineNetworkManager.getSyncVersion();
+   }
 
-    guiGraphics.centeredText(this.font, this.title, this.width / 2, 6, 0xFFFFFFFF);
+   @Override
+   public void tick() {
+      super.tick();
+      int current = MachineNetworkManager.getSyncVersion();
+      if (this.lastSyncVersion >= 0 && current != this.lastSyncVersion) {
+         this.lastSyncVersion = current;
+         this.synced = true;
+         MachineModels.MachineData fresh = MachineNetworkManager.getMachine(this.machineId);
+         if (fresh != null && fresh.modes != null) {
+            this.modes.clear();
+            this.modes.addAll(fresh.modes);
+            if (!this.playerSelected) {
+               this.pending.clear();
 
-    if (modes.isEmpty()) {
-      guiGraphics.centeredText(this.font,
-          Component.translatable("screen.command-gui.machine.modes_empty"),
-          this.width / 2, (GRID_TOP + listBottom) / 2, 0xFF888888);
-      return;
-    }
+               for (MachineModels.ModeData mode : this.modes) {
+                  if (mode.singleSelect && "on".equals(mode.detected)) {
+                     this.pending.add(mode.id);
+                  }
+               }
+            }
 
-    // Grid scrollbar (right of the chip grid). Always drawn — when the grid fits entirely the
-    // handle renders as a full-height grey thumb, matching the main screen's scrollbar convention.
-    int gridTop = GRID_TOP;
-    int gridH = VISIBLE_ROWS * (CHIP_HEIGHT + CHIP_GAP) - CHIP_GAP;
-    int scrollbarX = listRight - 12;
-    gridScrollbar = new ScrollbarHandle(scrollbarX, gridTop, 12, gridH);
-    boolean hovered = gridScrollbar.contains(mouseX, mouseY);
-    gridScrollbar.render(guiGraphics, gridScrollOffset, getMaxScroll(), VISIBLE_ROWS,
-        getTotalRows(), hovered);
-  }
+            this.rebuildChips();
+         }
+      }
+   }
+
+   private static boolean inCooldown(Long until) {
+      return until != null && System.currentTimeMillis() < until;
+   }
+
+   private void togglePending(MachineModels.ModeData clicked) {
+      if ((!clicked.singleSelect || !"on".equals(clicked.detected)) && !clicked.processing) {
+         this.playerSelected = true;
+         if (clicked.singleSelect) {
+            for (MachineModels.ModeData mode : this.modes) {
+               if (mode.singleSelect && !mode.id.equals(clicked.id)) {
+                  this.pending.remove(mode.id);
+               }
+            }
+         }
+
+         if (!this.pending.add(clicked.id)) {
+            this.pending.remove(clicked.id);
+         }
+
+         this.rebuildChips();
+      }
+   }
+
+   private void applyPending() {
+      if (this.pending.isEmpty()) {
+         this.minecraft.gui.setScreen(this.parent);
+      } else {
+         MachineModels.MachineData machine = MachineNetworkManager.getMachine(this.machineId);
+         if (machine == null) {
+            this.minecraft.gui.setScreen(this.parent);
+         } else {
+            long now = System.currentTimeMillis();
+            int interval = machine.switchInterval;
+
+            for (MachineModels.ModeData mode : machine.modes) {
+               if (mode.switchInterval > 0) {
+                  interval = mode.switchInterval;
+                  break;
+               }
+            }
+
+            for (String modeId : this.pending) {
+               this.modeCooldownUntil.put(modeId, now + (long)interval * 50L);
+            }
+
+            MachineNetworkManager.sendSetModes(this.machineId, new ArrayList<>(this.pending));
+            this.pending.clear();
+            this.minecraft.gui.setScreen(this.parent);
+         }
+      }
+   }
+
+   public boolean keyPressed(KeyEvent keyEvent) {
+      if (keyEvent.key() == 256) {
+         this.minecraft.gui.setScreen(this.parent);
+         return true;
+      } else {
+         return super.keyPressed(keyEvent);
+      }
+   }
+
+   public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+      if (this.getMaxScroll() > 0) {
+         this.scrollGrid(scrollY > 0.0 ? 1.0 : -1.0);
+         return true;
+      } else {
+         return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
+      }
+   }
+
+   public boolean mouseClicked(MouseButtonEvent mouseEvent, boolean focused) {
+      if (mouseEvent.button() == 0 && this.isOverGridScrollbar(mouseEvent.x(), mouseEvent.y()) && this.getMaxScroll() > 0 && this.gridScrollbar != null) {
+         int thumbTop = this.gridScrollbar.thumbTop(this.gridScrollOffset, this.getMaxScroll(), 6, this.getTotalRows());
+         this.gridScrollbarGrabOffset = mouseEvent.y() - (double)thumbTop;
+         this.draggingGridScrollbar = true;
+         return true;
+      } else {
+         return super.mouseClicked(mouseEvent, focused);
+      }
+   }
+
+   public boolean mouseDragged(MouseButtonEvent mouseEvent, double dragX, double dragY) {
+      if (this.draggingGridScrollbar && this.gridScrollbar != null) {
+         int offset = this.gridScrollbar.offsetFromY(mouseEvent.y(), this.gridScrollbarGrabOffset, this.getMaxScroll(), 6, this.getTotalRows());
+         this.setGridScrollOffset(offset);
+         return true;
+      } else {
+         return super.mouseDragged(mouseEvent, dragX, dragY);
+      }
+   }
+
+   public boolean mouseReleased(MouseButtonEvent mouseEvent) {
+      this.draggingGridScrollbar = false;
+      return super.mouseReleased(mouseEvent);
+   }
+
+   public void extractRenderState(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY, float partialTick) {
+      super.extractRenderState(guiGraphics, mouseX, mouseY, partialTick);
+      guiGraphics.centeredText(this.font, this.title, this.width / 2, 6, -1);
+      if (this.modes.isEmpty()) {
+         guiGraphics.centeredText(
+            this.font, Component.translatable("screen.command-gui.machine.modes_empty"), this.width / 2, (46 + this.listBottom) / 2, -7829368
+         );
+      } else {
+         int gridTop = 46;
+         int gridH = 138;
+         int scrollbarX = this.listRight - 12;
+         this.gridScrollbar = new ScrollbarHandle(scrollbarX, gridTop, 12, gridH);
+         boolean hovered = this.gridScrollbar.contains((double)mouseX, (double)mouseY);
+         this.gridScrollbar.render(guiGraphics, this.gridScrollOffset, this.getMaxScroll(), 6, this.getTotalRows(), hovered);
+      }
+   }
 }

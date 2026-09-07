@@ -1,394 +1,563 @@
 package com.remrin.client.gui;
 
 import com.remrin.client.config.CommandConfig;
+import com.remrin.client.config.SettingsConfig;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
+import java.util.Map.Entry;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.Tooltip;
+import net.minecraft.client.gui.components.Button.OnPress;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
 
-/**
- * Custom command tab, displaying all commands created by the user via {@link AddCommandScreen}.
- * <p>
- * Each command row has a main {@link Button} for execution plus three small
- * {@link ItemIconButton} widgets (edit / delete / move) placed to the right.
- * Supports text search and filtering by category.
- */
 public class CustomCommandTab extends AbstractCommandTab {
+   private static final int EDIT_BTN_W = 28;
+   private static final int MOVE_BTN_W = 28;
+   private static final int DELETE_BTN_W = 28;
+   private static final int MAX_CLUSTER_WIDTH = 135;
+   private static final int CATEGORY_COLUMN_MARGIN = 4;
+   private static final int LIST_BOTTOM_RESERVE = 18;
+   private final List<CustomCommandTab.FilteredCommand> filteredCommands = new ArrayList<>();
+   private final List<Button> extraButtons = new ArrayList<>();
+   private Button addCategoryButton = null;
+   private String selectedCategoryId = null;
+   private static String rememberedCategoryId = null;
+   private static int rememberedScrollOffset = 0;
+   private static int rememberedCategoryScrollOffset = 0;
 
-  /** Width of the small "×" delete button appended to each deletable category tab. */
-  private static final int CAT_DEL_BTN_W = 12;
-  /** Width of the category name button when a delete button is present beside it. */
-  private static final int NARROW_CAT_WIDTH = CATEGORY_TAB_WIDTH - CAT_DEL_BTN_W - 1;
-
-  /** Width of each action icon button (smaller than default to stay compact). */
-  private static final int ACTION_BTN_WIDTH = 14;
-  private static final int NUM_ACTION_BTNS = 3;
-  private static final int ACTION_BTNS_TOTAL = NUM_ACTION_BTNS * ACTION_BTN_WIDTH + (NUM_ACTION_BTNS - 1);
-
-  /** Item icons for the action buttons (edit / delete / move). */
-  private static final ItemStack EDIT_ICON   = new ItemStack(Items.WRITABLE_BOOK);
-  private static final ItemStack DELETE_ICON = new ItemStack(Items.LAVA_BUCKET);
-  private static final ItemStack MOVE_ICON   = new ItemStack(Items.SHULKER_BOX);
-
-  private final List<FilteredCommand> filteredCommands = new ArrayList<>();
-  /** Extra action icon button widgets generated alongside each command button row. */
-  private final List<Button> extraButtons = new ArrayList<>();
-  /**
-   * Parallel to {@link #allCategoryButtons}: holds the "×" delete button for each deletable
-   * user category, or {@code null} for the "All" button, "+" button, and the default category.
-   */
-  private final List<Button> allDeleteButtons = new ArrayList<>();
-  /**
-   * Visible (scrolled) subset of {@link #allDeleteButtons}, kept in sync with
-   * {@link #categoryButtons}.
-   */
-  private final List<Button> visibleDeleteButtons = new ArrayList<>();
-  private String selectedCategoryId = null;
-  public CustomCommandTab(Screen parent) {
-    super(parent);
-    buildFilteredCommands();
-  }
-
-  @Override
-  public Component getTabTitle() {
-    return Component.translatable("screen.command-gui.tab.custom");
-  }
-
-  @Override
-  protected int getFilteredCommandCount() {
-    return filteredCommands.size();
-  }
-
-  /**
-   * Filters commands by search text and selected category, writing results to
-   * {@link #filteredCommands}. A command matches if its name, description, or any command in its
-   * list contains the search string.
-   */
-  @Override
-  protected void buildFilteredCommands() {
-    filteredCommands.clear();
-    String search = searchText;
-    for (CommandConfig.Category category : CommandConfig.getCategories()) {
-      if (selectedCategoryId != null && !selectedCategoryId.equals(category.id)) {
-        continue;
-      }
-      for (Map.Entry<String, CommandConfig.CommandEntry> entry : category.commands.entrySet()) {
-        if (search.isEmpty() ||
-            entry.getKey().toLowerCase().contains(search) ||
-            entry.getValue().description.toLowerCase().contains(search) ||
-            matchesAnyCommand(entry.getValue(), search)) {
-          filteredCommands.add(new FilteredCommand(entry.getKey(), category.id, entry.getValue()));
-        }
-      }
-    }
-  }
-
-  private boolean matchesAnyCommand(CommandConfig.CommandEntry entry, String search) {
-    for (String cmd : entry.getCommands()) {
-			if (cmd.toLowerCase().contains(search)) {
-				return true;
-			}
-    }
-    return false;
-  }
-
-  @Override
-  protected void buildAllCategoryButtons() {
-    allCategoryButtons.clear();
-    allDeleteButtons.clear();
-    if (area == null) {
-      return;
-    }
-
-    int x = area.left();
-    int y = area.top();
-
-    for (CommandConfig.Category category : CommandConfig.getCategories()) {
-      final String catId = category.id;
-      Component btnText = category.getDisplayName() != null
-          ? Component.literal(category.getDisplayName())
-          : Component.translatable(category.nameKey);
-
-      boolean isDeletable = !catId.equals("default");
-      int catBtnWidth = isDeletable ? NARROW_CAT_WIDTH : CATEGORY_TAB_WIDTH;
-
-      Button catBtn = Button.builder(btnText, btn -> onCategoryButtonClick(catId))
-          .bounds(x, y, catBtnWidth, CATEGORY_TAB_HEIGHT).build();
-      catBtn.active = !catId.equals(selectedCategoryId);
-      allCategoryButtons.add(catBtn);
-
-      if (isDeletable) {
-        boolean hasCommands = !category.commands.isEmpty();
-        Button delBtn = Button.builder(
-            Component.literal("×"),
-            btn -> deleteCategory(catId)
-        ).bounds(x + catBtnWidth + 1, y, CAT_DEL_BTN_W, CATEGORY_TAB_HEIGHT).build();
-        delBtn.active = !hasCommands;
-        if (hasCommands) {
-          delBtn.setTooltip(Tooltip.create(
-              Component.translatable("screen.command-gui.category_not_empty")));
-        } else {
-          delBtn.setTooltip(Tooltip.create(
-              Component.translatable("screen.command-gui.delete_category")));
-        }
-        allDeleteButtons.add(delBtn);
+   public CustomCommandTab(Screen parent) {
+      super(parent);
+      if (SettingsConfig.getBoolean("quick_command_remember_view") && rememberedCategoryId != null && CommandConfig.getCategory(rememberedCategoryId) != null) {
+         this.selectedCategoryId = rememberedCategoryId;
+         this.scrollOffset = rememberedScrollOffset;
+         this.categoryScrollOffset = rememberedCategoryScrollOffset;
       } else {
-        allDeleteButtons.add(null); // default category has no delete button
+         this.selectedCategoryId = null;
       }
-    }
 
-    Button addCatBtn = Button.builder(
-        Component.literal("+"),
-        btn -> openAddCategoryScreen()
-    ).bounds(x, y, CATEGORY_TAB_WIDTH, CATEGORY_TAB_HEIGHT).build();
-    addCatBtn.setTooltip(Tooltip.create(Component.translatable("screen.command-gui.add_category")));
-    allCategoryButtons.add(addCatBtn);
-    allDeleteButtons.add(null); // "+" has no delete button
-  }
+      this.buildFilteredCommands();
+   }
 
-  @Override
-  protected Button buildCommandButton(int index, int x, int y, int width, int height) {
-    FilteredCommand cmd = filteredCommands.get(index);
-    final String cmdName = cmd.name();
-    final CommandConfig.CommandEntry cmdEntry = cmd.entry();
+   public Component getTabTitle() {
+      return Component.translatable("screen.command-gui.tab.custom");
+   }
 
-    java.util.List<String> commands = cmdEntry.getCommands();
-    String commandText = String.join("\n", commands);
-    String tooltipText = commandText;
-    if (cmdEntry.description != null && !cmdEntry.description.isEmpty()) {
-      tooltipText = cmdEntry.description + "\n§7" + commandText;
-    }
+   @Override
+   protected int sidebarOffset() {
+      return GuiTuning.getInt("CustomCommandTab.SIDEBAR_OFFSET", 8);
+   }
 
-    int cmdWidth = width - ACTION_BTNS_TOTAL;
-    Button btn = Button.builder(Component.literal(cmdName), b -> handleCommand(cmdEntry))
-        .bounds(x, y, cmdWidth, height)
-        .tooltip(Tooltip.create(Component.literal(tooltipText)))
-        .build();
-    return btn;
-  }
-
-  @Override
-  protected void onCommandButtonBuilt(int index, int x, int y, int width, int height) {
-    FilteredCommand cmd = filteredCommands.get(index);
-    final String cmdName = cmd.name();
-    final CommandConfig.CommandEntry cmdEntry = cmd.entry();
-
-    int cmdWidth = width - ACTION_BTNS_TOTAL;
-    int actionX = x + cmdWidth;
-
-    extraButtons.add(new ItemIconButton(
-        actionX, y, ACTION_BTN_WIDTH, height,
-        EDIT_ICON,
-        Component.translatable("screen.command-gui.action.edit"),
-        btn -> editCommand(cmdName, cmdEntry)));
-    actionX += ACTION_BTN_WIDTH + 1;
-
-    extraButtons.add(new ItemIconButton(
-        actionX, y, ACTION_BTN_WIDTH, height,
-        DELETE_ICON,
-        Component.translatable("screen.command-gui.action.delete"),
-        btn -> deleteCommand(cmdName)));
-    actionX += ACTION_BTN_WIDTH + 1;
-
-    extraButtons.add(new ItemIconButton(
-        actionX, y, ACTION_BTN_WIDTH, height,
-        MOVE_ICON,
-        Component.translatable("screen.command-gui.action.move"),
-        btn -> moveCommand(cmdName)));
-  }
-
-  @Override
-  protected void rebuildButtons() {
-    // The base class removes the old command buttons from the parent screen but NOT the extra
-    // action buttons built by onCommandButtonBuilt — without this, stale action icons linger at
-    // their old positions after a resize (fullscreen <-> windowed) or a scroll, overlapping the
-    // new rows ("window-sized buttons still visible").
-    removeOldExtraButtonsFromScreen();
-    extraButtons.clear();
-    super.rebuildButtons();
-  }
-
-  private void removeOldExtraButtonsFromScreen() {
-    if (parent instanceof CommandGUIScreen screen) {
-      for (Button button : extraButtons) {
-        screen.removeTabButton(button);
+   @Override
+   protected int categoryTabWidth() {
+      if (this.area == null) {
+         return this.categoryMinWidth();
       }
-    }
-  }
+      return Math.max(this.categoryMinWidth(), this.baseCategoryTabWidth() * this.categoryWidthPercent() / 100);
+   }
 
-  /**
-   * Keeps {@link #visibleDeleteButtons} in sync with the visible category buttons: for each
-   * visible slot that has a corresponding delete button, position and collect it.
-   */
-  @Override
-  protected void rebuildVisibleCategoryButtons() {
-    // Same stale-widget problem as rebuildButtons: the base class only removes the category
-    // buttons, not the paired delete buttons, so remove them explicitly before rebuilding.
-    removeOldDeleteButtonsFromScreen();
-    visibleDeleteButtons.clear();
-    super.rebuildVisibleCategoryButtons();
-
-    if (area == null) return;
-    int startIndex = getCategoryScrollOffset();
-    int visibleCount = getVisibleCategoryCount();
-    int endIndex = Math.min(startIndex + visibleCount, allDeleteButtons.size());
-    for (int i = startIndex; i < endIndex; i++) {
-      Button delBtn = allDeleteButtons.get(i);
-      if (delBtn != null) {
-        int y = area.top() + (i - startIndex) * (CATEGORY_TAB_HEIGHT + CATEGORY_TAB_GAP);
-        delBtn.setY(y);
-        visibleDeleteButtons.add(delBtn);
+   protected int baseCategoryTabWidth() {
+      if (this.area == null) {
+         return this.categoryMinWidth();
       }
-    }
-  }
+      return Math.max(this.categoryMinWidth(), this.area.width() / this.categoryWidthDivisor());
+   }
 
-  private void removeOldDeleteButtonsFromScreen() {
-    if (parent instanceof CommandGUIScreen screen) {
-      for (Button button : visibleDeleteButtons) {
-        screen.removeTabButton(button);
+
+   private int categoryMinWidth() {
+      return GuiTuning.getInt("CustomCommandTab.CATEGORY_MIN_WIDTH", 50);
+   }
+
+   private int categoryWidthDivisor() {
+      return GuiTuning.getInt("CustomCommandTab.CATEGORY_WIDTH_DIVISOR", 4);
+   }
+
+   private int categoryInnerMargin() {
+      return GuiTuning.getInt("CustomCommandTab.CATEGORY_INNER_MARGIN", 8);
+   }
+
+   private int categoryBottomReserve() {
+      return GuiTuning.getInt("CustomCommandTab.CATEGORY_BOTTOM_RESERVE", 18);
+   }
+
+   private int maxClusterWidth() {
+      return GuiTuning.getInt("CustomCommandTab.MAX_CLUSTER_WIDTH", 135);
+   }
+
+   private int minColumnGap() {
+      return GuiTuning.getInt("CustomCommandTab.MIN_COLUMN_GAP", 4);
+   }
+
+   private int categoryWidthPercent() {
+      return GuiTuning.getInt("CustomCommandTab.CATEGORY_WIDTH_PERCENT", 100);
+   }
+
+   private int buttonScalePercent() {
+      return GuiTuning.getInt("CustomCommandTab.BUTTON_SCALE_PERCENT", 100);
+   }
+
+   private int columns() {
+      return 3;
+   }
+
+   @Override
+   protected int getCommandAreaLeft() {
+      return this.area.left() + this.sidebarOffset() + this.baseCategoryTabWidth() + this.tunedCategoryScrollbarWidth() + this.tunedCategoryCommandGap();
+   }
+
+   @Override
+   protected int getCommandAreaWidth() {
+      return this.area.width() - this.sidebarOffset() - this.baseCategoryTabWidth() - this.tunedCategoryScrollbarWidth() - this.tunedCategoryCommandGap();
+   }
+
+   private int categoryColumnX() {
+      int sidebarRight = this.area.left() + this.sidebarOffset() + this.categoryTabWidth();
+      return Math.max(0, (sidebarRight - this.categoryColumnWidth()) / 2);
+   }
+
+   private int categoryColumnWidth() {
+      return this.categoryTabWidth() - this.categoryInnerMargin();
+   }
+
+   @Override
+   protected int getVisibleCategoryCount() {
+      if (this.area == null) {
+         return 0;
+      } else {
+         int rowHeight = this.tunedCategoryRowHeight();
+         return Math.max(1, (this.area.height() - this.categoryBottomReserve()) / rowHeight);
       }
-    }
-  }
+   }
 
-  /** Returns visible category buttons plus their paired delete buttons. */
-  @Override
-  public List<Button> getCategoryButtons() {
-    List<Button> all = new ArrayList<>(categoryButtons);
-    all.addAll(visibleDeleteButtons);
-    return all;
-  }
+   public int getSwitchX() {
+      if (this.area != null) {
+         return this.getCommandAreaLeft();
+      }
+      return 0;
+   }
 
-  /**
-   * Selects the edit screen based on the command entry type: fake player commands use
-   * {@link AddFakePlayerCommandScreen}, regular commands use {@link EditCommandScreen}.
-   */
-  private void editCommand(String name, CommandConfig.CommandEntry entry) {
-    Minecraft mc = Minecraft.getInstance();
-    CommandGUIScreen parentScreen = (CommandGUIScreen) parent;
-    if (isFakePlayerCommand(entry)) {
+   public int getSwitchWidth() {
+      if (this.area == null) {
+         return 100;
+      }
+      return Math.max(24, this.baseSwitchWidth() * this.buttonScalePercent() / 100);
+   }
+
+   private int baseSwitchWidth() {
+      if (this.area == null) {
+         return 100;
+      }
+      return Math.max(60, this.area.right() - this.getCommandAreaLeft() - this.tunedCategoryScrollbarWidth());
+   }
+
+   public int getSearchBoxWidth() {
+      if (this.area == null) {
+         return 100;
+      }
+      return Math.max(60, this.area.right() - this.getCommandAreaLeft() - this.maxClusterWidth() - this.tunedCategoryScrollbarWidth());
+   }
+
+   public int getModesX() {
+      if (this.area != null) {
+         return this.area.right() - this.maxClusterWidth();
+      }
+      return 0;
+   }
+
+   public int getCategoryColumnX() {
+      return this.categoryColumnX();
+   }
+
+   public boolean isPanelKeepOpen() {
+      return SettingsConfig.getBoolean("quick_command_keep_open_default");
+   }
+
+   @Override
+   protected int getFilteredCommandCount() {
+      return this.filteredCommands.size();
+   }
+
+   @Override
+   protected void buildFilteredCommands() {
+      this.filteredCommands.clear();
+      String search = this.searchText;
+
+      for (CommandConfig.Category category : CommandConfig.getCategories()) {
+         if (this.selectedCategoryId == null || this.selectedCategoryId.equals(category.id)) {
+            for (Entry<String, CommandConfig.CommandEntry> entry : category.commands.entrySet()) {
+               String name = entry.getKey();
+               if (!CommandConfig.isPendingRemoval(name)) {
+                  CommandConfig.CommandEntry effective = CommandConfig.getPendingEntry(name);
+                  if (effective == null) {
+                     effective = entry.getValue();
+                  }
+
+                  if (search.isEmpty() || name.toLowerCase().contains(search)) {
+                     this.filteredCommands.add(new CustomCommandTab.FilteredCommand(name, category.id, effective));
+                  }
+               }
+            }
+         }
+      }
+
+      for (String name : CommandConfig.getPendingNames()) {
+         CommandConfig.CommandEntry effectivex = CommandConfig.getPendingEntry(name);
+         if (effectivex != null && CommandConfig.findCommandCategory(name) == null) {
+            String categoryId = CommandConfig.getPendingCategory(name);
+            if ((this.selectedCategoryId == null || this.selectedCategoryId.equals(categoryId)) && (search.isEmpty() || name.toLowerCase().contains(search))) {
+               this.filteredCommands.add(new CustomCommandTab.FilteredCommand(name, categoryId, effectivex));
+            }
+         }
+      }
+   }
+
+   @Override
+   protected void buildAllCategoryButtons() {
+      this.allCategoryButtons.clear();
+      if (this.area != null) {
+         if (this.addCategoryButton != null && this.parent instanceof CommandGUIScreen screen) {
+            screen.removeTabButton(this.addCategoryButton);
+         }
+
+         int x = this.categoryColumnX();
+         int y = this.area.top();
+         int columnWidth = this.categoryColumnWidth();
+         Font font = Minecraft.getInstance().font;
+
+         for (CommandConfig.Category category : CommandConfig.getCategories()) {
+            String catId = category.id;
+            String displayName = category.getDisplayName();
+            boolean isDeletable = !catId.equals("default");
+            boolean nameTruncated = displayName != null && font.width(displayName) > columnWidth * 2 / 3;
+            Component btnText = displayName != null
+               ? Component.literal(truncate(displayName, columnWidth * 2 / 3, font))
+               : Component.translatable(category.nameKey);
+            DarkSelectButton catBtn = new DarkSelectButton(x, y, columnWidth, this.tunedCategoryTabHeight(), btnText, btn -> this.onCategoryButtonClick(catId));
+            catBtn.setDarkSelected(() -> Objects.equals(this.selectedCategoryId, catId), -1);
+            if (nameTruncated && displayName != null) {
+               catBtn.setTooltip(Tooltip.create(Component.literal("名称:" + displayName)));
+            }
+
+            if (isDeletable) {
+               catBtn.setOnRightClick(() -> this.openEditCategoryScreen(catId));
+               String tip = (nameTruncated && displayName != null ? "名称:" + displayName + "\n" : "")
+                  + Component.translatable("screen.command-gui.category_right_click_edit").getString();
+               catBtn.setTooltip(Tooltip.create(Component.literal(tip)));
+            }
+
+            this.allCategoryButtons.add(catBtn);
+         }
+
+         this.addCategoryButton = Button.builder(Component.literal("+"), btn -> this.openAddCategoryScreen()).bounds(x, 0, columnWidth, this.tunedCategoryTabHeight()).build();
+         this.addCategoryButton.setTooltip(Tooltip.create(Component.translatable("screen.command-gui.add_category")));
+      }
+   }
+
+   private static String truncate(String text, int maxWidth, Font font) {
+      if (font.width(text) <= maxWidth) {
+         return text;
+      }
+      return font.plainSubstrByWidth(text, maxWidth) + "...";
+   }
+
+   @Override
+   protected void rebuildVisibleCategoryButtons() {
+      super.rebuildVisibleCategoryButtons();
+      if (this.area != null) {
+         if (this.addCategoryButton != null) {
+            this.addCategoryButton.setX(this.categoryColumnX());
+            this.addCategoryButton.setY(this.area.bottom() - this.categoryBottomReserve());
+            this.addCategoryButton.setWidth(this.categoryColumnWidth());
+         }
+      }
+   }
+
+   @Override
+   public List<Button> getCategoryButtons() {
+      List<Button> all = new ArrayList<>(this.categoryButtons);
+      if (this.addCategoryButton != null) {
+         all.add(this.addCategoryButton);
+      }
+
+      return all;
+   }
+
+   @Override
+   protected void reRegisterCategoryButtons() {
+      super.reRegisterCategoryButtons();
+      if (this.parent instanceof CommandGUIScreen screen && this.addCategoryButton != null) {
+         screen.addTabButton(this.addCategoryButton);
+      }
+   }
+
+   @Override
+   protected Button buildCommandButton(int index, int x, int y, int width, int height) {
+      return null;
+   }
+
+   @Override
+   protected void rebuildButtons() {
+      CommandGUIScreen parentScreen = (CommandGUIScreen)this.parent;
+
+      for (Button button : this.commandButtons) {
+         parentScreen.removeTabButton(button);
+      }
+
+      for (Button button : this.extraButtons) {
+         parentScreen.removeTabButton(button);
+      }
+
+      this.extraButtons.clear();
+      this.commandButtons.clear();
+      if (this.area != null) {
+         int left = this.getCommandAreaLeft();
+         int right = this.area.right();
+         int contentHeight = Math.max(1, this.area.height());
+         int rowStep = this.scaledRowHeight();
+         int visibleRows = Math.max(1, contentHeight / rowStep);
+         int cols = this.columns();
+         int totalRows = (this.filteredCommands.size() + cols - 1) / cols;
+         int start = Math.min(this.scrollOffset, Math.max(0, totalRows - visibleRows));
+         this.scrollOffset = start;
+         int columnGap = Math.max(this.minColumnGap(), 8 * this.buttonScalePercent() / 100);
+         int groupWidth = (right - left - columnGap * (cols - 1)) / cols;
+
+         for (int i = 0; i < visibleRows; i++) {
+            for (int c = 0; c < cols; c++) {
+               int index = (start + i) * cols + c;
+               if (index >= this.filteredCommands.size()) {
+                  break;
+               }
+
+               int y = this.area.top() + i * rowStep;
+               int groupLeft = left + c * (groupWidth + columnGap);
+               this.buildRow(index, groupLeft, groupLeft + groupWidth, y, rowStep);
+            }
+         }
+      }
+   }
+
+   private int scaledRowHeight() {
+      return this.tunedItemHeight();
+   }
+
+   private void buildRow(int index, int left, int right, int y, int rowHeight) {
+      CustomCommandTab.FilteredCommand cmd = this.filteredCommands.get(index);
+      String cmdName = cmd.name();
+      CommandConfig.CommandEntry cmdEntry = cmd.entry();
+      int scale = this.buttonScalePercent();
+      int h = Math.max(10, rowHeight - 2);
+      int commandWidth;
+      if (this.columns() > 1) {
+         commandWidth = Math.max(20, (right - left) * scale / 100 - 4);
+      } else {
+         commandWidth = this.getSwitchWidth();
+      }
+
+      List<String> commands = cmdEntry.getCommands();
+      String commandText = String.join("\n", commands);
+      String tooltipText = "§7" + commands.size() + " 步";
+      if (cmdEntry.description != null && !cmdEntry.description.isEmpty()) {
+         tooltipText = cmdEntry.description + "\n" + tooltipText + "\n" + commandText;
+      } else {
+         tooltipText = tooltipText + "\n" + commandText;
+      }
+
+      Font font = Minecraft.getInstance().font;
+      int textMaxW = commandWidth * 2 / 3;
+      String label = commands.size() > 1 ? cmdName + " (" + commands.size() + ")" : cmdName;
+      boolean pending = CommandConfig.isPending(cmdName) && !CommandConfig.isPendingRemoval(cmdName);
+      if (pending) {
+         label = label + "（未保存）";
+      }
+
+      boolean truncated = font.width(label) > textMaxW;
+      String name = font.plainSubstrByWidth(label, textMaxW);
+      if (truncated) {
+         name = name + "...";
+      }
+
+      if (truncated) {
+         tooltipText = tooltipText + "\n名称:" + label;
+      }
+
+      Component labelComponent = pending ? Component.literal(name).withColor(-22016) : Component.literal(name);
+      String shortcutLine = "";
+      if (cmdEntry.shortcut != null && !cmdEntry.shortcut.isBlank()) {
+         shortcutLine = "\n" + Component.translatable("screen.command-gui.shortcut").getString() + ": " + CommandShortcut.display(cmdEntry.shortcut);
+      }
+
+      CustomCommandTab.CommandRowButton cmdBtn = new CustomCommandTab.CommandRowButton(
+         left, y, commandWidth, h, labelComponent, b -> this.handleCommand(cmdEntry), () -> this.editCommand(cmdName, cmdEntry)
+      );
+      cmdBtn.setTooltip(
+         Tooltip.create(
+            Component.literal(tooltipText + shortcutLine + "\n" + Component.translatable("screen.command-gui.action.left_execute_right_edit").getString())
+         )
+      );
+      this.commandButtons.add(cmdBtn);
+   }
+
+   @Override
+   public int getMaxScroll() {
+      if (this.area != null && !this.filteredCommands.isEmpty()) {
+         int visibleRows = Math.max(1, Math.max(1, this.area.height()) / this.scaledRowHeight());
+         int totalRows = (this.filteredCommands.size() + this.columns() - 1) / this.columns();
+         return Math.max(0, totalRows - visibleRows);
+      } else {
+         return 0;
+      }
+   }
+
+   @Override
+   public int getVisibleRowCount() {
+      if (this.area == null) {
+         return 1;
+      }
+      return Math.max(1, Math.max(1, this.area.height()) / this.scaledRowHeight());
+   }
+
+   @Override
+   public int getTotalRowCount() {
+      return Math.max(1, (this.filteredCommands.size() + this.columns() - 1) / this.columns());
+   }
+
+   @Override
+   public List<Button> getButtons() {
+      List<Button> all = new ArrayList<>(this.commandButtons);
+      all.addAll(this.extraButtons);
+      return all;
+   }
+
+   private void onCategoryButtonClick(String categoryId) {
+      if (Objects.equals(this.selectedCategoryId, categoryId)) {
+         this.notifyCategoryChange(() -> {
+            this.selectedCategoryId = null;
+            this.scrollOffset = 0;
+            this.buildFilteredCommands();
+            this.buildAllCategoryButtons();
+            this.rebuildVisibleCategoryButtons();
+            this.rebuildButtons();
+            this.rememberViewState();
+         });
+      } else {
+         this.notifyCategoryChange(() -> {
+            this.selectedCategoryId = categoryId;
+            this.scrollOffset = 0;
+            this.buildFilteredCommands();
+            this.buildAllCategoryButtons();
+            this.rebuildVisibleCategoryButtons();
+            this.rebuildButtons();
+            this.rememberViewState();
+         });
+      }
+   }
+
+   private void rememberViewState() {
+      if (SettingsConfig.getBoolean("quick_command_remember_view")) {
+         rememberedCategoryId = this.selectedCategoryId;
+         rememberedScrollOffset = this.scrollOffset;
+         rememberedCategoryScrollOffset = this.categoryScrollOffset;
+      }
+   }
+
+   @Override
+   public void scroll(double delta) {
+      super.scroll(delta);
+      this.rememberViewState();
+   }
+
+   @Override
+   public void scrollCategory(double delta) {
+      super.scrollCategory(delta);
+      this.rememberViewState();
+   }
+
+   @Override
+   public void setScrollOffset(int offset) {
+      super.setScrollOffset(offset);
+      this.rememberViewState();
+   }
+
+   @Override
+   public void setCategoryScrollOffset(int offset) {
+      super.setCategoryScrollOffset(offset);
+      this.rememberViewState();
+   }
+
+   private void openAddCategoryScreen() {
+      Minecraft.getInstance().gui.setScreen(new AddCategoryScreen((CommandGUIScreen)this.parent));
+   }
+
+   private void openEditCategoryScreen(String categoryId) {
+      CommandConfig.Category category = CommandConfig.getCategory(categoryId);
+      if (category != null && !categoryId.equals("default")) {
+         Minecraft.getInstance().gui.setScreen(new EditCategoryScreen((CommandGUIScreen)this.parent, category));
+      }
+   }
+
+   private void editCommand(String name, CommandConfig.CommandEntry entry) {
+      Minecraft mc = Minecraft.getInstance();
+      CommandGUIScreen parentScreen = (CommandGUIScreen)this.parent;
       String categoryId = CommandConfig.findCommandCategory(name);
-      mc.gui.setScreen(new AddFakePlayerCommandScreen(parentScreen, categoryId, name, entry));
-    } else {
-      mc.gui.setScreen(new EditCommandScreen(parentScreen, name, entry));
-    }
-  }
+      mc.gui.setScreen(new AddCommandScreen(parentScreen, categoryId, name, entry));
+   }
 
-  private void deleteCommand(String name) {
-    CommandConfig.removeCommand(name);
-    notifyCategoryChange(() -> {
-      buildFilteredCommands();
-      buildAllCategoryButtons();
-      rebuildVisibleCategoryButtons();
-      rebuildButtons();
-    });
-  }
+   private void handleCommand(CommandConfig.CommandEntry entry) {
+      List<String> commands = entry.getCommands();
+      if (commands.size() > 1) {
+         ChainedCommandExecutor.executeMulti(this.parent, commands, entry.commandDelay);
+      } else if (!commands.isEmpty()) {
+         ChainedCommandExecutor.execute(this.parent, commands.get(0));
+      }
+   }
 
-  /**
-   * Deletes a user category. Only allowed when the category is empty; the button is disabled when
-   * the category still has commands, so this guard is a safety net.
-   */
-  private void deleteCategory(String categoryId) {
-    CommandConfig.Category cat = CommandConfig.getCategory(categoryId);
-    if (cat == null || !cat.commands.isEmpty()) {
-      return; // should not happen since the button is disabled, but guard anyway
-    }
-    if (categoryId.equals(selectedCategoryId)) {
-      selectedCategoryId = null;
-    }
-    CommandConfig.removeCategory(categoryId);
-    notifyCategoryChange(() -> {
-      buildFilteredCommands();
-      buildAllCategoryButtons();
-      rebuildVisibleCategoryButtons();
-      rebuildButtons();
-    });
-  }
+   public void refresh() {
+      this.scrollOffset = 0;
+      this.buildFilteredCommands();
+      this.buildAllCategoryButtons();
+      this.rebuildVisibleCategoryButtons();
+      this.rebuildButtons();
+   }
 
-  private void moveCommand(String name) {
-		if (CommandConfig.getCategories().size() <= 1) {
-			return;
-		}
-    Minecraft mc = Minecraft.getInstance();
-    mc.gui.setScreen(new MoveCategoryScreen((CommandGUIScreen) parent, name));
-  }
+   public boolean isEmpty() {
+      return this.filteredCommands.isEmpty() && CommandConfig.getCategories().isEmpty();
+   }
 
-  private boolean isFakePlayerCommand(CommandConfig.CommandEntry entry) {
-    return CommandHelper.isFakePlayerCommand(entry);
-  }
+   public String getSelectedCategoryId() {
+      return this.selectedCategoryId;
+   }
 
-  @Override
-  public List<Button> getButtons() {
-    List<Button> all = new ArrayList<>(commandButtons);
-    all.addAll(extraButtons);
-    return all;
-  }
+   private final class CommandRowButton extends Button {
+      private final Runnable onRightClick;
 
-  private void onCategoryButtonClick(String categoryId) {
-    if (Objects.equals(selectedCategoryId, categoryId)) {
-      // Clicking the active category again shows everything
-      notifyCategoryChange(() -> {
-        selectedCategoryId = null;
-        scrollOffset = 0;
-        buildFilteredCommands();
-        buildAllCategoryButtons();
-        rebuildVisibleCategoryButtons();
-        rebuildButtons();
-      });
-      return;
-    }
-    notifyCategoryChange(() -> {
-      selectedCategoryId = categoryId;
-      scrollOffset = 0;
-      buildFilteredCommands();
-      buildAllCategoryButtons();
-      rebuildVisibleCategoryButtons();
-      rebuildButtons();
-    });
-  }
+      CommandRowButton(int x, int y, int width, int height, Component message, OnPress onPress, Runnable onRightClick) {
+         super(x, y, width, height, message, onPress, DEFAULT_NARRATION);
+         this.onRightClick = onRightClick;
+      }
 
-  private void openAddCategoryScreen() {
-    net.minecraft.client.Minecraft.getInstance()
-        .gui.setScreen(new AddCategoryScreen((CommandGUIScreen) parent));
-  }
+      public boolean mouseClicked(MouseButtonEvent mouseEvent, boolean focused) {
+         if (mouseEvent.button() == 1 && this.active && this.visible && this.isMouseOver(mouseEvent.x(), mouseEvent.y())) {
+            this.onRightClick.run();
+            return true;
+         } else {
+            return super.mouseClicked(mouseEvent, focused);
+         }
+      }
 
-  /**
-   * Executes a command or command sequence: multiple commands are sent in order via
-   * {@link ChainedCommandExecutor#executeMulti}, while a single command is handled by
-   * {@link ChainedCommandExecutor#execute} (including placeholder resolution).
-   */
-  private void handleCommand(CommandConfig.CommandEntry entry) {
-    java.util.List<String> commands = entry.getCommands();
-    if (commands.size() > 1) {
-      ChainedCommandExecutor.executeMulti(parent, commands);
-    } else if (!commands.isEmpty()) {
-      ChainedCommandExecutor.execute(parent, commands.get(0));
-    }
-  }
+      protected void extractContents(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY, float partialTick) {
+         this.extractDefaultSprite(guiGraphics);
+         Font font = Minecraft.getInstance().font;
+         int color = this.active ? -1 : -6250336;
+         guiGraphics.centeredText(font, this.getMessage(), this.getX() + this.getWidth() / 2, this.getY() + (this.getHeight() - 8) / 2, color);
+      }
+   }
 
-  public void refresh() {
-    this.scrollOffset = 0;
-    buildFilteredCommands();
-    buildAllCategoryButtons();
-    rebuildVisibleCategoryButtons();
-    rebuildButtons();
-  }
-
-  public boolean isEmpty() {
-    return filteredCommands.isEmpty() && CommandConfig.getCategories().isEmpty();
-  }
-
-  public String getSelectedCategoryId() {
-    return selectedCategoryId;
-  }
-
-  private record FilteredCommand(String name, String categoryId, CommandConfig.CommandEntry entry) {
-
-  }
+   private static record FilteredCommand(String name, String categoryId, CommandConfig.CommandEntry entry) {
+   }
 }

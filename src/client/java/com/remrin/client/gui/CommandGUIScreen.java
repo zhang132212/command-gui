@@ -1,942 +1,1137 @@
 package com.remrin.client.gui;
 
+import com.mojang.blaze3d.platform.Window;
 import com.remrin.client.config.PresetConfig;
 import com.remrin.client.config.SettingsConfig;
+import com.remrin.client.machine.MachineDebug;
 import com.remrin.client.machine.MachineNetworkManager;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.Checkbox;
 import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.components.tabs.MenuTabBar;
 import net.minecraft.client.gui.components.tabs.Tab;
 import net.minecraft.client.gui.components.tabs.TabManager;
 import net.minecraft.client.gui.components.tabs.TabNavigationBar;
+import net.minecraft.client.gui.components.tabs.MenuTabBar.Builder;
 import net.minecraft.client.gui.navigation.ScreenRectangle;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.entity.player.Abilities;
+import org.lwjgl.glfw.GLFW;
 
-/**
- * The mod's main screen, containing multiple tabs (custom commands, fake player management, preset
- * commands).
- * <p>
- * Key responsibilities:
- * <ul>
- *   <li>Managing the {@link TabNavigationBar} and the lifecycle of each tab</li>
- *   <li>Registering/unregistering each tab's buttons in the parent screen widget list</li>
- *   <li>Rendering the scrollbar and the bottom separator line</li>
- *   <li>Maintaining the search filter state and the "keep open after execute" checkbox state</li>
- * </ul>
- */
 public class CommandGUIScreen extends Screen {
+   private static final int FOOTER_HEIGHT = 44;
+   private static final int PADDING = 10;
+   private static final int SCROLLBAR_WIDTH = 12;
+   private static final int RIGHT_MARGIN = 16;
+   private static final int REFRESH_INTERVAL = 10;
+   private static int lastSelectedTabIndex = 0;
+   private static boolean keepOpenAfterExecute = false;
+   private static CommandGUIScreen currentInstance = null;
+   private TabManager tabManager;
+   private TabNavigationBar tabNavigationBar;
+   private CustomCommandTab customTab;
+   private FakePlayerTab fakePlayerTab;
+   private MachineSwitchTab machineTab;
+   private List<PresetCommandTab> presetTabs = new ArrayList<>();
+   private EditBox searchField;
+   private Button addButton;
+   private Button addMachineButton;
+   private Button addFakePlayerButton;
+   private Button machineSaveButton;
+   private Button fpRemoveSelectedButton;
+   private Button fpTimedAddButton;
+   private Button fpRemoveAllButton;
+   private Button fpBatchSpawnButton;
+   private MarkCheckbox filterOnCheckbox;
+   private MarkCheckbox filterOffCheckbox;
+   private Button closeButton;
+   private Checkbox keepOpenCheckbox;
+   private SettingsButton settingsButton;
+   private String searchText = "";
+   private Tab lastTab = null;
+   private ScreenRectangle tabArea;
+   private ScreenRectangle fakePlayerArea;
+   private int fakePlayerRefreshTicks = 0;
+   private int lastMachineSyncVersion = -1;
+   private int lastMachineStructureVersion = -1;
+   private int lastFakeStatesVersion = -1;
+   private final Set<Button> registeredTabButtons = new HashSet<>();
+   private ScrollbarHandle mainScrollbar = null;
+   private int mainScrollbarMaxScroll = 0;
+   private int mainScrollbarViewport = 1;
+   private int mainScrollbarContent = 1;
+   private boolean draggingMainScrollbar = false;
+   private double mainScrollbarGrabOffset = 0.0;
+   private boolean draggingCategoryScrollbar = false;
+   private double categoryScrollbarGrabOffset = 0.0;
+   private boolean draggingFakePlayerScrollbar = false;
+   private double fakePlayerScrollbarGrabOffset = 0.0;
+   private boolean draggingFakePlayerPanelScrollbar = false;
+   private double fakePlayerPanelScrollbarGrabOffset = 0.0;
 
-  /**
-   * Height of the bottom toolbar (pixels). Kept generous so the toolbar buttons and their label
-   * never touch the window's bottom edge (vertical centering leaves padding both above and below).
-   */
-  private static final int FOOTER_HEIGHT = 44;
-  private static final int PADDING = 10;
-  private static final int SCROLLBAR_WIDTH = 12;
-  /**
-   * Reserved right margin between the scrollbar and the window edge. Without it, the scrollbar and
-   * the rightmost widgets sit flush against the window and get clipped when the window is narrow.
-   */
-  private static final int RIGHT_MARGIN = 16;
-  /**
-   * Tick interval for auto-refreshing the fake player list
-   */
-  private static final int REFRESH_INTERVAL = 10;
-  /**
-   * Remembers the last selected tab index across screen rebuilds
-   */
-  private static int lastSelectedTabIndex = 0;
-  /**
-   * Persistent "keep GUI open after execute" state, preserved across screen instances
-   */
-  private static boolean keepOpenAfterExecute = false;
-  /**
-   * Current active instance, used by the static {@link #shouldKeepOpen()} method to query the
-   * checkbox state in real time
-   */
-  private static CommandGUIScreen currentInstance = null;
-  private TabManager tabManager;
-  private TabNavigationBar tabNavigationBar;
-  private CustomCommandTab customTab;
-  private FakePlayerTab fakePlayerTab;
-  private MachineSwitchTab machineTab;
-  private List<PresetCommandTab> presetTabs = new ArrayList<>();
-  private EditBox searchField;
-  private Button addButton;
-  private Button addFakePlayerButton;
-  private Button closeButton;
-  private Checkbox keepOpenCheckbox;
-  private SettingsButton settingsButton;
-  private String searchText = "";
-  private Tab lastTab = null;
-  private ScreenRectangle tabArea;
-  private ScreenRectangle fakePlayerArea;
-  /**
-   * Tick counter for periodic fake player tab refresh (refreshes every {@link #REFRESH_INTERVAL}
-   * ticks)
-   */
-  private int fakePlayerRefreshTicks = 0;
-  /**
-   * Last seen machine sync version, used to refresh the machine tab when the server pushes a new
-   * machine list
-   */
-  private int lastMachineSyncVersion = -1;
-  private int lastMachineStructureVersion = -1;
+   public CommandGUIScreen() {
+      super(Component.translatable("screen.command-gui.title"));
+   }
 
-  public CommandGUIScreen() {
-    super(Component.translatable("screen.command-gui.title"));
-  }
-
-  public static boolean shouldKeepOpen() {
-    if (currentInstance != null && currentInstance.keepOpenCheckbox != null) {
-      return currentInstance.keepOpenCheckbox.selected();
-    }
-    return keepOpenAfterExecute;
-  }
-
-  /**
-   * Checks whether the current player has command permissions: always allowed in singleplayer,
-   * requires creative-mode permissions on multiplayer. Used to decide whether to show the vanilla
-   * commands tab.
-   */
-  private boolean hasCommandPermission() {
-		if (this.minecraft == null || this.minecraft.player == null) {
-			return false;
-		}
-    if (this.minecraft.hasSingleplayerServer()) {
-      return true;
-    }
-    var abilities = this.minecraft.player.getAbilities();
-    return abilities.instabuild;
-  }
-
-  @Override
-  protected void init() {
-    super.init();
-
-    currentInstance = this;
-
-    this.tabManager = new TabManager(w -> {
-    }, w -> {
-    });
-
-    this.customTab = new CustomCommandTab(this);
-    this.customTab.setOnCategoryChanged(
-        () -> removeTabButtons(customTab),
-        () -> addTabButtons(customTab)
-    );
-
-    this.fakePlayerTab = new FakePlayerTab(this);
-    this.fakePlayerTab.setOnRebuild(
-        () -> removeTabButtons(fakePlayerTab),
-        () -> addTabButtons(fakePlayerTab)
-    );
-
-    // Machine switch tab: only present when the connected server supports machine switches
-    this.machineTab = null;
-    if (MachineNetworkManager.isServerSupported()) {
-      this.machineTab = new MachineSwitchTab(this);
-      this.machineTab.setOnCategoryChanged(
-          () -> removeTabButtons(machineTab),
-          () -> addTabButtons(machineTab)
-      );
-    }
-
-    presetTabs.clear();
-    boolean hasPermission = hasCommandPermission();
-    for (PresetConfig.Preset preset : PresetConfig.getPresets()) {
-      if ("vanilla".equals(preset.id)) {
-        if (!hasPermission || !SettingsConfig.getBoolean("show_vanilla_commands")) {
-          continue;
-        }
+   public static boolean shouldKeepOpen() {
+      if (currentInstance != null
+         && currentInstance.customTab != null
+         && currentInstance.tabManager != null
+         && currentInstance.tabManager.getCurrentTab() == currentInstance.customTab) {
+         return currentInstance.customTab.isPanelKeepOpen();
+      } else {
+         if (currentInstance != null && currentInstance.keepOpenCheckbox != null) {
+            return currentInstance.keepOpenCheckbox.selected();
+         }
+         return keepOpenAfterExecute;
       }
-      if ("carpet".equals(preset.id)) {
-        if (!SettingsConfig.getBoolean("show_carpet_commands")) {
-          continue;
-        }
+   }
+
+
+   private int footerHeight() {
+      return GuiTuning.getInt("CommandGUIScreen.FOOTER_HEIGHT", FOOTER_HEIGHT);
+   }
+
+   private int footerControlTopOffset() {
+      return GuiTuning.getInt("CommandGUIScreen.FOOTER_CONTROL_TOP_OFFSET", 12);
+   }
+
+   private int padding() {
+      return GuiTuning.getInt("CommandGUIScreen.PADDING", PADDING);
+   }
+
+   private int scrollbarWidth() {
+      return GuiTuning.getInt("CommandGUIScreen.SCROLLBAR_WIDTH", SCROLLBAR_WIDTH);
+   }
+
+   private int rightMargin() {
+      return GuiTuning.getInt("CommandGUIScreen.RIGHT_MARGIN", RIGHT_MARGIN);
+   }
+
+   private int searchWidth() {
+      return GuiTuning.getInt("CommandGUIScreen.SEARCH_WIDTH", 90);
+   }
+
+   private int closeButtonWidth() {
+      return GuiTuning.getInt("CommandGUIScreen.CLOSE_BUTTON_WIDTH", 60);
+   }
+
+   private int batchButtonWidth() {
+      return GuiTuning.getInt("CommandGUIScreen.BATCH_BUTTON_WIDTH", 88);
+   }
+
+   private int tabAreaTopGap() {
+      return GuiTuning.getInt("CommandGUIScreen.TAB_AREA_TOP_GAP", 4);
+   }
+
+   private int tabAreaBottomGap() {
+      return GuiTuning.getInt("CommandGUIScreen.TAB_AREA_BOTTOM_GAP", 2);
+   }
+
+   boolean hasCommandPermission() {
+      if (this.minecraft == null || this.minecraft.player == null) {
+         return false;
+      } else if (this.minecraft.hasSingleplayerServer()) {
+         return true;
+      } else {
+         Abilities abilities = this.minecraft.player.getAbilities();
+         return abilities.instabuild;
       }
-      PresetCommandTab tab = new PresetCommandTab(this, preset.id, preset.nameKey);
-      tab.setOnCategoryChanged(
-          () -> removeTabButtons(tab),
-          () -> addTabButtons(tab)
-      );
-      presetTabs.add(tab);
-    }
+   }
 
-    MenuTabBar.Builder builder = MenuTabBar.builder(this.tabManager, this.width);
-    builder.addTabs(this.customTab);
-    if (SettingsConfig.getBoolean("show_fakeplayer_tab")) {
-      builder.addTabs(this.fakePlayerTab);
-    }
-    if (this.machineTab != null) {
-      builder.addTabs(this.machineTab);
-    }
-    for (PresetCommandTab tab : presetTabs) {
-      builder.addTabs(tab);
-    }
+   boolean isOperator() {
+      return this.minecraft != null && this.minecraft.player != null && Commands.LEVEL_MODERATORS.check(this.minecraft.player.permissions());
+   }
 
-    this.tabNavigationBar = builder.build();
-    this.addRenderableWidget(this.tabNavigationBar);
-    this.tabNavigationBar.arrangeElements(this.width);
+   protected void init() {
+      super.init();
+      GuiTuning.load();
+      currentInstance = this;
+      this.tabManager = new TabManager(w -> {
+      }, w -> {
+      });
+      this.customTab = new CustomCommandTab(this);
+      this.customTab.setOnCategoryChanged(() -> this.removeTabButtons(this.customTab), () -> this.addTabButtons(this.customTab));
+      this.fakePlayerTab = new FakePlayerTab(this);
+      this.fakePlayerTab.setOnRebuild(() -> this.removeTabButtons(this.fakePlayerTab), () -> this.addTabButtons(this.fakePlayerTab));
+      this.machineTab = null;
+      if (MachineNetworkManager.isServerSupported()) {
+         this.machineTab = new MachineSwitchTab(this);
+         this.machineTab.setOnCategoryChanged(() -> this.removeTabButtons(this.machineTab), () -> this.addTabButtons(this.machineTab));
+      }
 
-    int tabBarBottom = this.tabNavigationBar.getRectangle().bottom();
+      this.presetTabs.clear();
+      boolean hasPermission = this.hasCommandPermission();
 
-    // Vertically center the 20px toolbar buttons inside the 44px footer (12px above and below)
-    int closeBtnY = this.height - FOOTER_HEIGHT + 12;
+      for (PresetConfig.Preset preset : PresetConfig.getPresets()) {
+         if ((!"vanilla".equals(preset.id) || hasPermission && SettingsConfig.getBoolean("show_vanilla_commands"))
+            && (!"carpet".equals(preset.id) || SettingsConfig.getBoolean("show_carpet_commands"))) {
+            PresetCommandTab tab = new PresetCommandTab(this, preset.id, preset.nameKey);
+            tab.setOnCategoryChanged(() -> this.removeTabButtons(tab), () -> this.addTabButtons(tab));
+            this.presetTabs.add(tab);
+         }
+      }
 
-    // Keep-open checkbox: far left
-    keepOpenCheckbox = Checkbox.builder(
-        Component.translatable("screen.command-gui.keep_open"),
-        this.font
-    ).pos(PADDING, closeBtnY).selected(keepOpenAfterExecute).build();
-    this.addRenderableWidget(keepOpenCheckbox);
+      Builder builder = MenuTabBar.builder(this.tabManager, this.width);
+      builder.addTabs(new Tab[]{this.customTab});
+      if (SettingsConfig.getBoolean("show_fakeplayer_tab")) {
+         builder.addTabs(new Tab[]{this.fakePlayerTab});
+      }
 
-    // Search bar + add buttons: centered
-    int searchWidth = 90;
-    int searchGroupWidth = searchWidth + 2 + 20 + 2 + 20; // 134
-    int searchGroupX = this.width / 2 - searchGroupWidth / 2;
-    searchField = new EditBox(this.font, searchGroupX, closeBtnY, searchWidth, 20,
-        Component.translatable("screen.command-gui.search_hint"));
-    searchField.setHint(Component.translatable("screen.command-gui.search_hint"));
-    searchField.setMaxLength(50);
-    searchField.setValue(searchText);
-    searchField.setResponder(this::onSearchChanged);
-    this.addRenderableWidget(searchField);
+      if (this.machineTab != null) {
+         builder.addTabs(new Tab[]{this.machineTab});
+      }
 
-    addButton = Button.builder(
-        Component.translatable("screen.command-gui.add"),
-        button -> {
-          Tab current = tabManager.getCurrentTab();
-          if (current == machineTab) {
+      for (PresetCommandTab tab : this.presetTabs) {
+         builder.addTabs(new Tab[]{tab});
+      }
+
+      this.tabNavigationBar = builder.build();
+      this.addRenderableWidget(this.tabNavigationBar);
+      this.tabNavigationBar.arrangeElements(this.width);
+      int tabBarBottom = this.tabNavigationBar.getRectangle().bottom();
+      int closeBtnY = this.height - this.footerHeight() + this.footerControlTopOffset();
+      this.keepOpenCheckbox = Checkbox.builder(Component.translatable("screen.command-gui.keep_open"), this.font)
+         .pos(this.padding(), closeBtnY)
+         .selected(keepOpenAfterExecute)
+         .build();
+      this.addRenderableWidget(this.keepOpenCheckbox);
+      int searchWidth = this.searchWidth();
+      int searchGroupWidth = searchWidth + 2 + 20 + 2 + 20;
+      int searchGroupX = this.width / 2 - searchGroupWidth / 2;
+      this.searchField = new EditBox(this.font, searchGroupX, closeBtnY, searchWidth, 20, Component.translatable("screen.command-gui.search_hint"));
+      this.searchField.setHint(Component.translatable("screen.command-gui.search_hint"));
+      this.searchField.setMaxLength(50);
+      this.searchField.setValue(this.searchText);
+      this.searchField.setResponder(this::onSearchChanged);
+      this.addRenderableWidget(this.searchField);
+      this.addButton = Button.builder(Component.translatable("screen.command-gui.add_command"), button -> {
+         Tab current = this.tabManager.getCurrentTab();
+         if (current == this.machineTab) {
             this.minecraft.gui.setScreen(new MachineEditorScreen(this, null));
-          } else {
-            this.minecraft.gui.setScreen(
-                new AddCommandScreen(this, customTab.getSelectedCategoryId()));
-          }
-        }
-    ).bounds(searchGroupX + searchWidth + 2, closeBtnY, 20, 20).build();
-    this.addRenderableWidget(addButton);
+         } else {
+            this.minecraft.gui.setScreen(new AddCommandScreen(this, this.customTab.getSelectedCategoryId()));
+         }
+      }).bounds(searchGroupX + searchWidth + 2, closeBtnY, 20, 20).build();
+      this.addRenderableWidget(this.addButton);
+      this.addMachineButton = Button.builder(
+            Component.translatable("screen.command-gui.machine.add_machine"),
+            button -> this.minecraft
+                  .gui
+                  .setScreen(new MachineEditorScreen(this, null, this.machineTab != null ? this.machineTab.getSelectedCategoryIdForNew() : null))
+         )
+         .bounds(searchGroupX + searchWidth + 2, closeBtnY, 48, 20)
+         .build();
+      this.addMachineButton.visible = false;
+      this.addMachineButton.active = false;
+      this.addRenderableWidget(this.addMachineButton);
+      this.machineSaveButton = Button.builder(Component.translatable("screen.command-gui.machine.save_pending"), b -> {
+         MachineNetworkManager.uploadPendingMachines();
+         if (this.machineTab != null) {
+            this.removeTabButtons(this.machineTab);
+            this.machineTab.refresh();
+            this.addTabButtons(this.machineTab);
+         }
 
-    addFakePlayerButton = Button.builder(
-        Component.literal("\uD83E\uDDD1"),
-        button -> this.minecraft.gui.setScreen(
-            new AddFakePlayerCommandScreen(this, customTab.getSelectedCategoryId()))
-    ).bounds(searchGroupX + searchWidth + 24, closeBtnY, 20, 20).build();
-    addFakePlayerButton.setTooltip(net.minecraft.client.gui.components.Tooltip.create(
-        Component.translatable("screen.command-gui.add_fakeplayer_cmd")));
-    this.addRenderableWidget(addFakePlayerButton);
+         this.updateMachineSaveVisibility();
+      }).bounds(0, closeBtnY, 72, 20).build();
+      this.machineSaveButton.visible = false;
+      this.machineSaveButton.active = false;
+      this.addRenderableWidget(this.machineSaveButton);
+      this.filterOnCheckbox = new MarkCheckbox(
+         this.padding(), closeBtnY - 8, 112, 14, Component.translatable("screen.command-gui.machine.filter_on"), false, b -> this.toggleMachineFilter(true)
+      );
+      this.filterOnCheckbox.visible = false;
+      this.filterOnCheckbox.active = false;
+      this.addRenderableWidget(this.filterOnCheckbox);
+      this.filterOffCheckbox = new MarkCheckbox(
+         this.padding(), closeBtnY + 6, 112, 14, Component.translatable("screen.command-gui.machine.filter_off"), false, b -> this.toggleMachineFilter(false)
+      );
+      this.filterOffCheckbox.visible = false;
+      this.filterOffCheckbox.active = false;
+      this.addRenderableWidget(this.filterOffCheckbox);
+      this.addFakePlayerButton = Button.builder(
+            Component.translatable("screen.command-gui.add_fakeplayer"),
+            button -> this.minecraft.gui.setScreen(new AddCommandScreen(this, this.customTab.getSelectedCategoryId(), true))
+         )
+         .bounds(this.padding(), closeBtnY, 88, 20)
+         .build();
+      this.addFakePlayerButton.setTooltip(Tooltip.create(Component.translatable("screen.command-gui.add_fakeplayer_cmd")));
+      this.addRenderableWidget(this.addFakePlayerButton);
+      this.fpRemoveSelectedButton = Button.builder(
+            Component.translatable("screen.command-gui.fakeplayer.remove_selected", new Object[]{0}), b -> this.fakePlayerTab.confirmRemoveSelected()
+         )
+         .bounds(this.padding(), closeBtnY, 76, 20)
+         .build();
+      this.fpRemoveSelectedButton.setTooltip(Tooltip.create(Component.translatable("screen.command-gui.fakeplayer.remove_selected_hint")));
+      this.fpRemoveSelectedButton.visible = false;
+      this.fpRemoveSelectedButton.active = false;
+      this.addRenderableWidget(this.fpRemoveSelectedButton);
+      this.fpTimedAddButton = Button.builder(
+            Component.translatable("screen.command-gui.fakeplayer.timed.spawn.short"), b -> this.fakePlayerTab.openTimedSpawnScreen()
+         )
+         .bounds(90, closeBtnY, 76, 20)
+         .build();
+      this.fpTimedAddButton.visible = false;
+      this.fpTimedAddButton.active = false;
+      this.addRenderableWidget(this.fpTimedAddButton);
+      this.fpRemoveAllButton = Button.builder(Component.translatable("screen.command-gui.fakeplayer.killall"), b -> this.fakePlayerTab.confirmRemoveAll())
+         .bounds(170, closeBtnY, 76, 20)
+         .build();
+      this.fpRemoveAllButton.setTooltip(Tooltip.create(Component.translatable("screen.command-gui.fakeplayer.killall.confirm_hint")));
+      this.fpRemoveAllButton.visible = false;
+      this.fpRemoveAllButton.active = false;
+      this.addRenderableWidget(this.fpRemoveAllButton);
+      this.fpBatchSpawnButton = Button.builder(
+            Component.translatable("screen.command-gui.fakeplayer.batch.title"), b -> this.fakePlayerTab.openBatchSpawnScreen()
+         )
+         .bounds(this.width - this.padding() - this.closeButtonWidth() - 4 - this.batchButtonWidth(), closeBtnY, this.batchButtonWidth(), 20)
+         .build();
+      this.fpBatchSpawnButton.visible = false;
+      this.fpBatchSpawnButton.active = false;
+      this.addRenderableWidget(this.fpBatchSpawnButton);
+      this.closeButton = Button.builder(Component.translatable("screen.command-gui.close"), button -> this.onClose())
+         .bounds(this.width - this.padding() - this.closeButtonWidth(), closeBtnY, this.closeButtonWidth(), 20)
+         .build();
+      this.addRenderableWidget(this.closeButton);
+      this.settingsButton = new SettingsButton(4, 2, 20, 20, btn -> this.minecraft.gui.setScreen(new SettingsScreen(this)));
+      this.settingsButton.visible = true;
+      this.settingsButton.active = true;
+      this.addRenderableWidget(this.settingsButton);
+      int tabCount = this.tabNavigationBar.getTabs().size();
+      int restoreIndex = Math.max(0, Math.min(lastSelectedTabIndex, tabCount - 1));
+      this.tabNavigationBar.selectTab(restoreIndex, false);
+      int listTop = tabBarBottom + this.tabAreaTopGap();
+      int tabAreaHeight = Math.max(20, this.height - this.footerHeight() - listTop - this.tabAreaBottomGap());
+      this.tabArea = new ScreenRectangle(this.padding(), listTop, this.width - this.padding() - this.rightMargin() - this.scrollbarWidth(), tabAreaHeight);
+      this.tabManager.setTabArea(this.tabArea);
+      this.customTab.doLayout(this.tabArea);
+      if (this.machineTab != null) {
+         this.machineTab.doLayout(this.tabArea);
+      }
 
-    // Close button: far right
-    closeButton = Button.builder(
-        Component.translatable("screen.command-gui.close"),
-        button -> this.onClose()
-    ).bounds(this.width - PADDING - 60, closeBtnY, 60, 20).build();
-    this.addRenderableWidget(closeButton);
+      int fpAreaHeight = Math.max(20, this.height - this.footerHeight() - (tabBarBottom + this.tabAreaTopGap()) - this.tabAreaBottomGap());
+      this.fakePlayerArea = new ScreenRectangle(this.padding(), tabBarBottom + this.tabAreaTopGap(), this.width - this.padding() - this.rightMargin() - this.scrollbarWidth(), fpAreaHeight);
+      this.fakePlayerTab.doLayout(this.fakePlayerArea);
 
-    // Settings button: hidden (functionality kept, entry hidden)
-    settingsButton = new SettingsButton(
-        this.width - PADDING - 20, closeBtnY,
-        20, 20,
-        btn -> this.minecraft.gui.setScreen(new SettingsScreen(this))
-    );
-    settingsButton.visible = false;
-    settingsButton.active = false;
-    this.addRenderableWidget(settingsButton);
+      for (PresetCommandTab tab : this.presetTabs) {
+         tab.doLayout(this.tabArea);
+      }
 
-    // Restore the last selected tab, clamped to the current tab count: the remembered index may
-    // exceed the tabs available right now (e.g. the machine tab only exists on a supported server,
-    // or preset tabs are disabled), which would crash TabNavigationBar.selectTab with an
-    // ArrayIndexOutOfBoundsException.
-    int tabCount = tabNavigationBar.getTabs().size();
-    int restoreIndex = Math.max(0, Math.min(lastSelectedTabIndex, tabCount - 1));
-    this.tabNavigationBar.selectTab(restoreIndex, false);
+      this.addTabButtons(this.tabManager.getCurrentTab());
+      this.updateTabDependentWidgets(this.tabManager.getCurrentTab());
+      this.lastTab = this.tabManager.getCurrentTab();
+   }
 
-    int listTop = tabBarBottom + 4;
-    // Tab area now extends to the footer (no separate search bar row)
-    int tabAreaHeight = Math.max(20, this.height - FOOTER_HEIGHT - listTop - 2);
+   public void removeTabButton(Button button) {
+      this.registeredTabButtons.remove(button);
+      this.removeWidget(button);
+   }
 
-    tabArea = new ScreenRectangle(
-        PADDING,
-        listTop,
-        this.width - PADDING - RIGHT_MARGIN - SCROLLBAR_WIDTH,
-        tabAreaHeight
-    );
-    this.tabManager.setTabArea(tabArea);
-    this.customTab.doLayout(tabArea);
-    if (this.machineTab != null) {
-      this.machineTab.doLayout(tabArea);
-    }
-    int fpAreaHeight = Math.max(20, this.height - (tabBarBottom + 4) - 4);
-    fakePlayerArea = new ScreenRectangle(
-        PADDING,
-        tabBarBottom + 4,
-        this.width - PADDING - RIGHT_MARGIN - SCROLLBAR_WIDTH,
-        fpAreaHeight
-    );
-    this.fakePlayerTab.doLayout(fakePlayerArea);
-    for (PresetCommandTab tab : presetTabs) {
-      tab.doLayout(tabArea);
-    }
+   public void addTabButton(Button button) {
+      if (this.registeredTabButtons.add(button)) {
+         this.addRenderableWidget(button);
+      }
+   }
 
-    addTabButtons(tabManager.getCurrentTab());
-    updateTabDependentWidgets(tabManager.getCurrentTab());
-    lastTab = tabManager.getCurrentTab();
-  }
+   private void addTabButtons(Tab tab) {
+      if (tab instanceof AbstractCommandTab ct) {
+         ct.getCategoryButtons().forEach(this::addTabButton);
+         ct.getButtons().forEach(this::addTabButton);
+      } else if (tab == this.fakePlayerTab) {
+         this.fakePlayerTab.getButtons().forEach(this::addTabButton);
+         this.fakePlayerTab.getIntervalFields().forEach(x$0 -> this.addRenderableWidget(x$0));
+      }
 
-  /**
-   * Tracks tab-owned buttons currently registered in this screen, so registration is idempotent
-   * and stale buttons can never linger after a tab rebuilds its lists.
-   */
-  private final java.util.Set<Button> registeredTabButtons = new java.util.HashSet<>();
+      MachineDebug.log("[Layout] addTabButtons " + tabName(tab) + " -> screen has " + this.registeredTabButtons.size() + " tab buttons");
+   }
 
-  /**
-   * Removes a tab-owned button from this screen's widget list. Public so tabs can clean up stale
-   * widgets when they rebuild their own button lists.
-   */
-  public void removeTabButton(Button button) {
-    registeredTabButtons.remove(button);
-    this.removeWidget(button);
-  }
+   private void removeTabButtons(Tab tab) {
+      if (tab instanceof AbstractCommandTab ct) {
+         ct.getCategoryButtons().forEach(this::removeTabButton);
+         ct.getButtons().forEach(this::removeTabButton);
+      } else if (tab == this.fakePlayerTab) {
+         this.fakePlayerTab.getButtons().forEach(this::removeTabButton);
+         this.fakePlayerTab.getIntervalFields().forEach(x$0 -> this.removeWidget(x$0));
+      }
 
-  /**
-   * Registers a tab-owned button, skipping it when it is already registered (prevents duplicate
-   * registration when a tab rebuilds and the caller also registers).
-   */
-  public void addTabButton(Button button) {
-    if (registeredTabButtons.add(button)) {
-      this.addRenderableWidget(button);
-    }
-  }
+      MachineDebug.log("[Layout] removeTabButtons " + tabName(tab) + " -> screen has " + this.registeredTabButtons.size() + " tab buttons");
+   }
 
-  /**
-   * Add only the current tab's buttons to the screen widget list.
-   */
-  private void addTabButtons(Tab tab) {
-    if (tab instanceof AbstractCommandTab ct) {
-      ct.getCategoryButtons().forEach(this::addTabButton);
-      ct.getButtons().forEach(this::addTabButton);
-    } else if (tab == fakePlayerTab) {
-      fakePlayerTab.getButtons().forEach(this::addTabButton);
-      fakePlayerTab.getIntervalFields().forEach(this::addRenderableWidget);
-    }
-    com.remrin.client.machine.MachineDebug.log("[Layout] addTabButtons " + tabName(tab)
-        + " -> screen has " + registeredTabButtons.size() + " tab buttons");
-  }
-
-  /**
-   * Remove only the given tab's buttons from the screen widget list.
-   */
-  private void removeTabButtons(Tab tab) {
-    if (tab instanceof AbstractCommandTab ct) {
-      ct.getCategoryButtons().forEach(this::removeTabButton);
-      ct.getButtons().forEach(this::removeTabButton);
-    } else if (tab == fakePlayerTab) {
-      fakePlayerTab.getButtons().forEach(this::removeTabButton);
-      fakePlayerTab.getIntervalFields().forEach(this::removeWidget);
-    }
-    com.remrin.client.machine.MachineDebug.log("[Layout] removeTabButtons " + tabName(tab)
-        + " -> screen has " + registeredTabButtons.size() + " tab buttons");
-  }
-
-  private static String tabName(Tab tab) {
-    if (tab instanceof CustomCommandTab) {
-      return "custom";
-    }
-    if (tab instanceof MachineSwitchTab) {
-      return "machine";
-    }
-    if (tab instanceof FakePlayerTab) {
-      return "fakePlayer";
-    }
-    return "preset";
-  }
-
-  /**
-   * Update visibility of widgets that depend on which tab is active.
-   */
-  private void updateTabDependentWidgets(Tab tab) {
-    boolean isFakePlayerTab = (tab == fakePlayerTab);
-    boolean isCustomTab = (tab == customTab);
-    boolean isMachineTab = (tab == machineTab) && MachineNetworkManager.isServerSupported();
-    // The machine tab adds machines via its sidebar "+" button; the footer add button stays for
-    // the custom tab only.
-    boolean showAdd = isCustomTab;
-    searchField.visible = !isFakePlayerTab;
-    searchField.active = !isFakePlayerTab;
-    addButton.visible = showAdd;
-    addButton.active = showAdd;
-    addFakePlayerButton.visible = isCustomTab;
-    addFakePlayerButton.active = isCustomTab;
-    closeButton.visible = !isFakePlayerTab;
-    closeButton.active = !isFakePlayerTab;
-    keepOpenCheckbox.visible = !isFakePlayerTab && !isMachineTab;
-    keepOpenCheckbox.active = !isFakePlayerTab && !isMachineTab;
-    // Settings button is always hidden (functionality kept via SettingsScreen)
-    settingsButton.visible = false;
-    settingsButton.active = false;
-  }
-
-  private void onSearchChanged(String text) {
-    searchText = text;
-    Tab currentTab = tabManager.getCurrentTab();
-
-    if (currentTab instanceof AbstractCommandTab ct) {
-      removeTabButtons(ct);
-      ct.setSearchText(text);
-      addTabButtons(ct);
-    }
-  }
-
-  /**
-   * Relayouts the whole screen on a window resize by running Minecraft's native rebuild pipeline
-   * ({@code clearWidgets() + init()}), exactly like the vanilla default. A hand-rolled fine-grained
-   * relayout proved unreliable here: rebuilding tabs in place could leave stale button instances
-   * registered on the screen ("two layers of buttons" after fullscreen <-> windowed toggles),
-   * because refresh() replaces tab button lists without synchronising the screen's widget list.
-   * {@code rebuildWidgets()} clears every widget first, so nothing can linger.
-   */
-  @Override
-  public void repositionElements() {
-    com.remrin.client.machine.MachineDebug.log("[Layout] repositionElements -> rebuildWidgets "
-        + this.width + "x" + this.height);
-    this.rebuildWidgets();
-  }
-
-  @Override
-  public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
-    Tab currentTab = tabManager.getCurrentTab();
-    if (currentTab == fakePlayerTab) {
-      fakePlayerTab.scroll(scrollY);
-    } else if (currentTab == machineTab && machineTab != null) {
-      if (machineTab.isInCategoryArea(mouseX, mouseY)) {
-        removeTabButtons(machineTab);
-        machineTab.scrollCategory(scrollY);
-        addTabButtons(machineTab);
+   private static String tabName(Tab tab) {
+      if (tab instanceof CustomCommandTab) {
+         return "custom";
+      } else if (tab instanceof MachineSwitchTab) {
+         return "machine";
       } else {
-        removeTabButtons(machineTab);
-        machineTab.scroll(scrollY);
-        addTabButtons(machineTab);
+         if (tab instanceof FakePlayerTab) {
+            return "fakePlayer";
+         }
+         return "preset";
       }
-    } else if (currentTab == customTab) {
-      if (customTab.isInCategoryArea(mouseX, mouseY)) {
-        removeTabButtons(customTab);
-        customTab.scrollCategory(scrollY);
-        addTabButtons(customTab);
+   }
+
+   private void updateTabDependentWidgets(Tab tab) {
+      boolean isFakePlayerTab = tab == this.fakePlayerTab;
+      boolean isCustomTab = tab == this.customTab;
+      boolean isMachineTab = tab == this.machineTab && MachineNetworkManager.isServerSupported();
+      if (isFakePlayerTab) {
+         MachineNetworkManager.sendRequestFakeStates();
+         int closeBtnY = this.height - this.footerHeight() + this.footerControlTopOffset();
+         int x = this.padding();
+         int w = 76;
+         int gap = 4;
+         this.fpBatchSpawnButton.setX(x);
+         this.fpBatchSpawnButton.setY(closeBtnY);
+         this.fpBatchSpawnButton.setWidth(w);
+         this.fpBatchSpawnButton.visible = true;
+         this.fpBatchSpawnButton.active = true;
+         x += w + gap;
+         int batchW = 88;
+         int batchX = this.closeButton.getX() - gap - batchW;
+         if (this.machineTab != null) {
+            this.fpTimedAddButton.setX(this.machineTab.getModesX());
+            this.fpTimedAddButton.setY(closeBtnY);
+            this.fpTimedAddButton.setWidth(48);
+         } else {
+            this.fpTimedAddButton.setX(batchX);
+            this.fpTimedAddButton.setY(closeBtnY);
+            this.fpTimedAddButton.setWidth(batchW);
+         }
+
+         this.fpTimedAddButton.visible = true;
+         this.fpTimedAddButton.active = true;
+         this.searchField.setX(this.customTab.getSwitchX());
+         this.searchField.setWidth(this.customTab.getSearchBoxWidth());
+         this.searchField.visible = true;
+         this.searchField.active = true;
+         ScreenRectangle fpArea = this.fakePlayerTab.getArea();
+         if (fpArea != null) {
+            int btnH = 16;
+            int listX = this.fakePlayerTab.getPlayerListX();
+            int listW = this.fakePlayerTab.getPlayerListWidth();
+            if (this.isOperator()) {
+               this.fpRemoveAllButton.setX(listX);
+               this.fpRemoveAllButton.setY(fpArea.bottom() - 32);
+               this.fpRemoveAllButton.setWidth(listW);
+               this.fpRemoveAllButton.setHeight(btnH);
+               this.fpRemoveAllButton.visible = true;
+               this.fpRemoveAllButton.active = true;
+            } else {
+               this.fpRemoveAllButton.visible = false;
+               this.fpRemoveAllButton.active = false;
+            }
+
+            this.fpRemoveSelectedButton.setX(listX);
+            this.fpRemoveSelectedButton.setY(fpArea.bottom() - 16);
+            this.fpRemoveSelectedButton.setWidth(listW);
+            this.fpRemoveSelectedButton.setHeight(btnH);
+         }
+
+         this.fpRemoveSelectedButton.visible = true;
+         this.fpRemoveSelectedButton.active = true;
+         this.addMachineButton.visible = false;
+         this.addMachineButton.active = false;
+         this.machineSaveButton.visible = false;
+         this.machineSaveButton.active = false;
+         this.filterOnCheckbox.visible = false;
+         this.filterOnCheckbox.active = false;
+         this.filterOffCheckbox.visible = false;
+         this.filterOffCheckbox.active = false;
+         this.updateFakePlayerFooter();
+      } else if (isMachineTab && this.machineTab != null) {
+         int sx = this.machineTab.getSwitchX();
+         int modesX = this.machineTab.getModesX();
+         int sw = this.machineTab.getSwitchWidth();
+         this.searchField.setX(sx);
+         this.searchField.setWidth(sw);
+         this.addMachineButton.setX(modesX);
+         this.addMachineButton.visible = true;
+         this.addMachineButton.active = true;
+         this.machineSaveButton.setX(modesX - 4 - 72);
+         this.machineSaveButton.setY(this.height - this.footerHeight() + this.footerControlTopOffset());
+         this.machineSaveButton.visible = MachineNetworkManager.hasPendingMachines();
+         this.machineSaveButton.active = this.machineSaveButton.visible;
+         this.filterOnCheckbox.visible = true;
+         this.filterOnCheckbox.active = true;
+         this.filterOffCheckbox.visible = true;
+         this.filterOffCheckbox.active = true;
+         int catX = this.machineTab.getCategoryColumnX();
+         this.filterOnCheckbox.setX(catX);
+         this.filterOffCheckbox.setX(catX);
+         this.searchField.visible = true;
+         this.searchField.active = true;
+      } else if (isCustomTab) {
+         int sx = this.customTab.getSwitchX();
+         int modesX = this.customTab.getModesX();
+         this.searchField.setX(sx);
+         this.searchField.setWidth(this.customTab.getSearchBoxWidth());
+         this.addButton.setX(modesX);
+         this.addButton.setWidth(48);
+         this.addButton.visible = true;
+         this.addButton.active = true;
+         this.machineSaveButton.visible = false;
+         this.machineSaveButton.active = false;
+         this.addFakePlayerButton.setX(this.customTab.getCategoryColumnX());
+         this.addFakePlayerButton.setY(this.height - this.footerHeight() + this.footerControlTopOffset());
+         this.addFakePlayerButton.setWidth(88);
+         this.addFakePlayerButton.visible = true;
+         this.addFakePlayerButton.active = true;
+         this.addMachineButton.visible = false;
+         this.addMachineButton.active = false;
+         this.filterOnCheckbox.visible = false;
+         this.filterOnCheckbox.active = false;
+         this.filterOffCheckbox.visible = false;
+         this.filterOffCheckbox.active = false;
+         this.searchField.visible = true;
+         this.searchField.active = true;
       } else {
-        removeTabButtons(customTab);
-        customTab.scroll(scrollY);
-        addTabButtons(customTab);
-      }
-    } else {
-      for (PresetCommandTab presetTab : presetTabs) {
-        if (currentTab == presetTab) {
-          if (presetTab.isInCategoryArea(mouseX, mouseY)) {
-            removeTabButtons(presetTab);
-            presetTab.scrollCategory(scrollY);
-            addTabButtons(presetTab);
-          } else {
-            removeTabButtons(presetTab);
-            presetTab.scroll(scrollY);
-            addTabButtons(presetTab);
-          }
-          break;
-        }
-      }
-    }
-    return true;
-  }
-
-  private void executeCommand(String command) {
-    if (this.minecraft != null && this.minecraft.player != null) {
-      CommandHelper.sendCommand(command);
-    }
-    if (!shouldKeepOpen()) {
-      this.minecraft.gui.setScreen(null);
-    }
-  }
-
-  @Override
-  public void extractRenderState(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY,
-      float partialTick) {
-    super.extractRenderState(guiGraphics, mouseX, mouseY, partialTick);
-
-    Tab currentTab = tabManager.getCurrentTab();
-
-    if (currentTab != fakePlayerTab) {
-      int bottomSeparatorY = this.height - FOOTER_HEIGHT;
-      guiGraphics.fill(0, bottomSeparatorY, this.width, bottomSeparatorY + 1, 0xFF555555);
-      renderScrollbar(guiGraphics, mouseX, mouseY);
-    }
-
-    if (currentTab == customTab) {
-      if (tabArea != null) {
-        guiGraphics.enableScissor(tabArea.left(), tabArea.top(),
-            tabArea.right(), tabArea.bottom());
-      }
-      customTab.renderCategoryScrollbar(guiGraphics);
-      if (tabArea != null) {
-        guiGraphics.disableScissor();
+         int searchWidth = this.searchWidth();
+         int searchGroupWidth = searchWidth + 2 + 20 + 2 + 20;
+         int searchGroupX = this.width / 2 - searchGroupWidth / 2;
+         this.searchField.setX(searchGroupX);
+         this.searchField.setWidth(searchWidth);
+         this.addButton.setWidth(20);
+         this.addMachineButton.visible = false;
+         this.addMachineButton.active = false;
+         this.machineSaveButton.visible = false;
+         this.machineSaveButton.active = false;
+         this.filterOnCheckbox.visible = false;
+         this.filterOnCheckbox.active = false;
+         this.filterOffCheckbox.visible = false;
+         this.filterOffCheckbox.active = false;
+         this.searchField.visible = true;
+         this.searchField.active = true;
       }
 
-      if (customTab.isEmpty()) {
-        ScreenRectangle area = customTab.getArea();
-        if (area != null) {
-          guiGraphics.centeredText(this.font,
-              Component.translatable("screen.command-gui.empty"),
-              this.width / 2, area.top() + area.height() / 2 - 4, 0xFF888888);
-        }
-      }
-    } else if (currentTab == machineTab && machineTab != null) {
-      if (tabArea != null) {
-        guiGraphics.enableScissor(tabArea.left(), tabArea.top(),
-            tabArea.right(), tabArea.bottom());
-      }
-      machineTab.renderCategoryScrollbar(guiGraphics);
-      if (tabArea != null) {
-        guiGraphics.disableScissor();
+      this.addButton.visible = isCustomTab;
+      this.addButton.active = isCustomTab;
+      this.addFakePlayerButton.visible = isCustomTab;
+      this.addFakePlayerButton.active = isCustomTab;
+      if (!isFakePlayerTab) {
+         this.fpRemoveSelectedButton.visible = false;
+         this.fpRemoveSelectedButton.active = false;
+         this.fpTimedAddButton.visible = false;
+         this.fpTimedAddButton.active = false;
+         this.fpRemoveAllButton.visible = false;
+         this.fpRemoveAllButton.active = false;
+         this.fpBatchSpawnButton.visible = false;
+         this.fpBatchSpawnButton.active = false;
       }
 
-      if (machineTab.isEmpty()) {
-        ScreenRectangle area = machineTab.getArea();
-        if (area != null) {
-          guiGraphics.centeredText(this.font,
-              Component.translatable("screen.command-gui.machine.empty"),
-              this.width / 2, area.top() + area.height() / 2 - 4, 0xFF888888);
-        }
+      this.closeButton.visible = true;
+      this.closeButton.active = true;
+      this.keepOpenCheckbox.visible = !isFakePlayerTab && !isMachineTab && !isCustomTab;
+      this.keepOpenCheckbox.active = !isFakePlayerTab && !isMachineTab && !isCustomTab;
+   }
+
+   public void updateFakePlayerFooter() {
+      if (this.fpRemoveSelectedButton != null && this.fakePlayerTab != null) {
+         int count = this.fakePlayerTab.getMultiSelectionCount();
+         this.fpRemoveSelectedButton.setMessage(Component.translatable("screen.command-gui.fakeplayer.remove_selected", new Object[]{count}));
+         this.fpRemoveSelectedButton.active = count > 0;
       }
-    } else if (currentTab == fakePlayerTab) {
-      if (fakePlayerArea != null) {
-        guiGraphics.enableScissor(fakePlayerArea.left(), fakePlayerArea.top(),
-            fakePlayerArea.right(), fakePlayerArea.bottom());
+   }
+
+   private void onSearchChanged(String text) {
+      this.searchText = text;
+      Tab currentTab = this.tabManager.getCurrentTab();
+      if (currentTab == this.fakePlayerTab) {
+         this.fakePlayerTab.setSearchText(text);
+      } else if (currentTab instanceof AbstractCommandTab ct) {
+         this.removeTabButtons(ct);
+         ct.setSearchText(text);
+         this.addTabButtons(ct);
       }
-      fakePlayerTab.render(guiGraphics, mouseX, mouseY);
-      fakePlayerTab.renderFaces(guiGraphics);
-      fakePlayerTab.renderScrollbar(guiGraphics);
-      if (fakePlayerArea != null) {
-        guiGraphics.disableScissor();
+   }
+
+   private void toggleMachineFilter(boolean on) {
+      if (this.machineTab != null) {
+         MachineSwitchTab.MachineFilter next;
+         if (on) {
+            boolean select = !this.filterOnCheckbox.selected();
+            this.filterOnCheckbox.setSelected(select);
+            this.filterOffCheckbox.setSelected(false);
+            next = select ? MachineSwitchTab.MachineFilter.ON : MachineSwitchTab.MachineFilter.ALL;
+         } else {
+            boolean select = !this.filterOffCheckbox.selected();
+            this.filterOffCheckbox.setSelected(select);
+            this.filterOnCheckbox.setSelected(false);
+            next = select ? MachineSwitchTab.MachineFilter.OFF : MachineSwitchTab.MachineFilter.ALL;
+         }
+
+         this.removeTabButtons(this.machineTab);
+         this.machineTab.setMachineFilter(next);
+         this.addTabButtons(this.machineTab);
       }
-    } else {
-      for (PresetCommandTab presetTab : presetTabs) {
-        if (currentTab == presetTab) {
-          if (tabArea != null) {
-            guiGraphics.enableScissor(tabArea.left(), tabArea.top(),
-                tabArea.right(), tabArea.bottom());
-          }
-          presetTab.renderCategoryScrollbar(guiGraphics);
-          if (tabArea != null) {
-            guiGraphics.disableScissor();
-          }
-          break;
-        }
-      }
-    }
-  }
+   }
 
-  @Override
-  public boolean isPauseScreen() {
-    return false;
-  }
-
-  @Override
-  public void onClose() {
-    if (keepOpenCheckbox != null) {
-      keepOpenAfterExecute = keepOpenCheckbox.selected();
-    }
-    fakePlayerRefreshTicks = 0;
-    currentInstance = null;
-    super.onClose();
-  }
-
-  public void refresh() {
-    removeTabButtons(customTab);
-    customTab.refresh();
-    addTabButtons(customTab);
-  }
-
-  /**
-   * Renders the main scrollbar (right edge) as a styled drag handle, and stores its geometry for
-   * mouse dragging. When nothing is scrollable the thumb fills the whole track (greyed out).
-   */
-  private void renderScrollbar(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY) {
-		if (tabArea == null) {
-			return;
-		}
-
-    Tab currentTab = tabManager.getCurrentTab();
-    int scrollOffset;
-    int maxScroll;
-    int viewport;
-    int content;
-    if (currentTab == customTab) {
-      scrollOffset = customTab.getScrollOffset();
-      maxScroll = customTab.getMaxScroll();
-      viewport = customTab.getVisibleRowCount();
-      content = customTab.getTotalRowCount();
-    } else if (currentTab == machineTab && machineTab != null) {
-      scrollOffset = machineTab.getScrollOffset();
-      maxScroll = machineTab.getMaxScroll();
-      viewport = machineTab.getVisibleRowCount();
-      content = machineTab.getTotalRowCount();
-    } else if (currentTab == fakePlayerTab) {
-      scrollOffset = fakePlayerTab.getScrollOffset();
-      maxScroll = fakePlayerTab.getMaxScroll();
-      viewport = fakePlayerTab.getVisibleRowCount();
-      content = fakePlayerTab.getTotalRowCount();
-    } else {
-      scrollOffset = 0;
-      maxScroll = 0;
-      viewport = 1;
-      content = 1;
-      for (PresetCommandTab presetTab : presetTabs) {
-        if (currentTab == presetTab) {
-          scrollOffset = presetTab.getScrollOffset();
-          maxScroll = presetTab.getMaxScroll();
-          viewport = presetTab.getVisibleRowCount();
-          content = presetTab.getTotalRowCount();
-          break;
-        }
-      }
-    }
-
-    int scrollbarX = this.width - RIGHT_MARGIN - SCROLLBAR_WIDTH;
-    int scrollbarTop = tabArea.top();
-    int scrollbarHeight = tabArea.height();
-
-    mainScrollbar = new ScrollbarHandle(scrollbarX, scrollbarTop, SCROLLBAR_WIDTH, scrollbarHeight);
-    boolean hovered = mainScrollbar.contains(mouseX, mouseY);
-    mainScrollbar.render(guiGraphics, scrollOffset, maxScroll, viewport, content, hovered);
-    mainScrollbarMaxScroll = maxScroll;
-    mainScrollbarViewport = viewport;
-    mainScrollbarContent = content;
-  }
-
-  /** Geometry of the main (right-edge) scrollbar, refreshed every render frame. */
-  private ScrollbarHandle mainScrollbar = null;
-  private int mainScrollbarMaxScroll = 0;
-  private int mainScrollbarViewport = 1;
-  private int mainScrollbarContent = 1;
-  /** True while the user is dragging the main scrollbar thumb. */
-  private boolean draggingMainScrollbar = false;
-  /** Pointer Y offset inside the thumb where the drag started. */
-  private double mainScrollbarGrabOffset = 0;
-  /** True while the user is dragging the category sidebar thumb. */
-  private boolean draggingCategoryScrollbar = false;
-  private double categoryScrollbarGrabOffset = 0;
-  /** True while the user is dragging the fake player list thumb. */
-  private boolean draggingFakePlayerScrollbar = false;
-  private double fakePlayerScrollbarGrabOffset = 0;
-
-  /**
-   * Starts dragging a scrollbar when its track is clicked (main or category), capturing the grab
-   * offset so the thumb does not jump to the pointer.
-   */
-  private void tryStartScrollbarDrag(double mouseX, double mouseY) {
-    Tab currentTab = tabManager.getCurrentTab();
-
-    // Category sidebar thumb (custom / machine / preset tabs)
-    if (currentTab instanceof AbstractCommandTab ct && ct.getArea() != null) {
-      int catX = ct.getArea().left() + ct.getCategorySidebarOffset() + ct.categoryTabWidth() + 2;
-      int catY = ct.getArea().top();
-      int catH = ct.getArea().height();
-      ScrollbarHandle catHandle = new ScrollbarHandle(catX, catY,
-          AbstractCommandTab.CATEGORY_SCROLLBAR_WIDTH, catH);
-      if (catHandle.contains(mouseX, mouseY) && ct.getMaxCategoryScroll() > 0) {
-        int thumbTop = catHandle.thumbTop(ct.getCategoryScrollOffset(),
-            ct.getMaxCategoryScroll(), ct.getVisibleCategoryCount(),
-            ct.getAllCategoryCount());
-        categoryScrollbarGrabOffset = mouseY - thumbTop;
-        draggingCategoryScrollbar = true;
-        return;
-      }
-    }
-
-    // Fake player list scrollbar (between the list and the actions column)
-    if (currentTab == fakePlayerTab) {
-      int fpScrollX = fakePlayerTab.getScrollbarX();
-      int fpY = fakePlayerTab.getArea().top();
-      int fpH = fakePlayerTab.getArea().height();
-      ScrollbarHandle fpHandle = new ScrollbarHandle(fpScrollX, fpY,
-          AbstractCommandTab.CATEGORY_SCROLLBAR_WIDTH, fpH);
-      if (fpHandle.contains(mouseX, mouseY) && fakePlayerTab.getMaxScroll() > 0) {
-        int thumbTop = fpHandle.thumbTop(fakePlayerTab.getScrollOffset(),
-            fakePlayerTab.getMaxScroll(), fakePlayerTab.getVisibleRowCount(),
-            fakePlayerTab.getTotalRowCount());
-        fakePlayerScrollbarGrabOffset = mouseY - thumbTop;
-        draggingFakePlayerScrollbar = true;
-        return;
-      }
-    }
-
-    // Main (right-edge) scrollbar
-    if (mainScrollbar != null && mainScrollbar.contains(mouseX, mouseY)
-        && mainScrollbarMaxScroll > 0) {
-      int thumbTop = mainScrollbar.thumbTop(getMainScrollOffset(), mainScrollbarMaxScroll,
-          mainScrollbarViewport, mainScrollbarContent);
-      mainScrollbarGrabOffset = mouseY - thumbTop;
-      draggingMainScrollbar = true;
-    }
-  }
-
-  /** Applies the thumb drag to the active tab's scroll offset. */
-  private void applyMainScrollbarDrag(double mouseY) {
-    if (mainScrollbar == null || mainScrollbarMaxScroll <= 0) {
-      return;
-    }
-    int offset = mainScrollbar.offsetFromY(mouseY, mainScrollbarGrabOffset,
-        mainScrollbarMaxScroll, mainScrollbarViewport, mainScrollbarContent);
-    Tab currentTab = tabManager.getCurrentTab();
-    if (currentTab == customTab) {
-      removeTabButtons(customTab);
-      customTab.setScrollOffset(offset);
-      addTabButtons(customTab);
-    } else if (currentTab == machineTab && machineTab != null) {
-      removeTabButtons(machineTab);
-      machineTab.setScrollOffset(offset);
-      addTabButtons(machineTab);
-    } else if (currentTab == fakePlayerTab) {
-      fakePlayerTab.setScrollOffset(offset);
-    } else {
-      for (PresetCommandTab presetTab : presetTabs) {
-        if (currentTab == presetTab) {
-          removeTabButtons(presetTab);
-          presetTab.setScrollOffset(offset);
-          addTabButtons(presetTab);
-          break;
-        }
-      }
-    }
-  }
-
-  private void applyCategoryScrollbarDrag(double mouseY) {
-    Tab currentTab = tabManager.getCurrentTab();
-    if (!(currentTab instanceof AbstractCommandTab ct) || ct.getArea() == null) {
-      return;
-    }
-    int catX = ct.getArea().left() + ct.getCategorySidebarOffset() + ct.categoryTabWidth() + 2;
-    int catY = ct.getArea().top();
-    int catH = ct.getArea().height();
-    ScrollbarHandle catHandle = new ScrollbarHandle(catX, catY,
-        AbstractCommandTab.CATEGORY_SCROLLBAR_WIDTH, catH);
-    int offset = catHandle.offsetFromY(mouseY, categoryScrollbarGrabOffset,
-        ct.getMaxCategoryScroll(), ct.getVisibleCategoryCount(), ct.getAllCategoryCount());
-    removeTabButtons(ct);
-    ct.setCategoryScrollOffset(offset);
-    addTabButtons(ct);
-  }
-
-  private int getMainScrollOffset() {
-    Tab currentTab = tabManager.getCurrentTab();
-    if (currentTab == customTab) {
-      return customTab.getScrollOffset();
-    }
-    if (currentTab == machineTab && machineTab != null) {
-      return machineTab.getScrollOffset();
-    }
-    if (currentTab == fakePlayerTab) {
-      return fakePlayerTab.getScrollOffset();
-    }
-    for (PresetCommandTab presetTab : presetTabs) {
-      if (currentTab == presetTab) {
-        return presetTab.getScrollOffset();
-      }
-    }
-    return 0;
-  }
-
-  @Override
-  public boolean mouseClicked(net.minecraft.client.input.MouseButtonEvent mouseEvent,
-      boolean focused) {
-    if (mouseEvent.button() == 0) {
-      tryStartScrollbarDrag(mouseEvent.x(), mouseEvent.y());
-    }
-    return super.mouseClicked(mouseEvent, focused);
-  }
-
-  @Override
-  public boolean mouseDragged(net.minecraft.client.input.MouseButtonEvent mouseEvent,
-      double dragX, double dragY) {
-    if (draggingMainScrollbar) {
-      applyMainScrollbarDrag(mouseEvent.y());
-      return true;
-    }
-    if (draggingCategoryScrollbar) {
-      applyCategoryScrollbarDrag(mouseEvent.y());
-      return true;
-    }
-    if (draggingFakePlayerScrollbar) {
-      applyFakePlayerScrollbarDrag(mouseEvent.y());
-      return true;
-    }
-    return super.mouseDragged(mouseEvent, dragX, dragY);
-  }
-
-  /** Applies the fake player list thumb drag. */
-  private void applyFakePlayerScrollbarDrag(double mouseY) {
-    if (fakePlayerTab.getArea() == null || fakePlayerTab.getMaxScroll() <= 0) {
-      return;
-    }
-    int fpX = fakePlayerTab.getScrollbarX();
-    int fpY = fakePlayerTab.getArea().top();
-    int fpH = fakePlayerTab.getArea().height();
-    ScrollbarHandle fpHandle = new ScrollbarHandle(fpX, fpY,
-        AbstractCommandTab.CATEGORY_SCROLLBAR_WIDTH, fpH);
-    int offset = fpHandle.offsetFromY(mouseY, fakePlayerScrollbarGrabOffset,
-        fakePlayerTab.getMaxScroll(), fakePlayerTab.getVisibleRowCount(),
-        fakePlayerTab.getTotalRowCount());
-    fakePlayerTab.setScrollOffset(offset);
-  }
-
-  @Override
-  public boolean mouseReleased(net.minecraft.client.input.MouseButtonEvent mouseEvent) {
-    draggingMainScrollbar = false;
-    draggingCategoryScrollbar = false;
-    draggingFakePlayerScrollbar = false;
-    return super.mouseReleased(mouseEvent);
-  }
-
-  /**
-   * Tracks the vanilla resize pipeline reaching this screen (Minecraft.framebufferSizeChanged ->
-   * resizeGui -> screen.resize). Logs so a missed event can be distinguished from a failed
-   * relayout.
-   */
-  @Override
-  public void resize(int width, int height) {
-    com.remrin.client.machine.MachineDebug.log("[Layout] CommandGUIScreen.resize called "
-        + width + "x" + height + " (current " + this.width + "x" + this.height + ")");
-    super.resize(width, height);
-  }
-
-  /**
-   * Polls the LIVE window (framebuffer) size every tick and repairs the layout when the
-   * framebuffer-resize callback was skipped — F11 fullscreen toggles do not always fire it on
-   * Windows, so the cached size (and therefore the screen's width/height) would keep the old
-   * fullscreen values and every button would stay at fullscreen coordinates after switching to a
-   * windowed mode. Two independent checks:
-   * <ul>
-   *   <li>the cached framebuffer size lags behind the live GLFW size (the callback never ran)</li>
-   *   <li>this screen's logical size differs from the cached GUI-scaled size (the resize chain ran
-   *       for the framebuffer but this screen did not receive the new dimensions)</li>
-   * </ul>
-   * Either way Minecraft's resize pipeline is re-run, which relayouts the current screen.
-   */
-  private void syncWindowSize() {
-    if (this.minecraft == null || this.minecraft.getWindow() == null) {
-      return;
-    }
-    com.mojang.blaze3d.platform.Window window = this.minecraft.getWindow();
-    int[] fbW = new int[1];
-    int[] fbH = new int[1];
-    org.lwjgl.glfw.GLFW.glfwGetFramebufferSize(window.handle(), fbW, fbH);
-    if (fbW[0] <= 0 || fbH[0] <= 0) {
-      return;
-    }
-    if (fbW[0] != window.getWidth() || fbH[0] != window.getHeight()) {
-      // The framebuffer-resize callback never ran: update the cached size and re-run the pipeline
-      com.remrin.client.machine.MachineDebug.log("[Layout] syncWindowSize framebuffer lag: cached "
-          + window.getWidth() + "x" + window.getHeight() + " live " + fbW[0] + "x" + fbH[0]
-          + " screen " + this.width + "x" + this.height);
-      window.setWidth(fbW[0]);
-      window.setHeight(fbH[0]);
-      this.minecraft.resizeGui();
-      return;
-    }
-    if (this.width != window.getGuiScaledWidth() || this.height != window.getGuiScaledHeight()) {
-      // The framebuffer is in sync but this screen never got the new logical size
-      com.remrin.client.machine.MachineDebug.log("[Layout] syncWindowSize logical lag: screen "
-          + this.width + "x" + this.height + " scaled " + window.getGuiScaledWidth() + "x"
-          + window.getGuiScaledHeight());
-      this.minecraft.resizeGui();
-    }
-  }
-
-  @Override
-  public void tick() {
-    super.tick();
-
-    // F11 fullscreen toggles do not always fire a GLFW framebuffer-resize callback, leaving the
-    // screen laid out for the old logical size (buttons stay at fullscreen coordinates after
-    // switching to a window). Poll the LIVE window size every tick and repair the layout whenever
-    // the cached size lags behind the real window.
-    syncWindowSize();
-
-    Tab currentTab = tabManager.getCurrentTab();
-    if (lastTab != currentTab) {
-      removeTabButtons(lastTab);
-      if (lastTab == fakePlayerTab) {
-        fakePlayerTab.clearSelection();
-      }
-
-      if (currentTab == customTab) {
-        customTab.setSearchText(searchText);
-        lastSelectedTabIndex = 0;
-      } else if (currentTab == fakePlayerTab) {
-        fakePlayerTab.refresh();
-        fakePlayerRefreshTicks = 0;
-        lastSelectedTabIndex = 1;
-      } else if (currentTab == machineTab) {
-        machineTab.setSearchText(searchText);
-        removeTabButtons(machineTab);
-        machineTab.refresh();
-        addTabButtons(machineTab);
-        lastSelectedTabIndex = 2;
-      } else {
-        for (int i = 0; i < presetTabs.size(); i++) {
-          if (currentTab == presetTabs.get(i)) {
-            presetTabs.get(i).setSearchText(searchText);
-            lastSelectedTabIndex = i + 3;
-            break;
-          }
-        }
-      }
-
-      addTabButtons(currentTab);
-      updateTabDependentWidgets(currentTab);
-      lastTab = currentTab;
-    }
-
-    if (currentTab == fakePlayerTab) {
-      fakePlayerRefreshTicks++;
-      if (fakePlayerRefreshTicks >= REFRESH_INTERVAL) {
-        fakePlayerRefreshTicks = 0;
-        removeTabButtons(fakePlayerTab);
-        fakePlayerTab.refresh();
-        addTabButtons(fakePlayerTab);
-      }
-    }
-
-    // If the server advertised machines after this screen was opened, rebuild to add the tab.
-    if (machineTab == null && MachineNetworkManager.isServerSupported()) {
+   public void repositionElements() {
+      MachineDebug.log("[Layout] repositionElements -> rebuildWidgets " + this.width + "x" + this.height);
       this.rebuildWidgets();
-      return;
-    }
+   }
 
-    // Refresh the machine tab when the server pushes an updated machine list / state.
-    // Only register the buttons into the screen when the machine tab is ACTIVE, otherwise they
-    // would leak onto the other tabs (custom / fake player / presets).
-    if (machineTab != null && MachineNetworkManager.getSyncVersion() != lastMachineSyncVersion) {
-      lastMachineSyncVersion = MachineNetworkManager.getSyncVersion();
-      boolean machineActive = (tabManager.getCurrentTab() == machineTab);
-      boolean structureChanged =
-          MachineNetworkManager.getStructureVersion() != lastMachineStructureVersion;
-      removeTabButtons(machineTab);
-      if (structureChanged) {
-        // Add / edit / delete: reset scroll and pending mode selections
-        lastMachineStructureVersion = MachineNetworkManager.getStructureVersion();
-        machineTab.refresh();
+   public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+      Tab currentTab = this.tabManager.getCurrentTab();
+      if (currentTab == this.fakePlayerTab) {
+         if (this.fakePlayerTab.isInPanelArea(mouseX, mouseY)) {
+            this.fakePlayerTab.scrollPanel(scrollY);
+         } else {
+            this.fakePlayerTab.scroll(scrollY);
+         }
+      } else if (currentTab == this.machineTab && this.machineTab != null) {
+         if (this.machineTab.isInCategoryArea(mouseX, mouseY)) {
+            this.removeTabButtons(this.machineTab);
+            this.machineTab.scrollCategory(scrollY);
+            this.addTabButtons(this.machineTab);
+         } else {
+            this.removeTabButtons(this.machineTab);
+            this.machineTab.scroll(scrollY);
+            this.addTabButtons(this.machineTab);
+         }
+      } else if (currentTab == this.customTab) {
+         if (this.customTab.isInCategoryArea(mouseX, mouseY)) {
+            this.removeTabButtons(this.customTab);
+            this.customTab.scrollCategory(scrollY);
+            this.addTabButtons(this.customTab);
+         } else {
+            this.removeTabButtons(this.customTab);
+            this.customTab.scroll(scrollY);
+            this.addTabButtons(this.customTab);
+         }
       } else {
-        // State-only sync (running / detection flips): rebuild rows in place, preserving scroll
-        // position and pending mode selections
-        machineTab.rebuildRows();
+         for (PresetCommandTab presetTab : this.presetTabs) {
+            if (currentTab == presetTab) {
+               if (presetTab.isInCategoryArea(mouseX, mouseY)) {
+                  this.removeTabButtons(presetTab);
+                  presetTab.scrollCategory(scrollY);
+                  this.addTabButtons(presetTab);
+               } else {
+                  this.removeTabButtons(presetTab);
+                  presetTab.scroll(scrollY);
+                  this.addTabButtons(presetTab);
+               }
+               break;
+            }
+         }
       }
-      if (machineActive) {
-        addTabButtons(machineTab);
-        updateTabDependentWidgets(currentTab);
+
+      return true;
+   }
+
+   private void executeCommand(String command) {
+      if (this.minecraft != null && this.minecraft.player != null) {
+         CommandHelper.sendCommand(command);
       }
-    }
-  }
+
+      if (!shouldKeepOpen()) {
+         this.minecraft.gui.setScreen(null);
+      }
+   }
+
+   public void extractRenderState(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY, float partialTick) {
+      super.extractRenderState(guiGraphics, mouseX, mouseY, partialTick);
+      Tab currentTab = this.tabManager.getCurrentTab();
+      int bottomSeparatorY = this.height - this.footerHeight();
+      guiGraphics.fill(0, bottomSeparatorY, this.width, bottomSeparatorY + 1, -11184811);
+      if (currentTab != this.fakePlayerTab) {
+         this.renderScrollbar(guiGraphics, mouseX, mouseY);
+      }
+
+      if (currentTab == this.customTab) {
+         if (this.tabArea != null) {
+            guiGraphics.enableScissor(this.tabArea.left(), this.tabArea.top(), this.tabArea.right(), this.tabArea.bottom());
+         }
+
+         this.customTab.renderCategoryScrollbar(guiGraphics);
+         if (this.tabArea != null) {
+            guiGraphics.disableScissor();
+         }
+
+         if (this.customTab.isEmpty()) {
+            ScreenRectangle area = this.customTab.getArea();
+            if (area != null) {
+               guiGraphics.centeredText(
+                  this.font, Component.translatable("screen.command-gui.empty"), this.width / 2, area.top() + area.height() / 2 - 4, -7829368
+               );
+            }
+         }
+      } else if (currentTab == this.machineTab && this.machineTab != null) {
+         if (this.tabArea != null) {
+            guiGraphics.enableScissor(this.tabArea.left(), this.tabArea.top(), this.tabArea.right(), this.tabArea.bottom());
+         }
+
+         this.machineTab.renderCategoryScrollbar(guiGraphics);
+         if (this.tabArea != null) {
+            guiGraphics.disableScissor();
+         }
+
+         if (this.machineTab.isEmpty()) {
+            ScreenRectangle area = this.machineTab.getArea();
+            if (area != null) {
+               guiGraphics.centeredText(
+                  this.font, Component.translatable("screen.command-gui.machine.empty"), this.width / 2, area.top() + area.height() / 2 - 4, -7829368
+               );
+            }
+         }
+      } else if (currentTab == this.fakePlayerTab) {
+         if (this.fakePlayerArea != null) {
+            guiGraphics.enableScissor(this.fakePlayerArea.left(), this.fakePlayerArea.top(), this.fakePlayerArea.right(), this.fakePlayerArea.bottom());
+         }
+
+         this.fakePlayerTab.render(guiGraphics, mouseX, mouseY);
+         this.fakePlayerTab.renderFaces(guiGraphics);
+         this.fakePlayerTab.renderScrollbar(guiGraphics);
+         if (this.fakePlayerArea != null) {
+            guiGraphics.disableScissor();
+         }
+
+         this.fakePlayerTab.renderPanelScrollbar(guiGraphics);
+      } else {
+         for (PresetCommandTab presetTab : this.presetTabs) {
+            if (currentTab == presetTab) {
+               if (this.tabArea != null) {
+                  guiGraphics.enableScissor(this.tabArea.left(), this.tabArea.top(), this.tabArea.right(), this.tabArea.bottom());
+               }
+
+               presetTab.renderCategoryScrollbar(guiGraphics);
+               if (this.tabArea != null) {
+                  guiGraphics.disableScissor();
+               }
+               break;
+            }
+         }
+      }
+   }
+
+   public boolean isPauseScreen() {
+      return false;
+   }
+
+   public void onClose() {
+      if (this.keepOpenCheckbox != null) {
+         keepOpenAfterExecute = this.keepOpenCheckbox.selected();
+      }
+
+      this.fakePlayerRefreshTicks = 0;
+      currentInstance = null;
+      super.onClose();
+   }
+
+   public void refresh() {
+      this.removeTabButtons(this.customTab);
+      this.customTab.refresh();
+      this.addTabButtons(this.customTab);
+   }
+
+   public void refreshFakePlayerTab() {
+      if (this.fakePlayerTab == null) {
+         return;
+      }
+
+      boolean intervalFocused = this.fakePlayerTab.isIntervalFieldFocused();
+      this.removeTabButtons(this.fakePlayerTab);
+      this.fakePlayerTab.refresh();
+      this.addTabButtons(this.fakePlayerTab);
+      if (intervalFocused) {
+         this.fakePlayerTab.restoreIntervalFieldFocus();
+      }
+   }
+
+   private void renderScrollbar(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY) {
+      if (this.tabArea != null) {
+         Tab currentTab = this.tabManager.getCurrentTab();
+         int scrollOffset;
+         int maxScroll;
+         int viewport;
+         int content;
+         if (currentTab == this.customTab) {
+            scrollOffset = this.customTab.getScrollOffset();
+            maxScroll = this.customTab.getMaxScroll();
+            viewport = this.customTab.getVisibleRowCount();
+            content = this.customTab.getTotalRowCount();
+         } else if (currentTab == this.machineTab && this.machineTab != null) {
+            scrollOffset = this.machineTab.getScrollOffset();
+            maxScroll = this.machineTab.getMaxScroll();
+            viewport = this.machineTab.getVisibleRowCount();
+            content = this.machineTab.getTotalRowCount();
+         } else if (currentTab == this.fakePlayerTab) {
+            scrollOffset = this.fakePlayerTab.getScrollOffset();
+            maxScroll = this.fakePlayerTab.getMaxScroll();
+            viewport = this.fakePlayerTab.getVisibleRowCount();
+            content = this.fakePlayerTab.getTotalRowCount();
+         } else {
+            scrollOffset = 0;
+            maxScroll = 0;
+            viewport = 1;
+            content = 1;
+
+            for (PresetCommandTab presetTab : this.presetTabs) {
+               if (currentTab == presetTab) {
+                  scrollOffset = presetTab.getScrollOffset();
+                  maxScroll = presetTab.getMaxScroll();
+                  viewport = presetTab.getVisibleRowCount();
+                  content = presetTab.getTotalRowCount();
+                  break;
+               }
+            }
+         }
+
+         boolean isMachineTab = currentTab == this.machineTab && this.machineTab != null;
+         int scrollbarX = !isMachineTab && currentTab != this.customTab ? this.width - this.rightMargin() - this.scrollbarWidth() : this.width - 8 - this.scrollbarWidth();
+         int scrollbarTop = this.tabArea.top();
+         int scrollbarHeight = this.tabArea.height();
+         this.mainScrollbar = new ScrollbarHandle(scrollbarX, scrollbarTop, this.scrollbarWidth(), scrollbarHeight);
+         boolean hovered = this.mainScrollbar.contains((double)mouseX, (double)mouseY);
+         this.mainScrollbar.render(guiGraphics, scrollOffset, maxScroll, viewport, content, hovered);
+         this.mainScrollbarMaxScroll = maxScroll;
+         this.mainScrollbarViewport = viewport;
+         this.mainScrollbarContent = content;
+      }
+   }
+
+   private void tryStartScrollbarDrag(double mouseX, double mouseY) {
+      Tab currentTab = this.tabManager.getCurrentTab();
+      if (currentTab instanceof AbstractCommandTab ct && ct.getArea() != null) {
+         int catX = ct.getArea().left() + ct.getCategorySidebarOffset() + ct.categoryTabWidth() + 2;
+         int catY = ct.getArea().top();
+         int catH = ct.getArea().height();
+         ScrollbarHandle catHandle = new ScrollbarHandle(catX, catY, this.scrollbarWidth(), catH);
+         if (catHandle.contains(mouseX, mouseY) && ct.getMaxCategoryScroll() > 0) {
+            int thumbTop = catHandle.thumbTop(ct.getCategoryScrollOffset(), ct.getMaxCategoryScroll(), ct.getVisibleCategoryCount(), ct.getAllCategoryCount());
+            this.categoryScrollbarGrabOffset = mouseY - (double)thumbTop;
+            this.draggingCategoryScrollbar = true;
+            return;
+         }
+      }
+
+      if (currentTab == this.fakePlayerTab) {
+         int fpScrollX = this.fakePlayerTab.getScrollbarX();
+         int fpY = this.fakePlayerTab.getArea().top();
+         int fpH = this.fakePlayerTab.getArea().height();
+         ScrollbarHandle fpHandle = new ScrollbarHandle(fpScrollX, fpY, this.scrollbarWidth(), fpH);
+         if (fpHandle.contains(mouseX, mouseY) && this.fakePlayerTab.getMaxScroll() > 0) {
+            int thumbTop = fpHandle.thumbTop(
+               this.fakePlayerTab.getScrollOffset(),
+               this.fakePlayerTab.getMaxScroll(),
+               this.fakePlayerTab.getVisibleRowCount(),
+               this.fakePlayerTab.getTotalRowCount()
+            );
+            this.fakePlayerScrollbarGrabOffset = mouseY - (double)thumbTop;
+            this.draggingFakePlayerScrollbar = true;
+            return;
+         }
+      }
+
+      if (currentTab == this.fakePlayerTab && this.fakePlayerTab.getArea() != null) {
+         int fpPanelX = this.fakePlayerTab.getPanelScrollbarX();
+         int fpPanelY = this.fakePlayerTab.getArea().top();
+         int fpPanelH = this.fakePlayerTab.getArea().height();
+         ScrollbarHandle fpPanelHandle = new ScrollbarHandle(fpPanelX, fpPanelY, this.scrollbarWidth(), fpPanelH);
+         if (fpPanelHandle.contains(mouseX, mouseY) && this.fakePlayerTab.getPanelMaxScroll() > 0) {
+            int thumbTop = fpPanelHandle.thumbTop(
+               this.fakePlayerTab.getPanelScrollOffset(),
+               this.fakePlayerTab.getPanelMaxScroll(),
+               this.fakePlayerTab.getPanelVisibleRowCount(),
+               this.fakePlayerTab.getPanelContentRowCount()
+            );
+            this.fakePlayerPanelScrollbarGrabOffset = mouseY - (double)thumbTop;
+            this.draggingFakePlayerPanelScrollbar = true;
+            return;
+         }
+      }
+
+      if (this.mainScrollbar != null && this.mainScrollbar.contains(mouseX, mouseY) && this.mainScrollbarMaxScroll > 0) {
+         int thumbTop = this.mainScrollbar
+            .thumbTop(this.getMainScrollOffset(), this.mainScrollbarMaxScroll, this.mainScrollbarViewport, this.mainScrollbarContent);
+         this.mainScrollbarGrabOffset = mouseY - (double)thumbTop;
+         this.draggingMainScrollbar = true;
+      }
+   }
+
+   private void applyMainScrollbarDrag(double mouseY) {
+      if (this.mainScrollbar != null && this.mainScrollbarMaxScroll > 0) {
+         int offset = this.mainScrollbar
+            .offsetFromY(mouseY, this.mainScrollbarGrabOffset, this.mainScrollbarMaxScroll, this.mainScrollbarViewport, this.mainScrollbarContent);
+         Tab currentTab = this.tabManager.getCurrentTab();
+         if (currentTab == this.customTab) {
+            this.removeTabButtons(this.customTab);
+            this.customTab.setScrollOffset(offset);
+            this.addTabButtons(this.customTab);
+         } else if (currentTab == this.machineTab && this.machineTab != null) {
+            this.removeTabButtons(this.machineTab);
+            this.machineTab.setScrollOffset(offset);
+            this.addTabButtons(this.machineTab);
+         } else if (currentTab == this.fakePlayerTab) {
+            this.fakePlayerTab.setScrollOffset(offset);
+         } else {
+            for (PresetCommandTab presetTab : this.presetTabs) {
+               if (currentTab == presetTab) {
+                  this.removeTabButtons(presetTab);
+                  presetTab.setScrollOffset(offset);
+                  this.addTabButtons(presetTab);
+                  break;
+               }
+            }
+         }
+      }
+   }
+
+   private void applyCategoryScrollbarDrag(double mouseY) {
+      if (this.tabManager.getCurrentTab() instanceof AbstractCommandTab ct && ct.getArea() != null) {
+         int catX = ct.getArea().left() + ct.getCategorySidebarOffset() + ct.categoryTabWidth() + 2;
+         int catY = ct.getArea().top();
+         int catH = ct.getArea().height();
+         ScrollbarHandle catHandle = new ScrollbarHandle(catX, catY, this.scrollbarWidth(), catH);
+         int offset = catHandle.offsetFromY(
+            mouseY, this.categoryScrollbarGrabOffset, ct.getMaxCategoryScroll(), ct.getVisibleCategoryCount(), ct.getAllCategoryCount()
+         );
+         this.removeTabButtons(ct);
+         ct.setCategoryScrollOffset(offset);
+         this.addTabButtons(ct);
+         return;
+      }
+   }
+
+   private int getMainScrollOffset() {
+      Tab currentTab = this.tabManager.getCurrentTab();
+      if (currentTab == this.customTab) {
+         return this.customTab.getScrollOffset();
+      } else if (currentTab == this.machineTab && this.machineTab != null) {
+         return this.machineTab.getScrollOffset();
+      } else if (currentTab == this.fakePlayerTab) {
+         return this.fakePlayerTab.getScrollOffset();
+      } else {
+         for (PresetCommandTab presetTab : this.presetTabs) {
+            if (currentTab == presetTab) {
+               return presetTab.getScrollOffset();
+            }
+         }
+
+         return 0;
+      }
+   }
+
+   public boolean mouseClicked(MouseButtonEvent mouseEvent, boolean focused) {
+      if (mouseEvent.button() == 0) {
+         this.tryStartScrollbarDrag(mouseEvent.x(), mouseEvent.y());
+      }
+
+      return super.mouseClicked(mouseEvent, focused);
+   }
+
+   public boolean mouseDragged(MouseButtonEvent mouseEvent, double dragX, double dragY) {
+      if (this.draggingMainScrollbar) {
+         this.applyMainScrollbarDrag(mouseEvent.y());
+         return true;
+      } else if (this.draggingCategoryScrollbar) {
+         this.applyCategoryScrollbarDrag(mouseEvent.y());
+         return true;
+      } else if (this.draggingFakePlayerScrollbar) {
+         this.applyFakePlayerScrollbarDrag(mouseEvent.y());
+         return true;
+      } else if (this.draggingFakePlayerPanelScrollbar) {
+         this.applyFakePlayerPanelScrollbarDrag(mouseEvent.y());
+         return true;
+      } else {
+         return super.mouseDragged(mouseEvent, dragX, dragY);
+      }
+   }
+
+   private void applyFakePlayerScrollbarDrag(double mouseY) {
+      if (this.fakePlayerTab.getArea() != null && this.fakePlayerTab.getMaxScroll() > 0) {
+         int fpX = this.fakePlayerTab.getScrollbarX();
+         int fpY = this.fakePlayerTab.getArea().top();
+         int fpH = this.fakePlayerTab.getArea().height();
+         ScrollbarHandle fpHandle = new ScrollbarHandle(fpX, fpY, this.scrollbarWidth(), fpH);
+         int offset = fpHandle.offsetFromY(
+            mouseY,
+            this.fakePlayerScrollbarGrabOffset,
+            this.fakePlayerTab.getMaxScroll(),
+            this.fakePlayerTab.getVisibleRowCount(),
+            this.fakePlayerTab.getTotalRowCount()
+         );
+         this.fakePlayerTab.setScrollOffset(offset);
+      }
+   }
+
+   private void applyFakePlayerPanelScrollbarDrag(double mouseY) {
+      if (this.fakePlayerTab.getArea() != null && this.fakePlayerTab.getPanelMaxScroll() > 0) {
+         int fpPanelX = this.fakePlayerTab.getPanelScrollbarX();
+         int fpPanelY = this.fakePlayerTab.getArea().top();
+         int fpPanelH = this.fakePlayerTab.getArea().height();
+         ScrollbarHandle fpPanelHandle = new ScrollbarHandle(fpPanelX, fpPanelY, this.scrollbarWidth(), fpPanelH);
+         int offset = fpPanelHandle.offsetFromY(
+            mouseY,
+            this.fakePlayerPanelScrollbarGrabOffset,
+            this.fakePlayerTab.getPanelMaxScroll(),
+            this.fakePlayerTab.getPanelVisibleRowCount(),
+            this.fakePlayerTab.getPanelContentRowCount()
+         );
+         this.fakePlayerTab.setPanelScrollOffset(offset);
+      }
+   }
+
+   public boolean mouseReleased(MouseButtonEvent mouseEvent) {
+      this.draggingMainScrollbar = false;
+      this.draggingCategoryScrollbar = false;
+      this.draggingFakePlayerScrollbar = false;
+      this.draggingFakePlayerPanelScrollbar = false;
+      return super.mouseReleased(mouseEvent);
+   }
+
+   public void resize(int width, int height) {
+      MachineDebug.log("[Layout] CommandGUIScreen.resize called " + width + "x" + height + " (current " + this.width + "x" + this.height + ")");
+      super.resize(width, height);
+   }
+
+   private void syncWindowSize() {
+      if (this.minecraft != null && this.minecraft.getWindow() != null) {
+         Window window = this.minecraft.getWindow();
+         int[] fbW = new int[1];
+         int[] fbH = new int[1];
+         GLFW.glfwGetFramebufferSize(window.handle(), fbW, fbH);
+         if (fbW[0] > 0 && fbH[0] > 0) {
+            if (fbW[0] == window.getWidth() && fbH[0] == window.getHeight()) {
+               if (this.width != window.getGuiScaledWidth() || this.height != window.getGuiScaledHeight()) {
+                  MachineDebug.log(
+                     "[Layout] syncWindowSize logical lag: screen "
+                        + this.width
+                        + "x"
+                        + this.height
+                        + " scaled "
+                        + window.getGuiScaledWidth()
+                        + "x"
+                        + window.getGuiScaledHeight()
+                  );
+                  this.minecraft.resizeGui();
+               }
+            } else {
+               MachineDebug.log(
+                  "[Layout] syncWindowSize framebuffer lag: cached "
+                     + window.getWidth()
+                     + "x"
+                     + window.getHeight()
+                     + " live "
+                     + fbW[0]
+                     + "x"
+                     + fbH[0]
+                     + " screen "
+                     + this.width
+                     + "x"
+                     + this.height
+               );
+               window.setWidth(fbW[0]);
+               window.setHeight(fbH[0]);
+               this.minecraft.resizeGui();
+            }
+         }
+      }
+   }
+
+   public void tick() {
+      super.tick();
+      this.syncWindowSize();
+      Tab currentTab = this.tabManager.getCurrentTab();
+      if (this.lastTab != currentTab) {
+         this.removeTabButtons(this.lastTab);
+         if (this.lastTab == this.fakePlayerTab) {
+            MachineNetworkManager.sendUnsubscribeFakeStates();
+            this.fakePlayerTab.clearSelection();
+         }
+
+         if (currentTab == this.customTab) {
+            this.customTab.setSearchText(this.searchText);
+            lastSelectedTabIndex = 0;
+         } else if (currentTab == this.fakePlayerTab) {
+            this.fakePlayerTab.setSearchText(this.searchText);
+            this.fakePlayerRefreshTicks = 0;
+            lastSelectedTabIndex = 1;
+         } else if (currentTab == this.machineTab) {
+            this.machineTab.setSearchText(this.searchText);
+            this.removeTabButtons(this.machineTab);
+            this.machineTab.refresh();
+            this.addTabButtons(this.machineTab);
+            lastSelectedTabIndex = 2;
+         } else {
+            for (int i = 0; i < this.presetTabs.size(); i++) {
+               if (currentTab == this.presetTabs.get(i)) {
+                  this.presetTabs.get(i).setSearchText(this.searchText);
+                  lastSelectedTabIndex = i + 3;
+                  break;
+               }
+            }
+         }
+
+         this.addTabButtons(currentTab);
+         this.updateTabDependentWidgets(currentTab);
+         this.lastTab = currentTab;
+      }
+
+      if (currentTab == this.fakePlayerTab && !MachineNetworkManager.isFakePlayerStatesSupported()) {
+         this.fakePlayerRefreshTicks++;
+         if (this.fakePlayerRefreshTicks >= 10) {
+            this.fakePlayerRefreshTicks = 0;
+            boolean intervalFocused = this.fakePlayerTab.isIntervalFieldFocused();
+            this.removeTabButtons(this.fakePlayerTab);
+            this.fakePlayerTab.refresh();
+            this.addTabButtons(this.fakePlayerTab);
+            if (intervalFocused) {
+               this.fakePlayerTab.restoreIntervalFieldFocus();
+            }
+         }
+      }
+
+      if (this.machineTab == null && MachineNetworkManager.isServerSupported()) {
+         this.rebuildWidgets();
+      } else {
+         if (this.machineTab != null && MachineNetworkManager.getSyncVersion() != this.lastMachineSyncVersion) {
+            this.lastMachineSyncVersion = MachineNetworkManager.getSyncVersion();
+            boolean machineActive = this.tabManager.getCurrentTab() == this.machineTab;
+            boolean structureChanged = MachineNetworkManager.getStructureVersion() != this.lastMachineStructureVersion;
+            this.removeTabButtons(this.machineTab);
+            if (structureChanged) {
+               this.lastMachineStructureVersion = MachineNetworkManager.getStructureVersion();
+               this.machineTab.refresh();
+            } else {
+               this.machineTab.rebuildRows();
+            }
+
+            if (machineActive) {
+               this.addTabButtons(this.machineTab);
+               this.updateTabDependentWidgets(currentTab);
+            }
+         }
+
+         if (currentTab == this.fakePlayerTab && MachineNetworkManager.getFakeStatesVersion() != this.lastFakeStatesVersion) {
+            this.lastFakeStatesVersion = MachineNetworkManager.getFakeStatesVersion();
+            boolean intervalFocused = this.fakePlayerTab.isIntervalFieldFocused();
+            this.removeTabButtons(this.fakePlayerTab);
+            this.fakePlayerTab.refresh();
+            this.addTabButtons(this.fakePlayerTab);
+            if (intervalFocused) {
+               this.fakePlayerTab.restoreIntervalFieldFocus();
+            }
+         }
+
+         this.updateMachineSaveVisibility();
+      }
+   }
+
+   private void updateMachineSaveVisibility() {
+      if (this.machineSaveButton != null && this.machineTab != null) {
+         boolean show = this.tabManager != null && this.tabManager.getCurrentTab() == this.machineTab && MachineNetworkManager.hasPendingMachines();
+         this.machineSaveButton.visible = show;
+         this.machineSaveButton.active = show;
+      }
+   }
 }

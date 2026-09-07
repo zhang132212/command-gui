@@ -2,8 +2,8 @@ package com.remrin.client.gui;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.remrin.client.machine.MachineDebug;
 import com.remrin.client.machine.MachineModels;
-import com.remrin.client.machine.MachineModels.MachineData;
 import com.remrin.client.machine.MachineNetworkManager;
 import java.util.ArrayList;
 import java.util.List;
@@ -12,468 +12,604 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.network.chat.Component;
-import org.lwjgl.glfw.GLFW;
+import net.minecraft.network.chat.MutableComponent;
 
-/**
- * Editor screen for creating or editing a machine switch. All fields except the timelines are
- * entered here; each timeline is edited in a separate {@link TimelineEditorScreen}.
- * <p>
- * The screen works on a working copy of the machine data, so cancelling discards all changes.
- * Saving validates the input client-side and sends an add / edit action to the server.
- */
 public class MachineEditorScreen extends BaseParentedScreen<CommandGUIScreen> {
+   private static final Gson GSON = new GsonBuilder().create();
+   private static final int FIELD_WIDTH = 300;
+   private static final int FIELD_HEIGHT = 20;
+   private static final int FIELD_GAP = 8;
+   private static final int HALF_FIELD_WIDTH = 146;
+   private MachineModels.MachineData machine;
+   private MachineModels.MachineData formalMachine;
+   private final String draftKey;
+   private boolean dirty = false;
+   private boolean modesEdited = false;
+   private int syncVersionAtOpen = -1;
+   private boolean reloadAfterDraftDelete = false;
+   private boolean pendingDraftPrompt = false;
+   private String draftTime = "";
+   private boolean initializing = false;
+   private final boolean isNewMachine;
+   private final boolean isEditor;
+   private final boolean isConfigEditor;
+   private int baseRevision;
+   private int rowGap = 30;
+   private int buttonsRowY;
+   private String errorMessage = "";
+   private String nameText = "";
+   private String descriptionText = "";
+   private String categoryText = "";
+   private String permissionText = "";
+   private String intervalText = "";
+   private EditBox nameField;
+   private EditBox descriptionField;
+   private EditBox categoryField;
+   private EditBox botsField;
+   private EditBox intervalField;
+   private EditBox permissionField;
+   private EditBox playersField;
+   private Button onTimelineButton;
+   private Button offTimelineButton;
+   private Button modesButton;
+   private Button detectionButton;
 
-  private static final Gson GSON = new GsonBuilder().create();
-  private static final int FIELD_WIDTH = 300;
-  private static final int FIELD_HEIGHT = 20;
-  private static final int FIELD_GAP = 8;
-  private static final int HALF_FIELD_WIDTH = (FIELD_WIDTH - FIELD_GAP) / 2;
+   public MachineEditorScreen(CommandGUIScreen parent, MachineModels.MachineData existing) {
+      this(parent, existing, null);
+   }
 
-  /** Working copy of the machine being edited (never the synced cache object). */
-  private final MachineData machine;
-  /** Whether this editor creates a new machine (affects optional field defaults). */
-  private final boolean isNewMachine;
-  /** Whether the local player may edit machines (canEdit: OP or whitelisted). */
-  private final boolean isEditor;
-  /** Whether the local player sees the full config rows (permission / players): OP only. */
-  private final boolean isConfigEditor;
-  /** Revision captured when the editor was opened; sent with edits for conflict detection. */
-  private final int baseRevision;
-  /** Vertical gap between fields; larger for non-editors (fewer rows to spread out). */
-  private int rowGap = 30;
-  /** Y of the process/detection button row. */
-  private int buttonsRowY;
-  /** Validation error shown above the save bar; empty means no error. */
-  private String errorMessage = "";
-  /**
-   * Live text backups so typed input survives screen re-init (Gui.setScreen re-inits the target
-   * screen every time, wiping EditBox contents that are not backed up).
-   */
-  private String nameText = "";
-  private String descriptionText = "";
-  private String categoryText = "";
-  private String permissionText = "";
-  private String intervalText = "";
-  private EditBox nameField;
-  private EditBox descriptionField;
-  private EditBox categoryField;
-  private EditBox botsField;
-  private EditBox intervalField;
-  private EditBox permissionField;
-  private EditBox playersField;
-  private Button onTimelineButton;
-  private Button offTimelineButton;
-  private Button modesButton;
-  private Button detectionButton;
-
-  public MachineEditorScreen(CommandGUIScreen parent, MachineData existing) {
-    super(Component.translatable(existing == null
-        ? "screen.command-gui.machine.add_title"
-        : "screen.command-gui.machine.edit_title"), parent);
-    this.isNewMachine = existing == null;
-    this.isEditor = MachineNetworkManager.canEdit();
-    this.isConfigEditor = MachineNetworkManager.canConfig();
-    this.machine = existing != null ? GSON.fromJson(GSON.toJson(existing), MachineData.class)
-        : new MachineData();
-    this.baseRevision = existing != null ? existing.revision : -1;
-    this.nameText = this.machine.name != null ? this.machine.name : "";
-    this.descriptionText = this.machine.description != null ? this.machine.description : "";
-    this.categoryText = this.machine.category != null ? this.machine.category : "";
-    this.intervalText = String.valueOf(this.machine.switchInterval);
-    // Permission is optional: blank means every player can toggle (level 0)
-    this.permissionText = this.isNewMachine ? "" : String.valueOf(this.machine.permissionLevel);
-  }
-
-  /** The working machine copy (used by the mode list / multi-mode config screens). */
-  public MachineData getMachine() {
-    return machine;
-  }
-
-  @Override
-  protected void init() {
-    super.init();
-
-    // Acquire the hard edit lock for the whole editing session (including sub-screens). The lock
-    // is released on save or when this screen is closed.
-    if (!isNewMachine && machine.id != null && !machine.id.isEmpty()) {
-      MachineNetworkManager.sendEditSession(machine.id, true);
-    }
-
-    int fieldX = (this.width - FIELD_WIDTH) / 2;
-    // Config editors see 4 rows (permission / players included); others 3. Editors get a wider
-    // gap, whitelisted non-OP editors have fewer rows so they spread wider still.
-    this.rowGap = isConfigEditor ? 36 : 44;
-    int fieldsEnd = isConfigEditor ? 4 : 3; // rows before the button row
-    this.buttonsRowY = 32 + rowGap * fieldsEnd;
-
-    nameField = new EditBox(this.font, fieldX, 32, HALF_FIELD_WIDTH, FIELD_HEIGHT,
-        Component.translatable("screen.command-gui.machine.name"));
-    nameField.setMaxLength(50);
-    nameField.setValue(nameText);
-    nameField.setResponder(text -> nameText = text);
-    this.addRenderableWidget(nameField);
-
-    categoryField = new EditBox(this.font, fieldX + HALF_FIELD_WIDTH + FIELD_GAP, 32,
-        HALF_FIELD_WIDTH, FIELD_HEIGHT,
-        Component.translatable("screen.command-gui.machine.category"));
-    categoryField.setMaxLength(30);
-    categoryField.setValue(categoryText);
-    categoryField.setHint(Component.translatable("screen.command-gui.machine.category_hint"));
-    categoryField.setResponder(text -> categoryText = text);
-    this.addRenderableWidget(categoryField);
-
-    descriptionField = new EditBox(this.font, fieldX, 32 + rowGap, FIELD_WIDTH, FIELD_HEIGHT,
-        Component.translatable("screen.command-gui.machine.description"));
-    descriptionField.setMaxLength(200);
-    descriptionField.setValue(descriptionText);
-    descriptionField.setResponder(text -> descriptionText = text);
-    this.addRenderableWidget(descriptionField);
-
-    botsField = new EditBox(this.font, fieldX, 32 + rowGap * 2, FIELD_WIDTH - 76, FIELD_HEIGHT,
-        Component.translatable("screen.command-gui.machine.bots"));
-    botsField.setMaxLength(200);
-    botsField.setHint(Component.translatable("screen.command-gui.machine.bots_hint"));
-    botsField.setValue(String.join(",", machine.bots));
-    botsField.setResponder(text -> machine.bots = parseList(text));
-    this.addRenderableWidget(botsField);
-
-    // Switch lock window (ticks): after booting/shutting down, further switches are blocked for
-    // this many ticks. Same row as the bots field.
-    intervalField = new EditBox(this.font, fieldX + FIELD_WIDTH - 72, 32 + rowGap * 2, 72,
-        FIELD_HEIGHT,
-        Component.translatable("screen.command-gui.machine.switch_interval"));
-    intervalField.setMaxLength(4);
-    intervalField.setValue(intervalText);
-    intervalField.setHint(Component.translatable("screen.command-gui.machine.switch_interval_hint"));
-    intervalField.setResponder(text -> intervalText = text);
-    this.addRenderableWidget(intervalField);
-
-    // Permission level / allowed players: only visible to OP config editors, on one shared row
-    if (isConfigEditor) {
-      int permRowY = 32 + rowGap * 3;
-      permissionField = new EditBox(this.font, fieldX, permRowY, 60, FIELD_HEIGHT,
-          Component.translatable("screen.command-gui.machine.permission"));
-      permissionField.setMaxLength(1);
-      permissionField.setValue(permissionText);
-      permissionField.setHint(
-          Component.translatable("screen.command-gui.machine.permission_hint"));
-      permissionField.setResponder(text -> permissionText = text);
-      this.addRenderableWidget(permissionField);
-
-      playersField = new EditBox(this.font, fieldX + 68, permRowY, FIELD_WIDTH - 68, FIELD_HEIGHT,
-          Component.translatable("screen.command-gui.machine.players"));
-      playersField.setMaxLength(200);
-      playersField.setHint(Component.translatable("screen.command-gui.machine.players_hint"));
-      playersField.setValue(String.join(",", machine.allowedPlayers));
-      playersField.setResponder(text -> machine.allowedPlayers = parseList(text));
-      this.addRenderableWidget(playersField);
-    }
-
-    int timelineWidth = (FIELD_WIDTH - 24) / 4;
-    onTimelineButton = Button.builder(
-        buildTimelineLabel(true),
-        btn -> openTimelineEditor(true)
-    ).bounds(fieldX, buttonsRowY, timelineWidth, 18).build();
-    this.addRenderableWidget(onTimelineButton);
-
-    offTimelineButton = Button.builder(
-        buildTimelineLabel(false),
-        btn -> openTimelineEditor(false)
-    ).bounds(fieldX + timelineWidth + 8, buttonsRowY, timelineWidth, 18).build();
-    this.addRenderableWidget(offTimelineButton);
-
-    modesButton = Button.builder(
-        buildModesLabel(),
-        btn -> openModesEditor()
-    ).bounds(fieldX + (timelineWidth + 8) * 2, buttonsRowY, timelineWidth, 18).build();
-    this.addRenderableWidget(modesButton);
-
-    detectionButton = Button.builder(
-        buildDetectionLabel(),
-        btn -> openDetectionEditor()
-    ).bounds(fieldX + (timelineWidth + 8) * 3, buttonsRowY, timelineWidth, 18).build();
-    this.addRenderableWidget(detectionButton);
-
-    int barY = this.height - 22;
-    int barWidth = Math.min(80, FIELD_WIDTH / 3);
-    int barStartX = fieldX + (FIELD_WIDTH - barWidth * 2 - 8) / 2;
-    this.addRenderableWidget(Button.builder(
-        Component.translatable("screen.command-gui.save"),
-        btn -> saveAndClose()
-    ).bounds(barStartX, barY, barWidth, 18).build());
-    // Back always leaves: exit without saving when the config is incomplete
-    this.addRenderableWidget(Button.builder(
-        Component.translatable("screen.command-gui.back"),
-        btn -> backAndClose()
-    ).bounds(barStartX + barWidth + 8, barY, barWidth, 18).build());
-  }
-
-  private void openTimelineEditor(boolean onTimeline) {
-    com.remrin.client.machine.MachineDebug.log("[MachineEditor.openTimeline] on=" + onTimeline
-        + " machineHash=" + System.identityHashCode(machine)
-        + " onTimelineHash=" + System.identityHashCode(machine.onTimeline)
-        + " steps=" + machine.onTimeline.steps.size()
-        + " firstCommands=" + (machine.onTimeline.steps.isEmpty() ? "[]"
-            : com.remrin.client.machine.MachineDebug.commandsString(
-                machine.onTimeline.steps.get(0).commands)));
-    this.minecraft.gui.setScreen(new TimelineEditorScreen(
-        this,
-        Component.translatable(onTimeline
-            ? "screen.command-gui.machine.boot_process_title"
-            : "screen.command-gui.machine.shutdown_process_title"),
-        onTimeline ? machine.onTimeline : machine.offTimeline,
-        onTimeline,
-        true,
-        () -> updateTimelineButtons(),
-        machine.bots));
-  }
-
-  private void openModesEditor() {
-    this.minecraft.gui.setScreen(new ModesEditorScreen(
-        this,
-        machine.modes,
-        machine.bots,
-        () -> updateTimelineButtons()));
-  }
-
-  private void openDetectionEditor() {
-    this.minecraft.gui.setScreen(new DetectionScreen(
-        this,
-        machine.detection,
-        detection -> {
-          machine.detection = detection;
-          detectionButton.setMessage(buildDetectionLabel());
-        }));
-  }
-
-  private void updateTimelineButtons() {
-    if (onTimelineButton != null) {
-      onTimelineButton.setMessage(buildTimelineLabel(true));
-    }
-    if (offTimelineButton != null) {
-      offTimelineButton.setMessage(buildTimelineLabel(false));
-    }
-    if (modesButton != null) {
-      modesButton.setMessage(buildModesLabel());
-    }
-    if (detectionButton != null) {
-      detectionButton.setMessage(buildDetectionLabel());
-    }
-  }
-
-  private Component buildTimelineLabel(boolean onTimeline) {
-    int steps = (onTimeline ? machine.onTimeline : machine.offTimeline).steps.size();
-    return Component.translatable(onTimeline
-        ? "screen.command-gui.machine.boot_process_short"
-        : "screen.command-gui.machine.shutdown_process_short", steps);
-  }
-
-  private Component buildModesLabel() {
-    return Component.translatable("screen.command-gui.machine.modes_short", machine.modes.size());
-  }
-
-  private Component buildDetectionLabel() {
-    if (machine.detection == null || !machine.detection.isConfigured()) {
-      return Component.translatable("screen.command-gui.machine.detection_none_short");
-    }
-    if (machine.detection.enabled) {
-      return Component.translatable("screen.command-gui.machine.detection_on_short");
-    }
-    return Component.translatable("screen.command-gui.machine.detection_off_short");
-  }
-
-  /**
-   * Validates the machine; returns an error message or an empty string when valid.
-   */
-  private String validateMachine() {
-    String name = nameField.getValue().trim();
-    if (name.isEmpty()) {
-      return Component.translatable("screen.command-gui.machine.error_name").getString();
-    }
-    if (machine.bots.isEmpty()) {
-      return Component.translatable("screen.command-gui.machine.error_bots").getString();
-    }
-    if (!MachineModels.isSpawnCommand(MachineModels.firstCommand(machine.onTimeline))) {
-      return Component.translatable("screen.command-gui.machine.spawn_required").getString();
-    }
-    String stepsError = MachineModels.validateSteps("开机流程", machine.onTimeline);
-    if (stepsError != null) {
-      return stepsError;
-    }
-    stepsError = MachineModels.validateSteps("关机流程", machine.offTimeline);
-    if (stepsError != null) {
-      return stepsError;
-    }
-    for (MachineModels.ModeData mode : machine.modes) {
-      if (mode.name == null || mode.name.isBlank()) {
-        return Component.translatable("screen.command-gui.machine.error_mode_name").getString();
+   public MachineEditorScreen(CommandGUIScreen parent, MachineModels.MachineData existing, String initialCategory) {
+      super(Component.translatable(existing == null ? "screen.command-gui.machine.add_title" : "screen.command-gui.machine.edit_title"), parent);
+      this.isNewMachine = existing == null;
+      this.isEditor = MachineNetworkManager.canEdit();
+      this.isConfigEditor = MachineNetworkManager.canConfig();
+      this.machine = existing != null
+         ? (MachineModels.MachineData)GSON.fromJson(GSON.toJson(existing), MachineModels.MachineData.class)
+         : new MachineModels.MachineData();
+      this.baseRevision = existing != null ? existing.revision : -1;
+      this.formalMachine = existing != null ? (MachineModels.MachineData)GSON.fromJson(GSON.toJson(existing), MachineModels.MachineData.class) : null;
+      this.syncVersionAtOpen = MachineNetworkManager.getSyncVersion();
+      this.draftKey = existing != null ? "machine-" + existing.id : "machine-new-" + System.currentTimeMillis();
+      String draftJson = DraftStore.load(this.draftKey);
+      if (draftJson != null) {
+         try {
+            MachineModels.MachineData draft = (MachineModels.MachineData)GSON.fromJson(draftJson, MachineModels.MachineData.class);
+            if (draft != null && draft.id != null && (existing == null || draft.id.equals(existing.id))) {
+               this.machine = draft;
+               this.pendingDraftPrompt = true;
+               this.draftTime = DraftStore.lastModified(this.draftKey);
+            }
+         } catch (Exception var6) {
+         }
       }
-      if (!MachineModels.isSpawnCommand(MachineModels.firstCommand(mode.onTimeline))) {
-        return Component.translatable("screen.command-gui.machine.error_mode_spawn",
-            mode.name).getString();
-      }
-      stepsError = MachineModels.validateSteps("模式「" + mode.name + "」开启流程",
-          mode.onTimeline);
-      if (stepsError != null) {
-        return stepsError;
-      }
-      stepsError = MachineModels.validateSteps("模式「" + mode.name + "」关机流程",
-          mode.offTimeline);
-      if (stepsError != null) {
-        return stepsError;
-      }
-    }
-    return "";
-  }
 
-  private void saveAndClose() {
-    errorMessage = "";
-    String error = validateMachine();
-    if (!error.isEmpty()) {
-      errorMessage = error;
-      return;
-    }
-    // Read the live widgets directly (the backups only serve re-init restoration)
-    String name = nameField.getValue().trim();
-    machine.name = name;
-    machine.description = descriptionField.getValue().trim();
-    machine.category = categoryField.getValue().trim();
-    try {
-      machine.switchInterval = Math.max(0, Math.min(1200,
-          Integer.parseInt(intervalField.getValue().trim())));
-    } catch (NumberFormatException ignored) {
-      machine.switchInterval = 20;
-    }
-    // Permission is optional (OP editors only): blank or invalid input means every player can
-    // toggle (level 0). Non-editors keep the machine's existing value.
-    if (permissionField != null) {
+      this.nameText = this.machine.name != null ? this.machine.name : "";
+      this.descriptionText = this.machine.description != null ? this.machine.description : "";
+      this.categoryText = initialCategory != null ? initialCategory : (this.machine.category != null ? this.machine.category : "");
+      if (initialCategory != null) {
+         this.machine.category = initialCategory;
+      }
+
+      this.intervalText = String.valueOf(this.machine.switchInterval);
+      this.permissionText = this.isNewMachine ? "" : String.valueOf(this.machine.permissionLevel);
+   }
+
+   public MachineModels.MachineData getMachine() {
+      return this.machine;
+   }
+
+   protected void init() {
+      super.init();
+      this.initializing = true;
+      if (!this.isNewMachine && this.machine.id != null && !this.machine.id.isEmpty()) {
+         MachineNetworkManager.sendEditSession(this.machine.id, true);
+      }
+
+      int fieldX = (this.width - 300) / 2;
+      this.rowGap = this.isConfigEditor ? 36 : 44;
+      int fieldsEnd = this.isConfigEditor ? 4 : 3;
+      this.buttonsRowY = 32 + this.rowGap * fieldsEnd;
+      this.nameField = new EditBox(this.font, fieldX, 32, 146, 20, Component.translatable("screen.command-gui.machine.name"));
+      this.nameField.setMaxLength(50);
+      this.nameField.setValue(this.nameText);
+      this.nameField.setResponder(text -> {
+         this.nameText = text;
+         this.setDirty();
+      });
+      this.addRenderableWidget(this.nameField);
+      this.categoryField = new EditBox(this.font, fieldX + 146 + 8, 32, 146, 20, Component.translatable("screen.command-gui.machine.category"));
+      this.categoryField.setMaxLength(30);
+      this.categoryField.setValue(this.categoryText);
+      this.categoryField.setHint(Component.translatable("screen.command-gui.machine.category_hint"));
+      this.categoryField.setResponder(text -> {
+         this.categoryText = text;
+         this.setDirty();
+      });
+      this.addRenderableWidget(this.categoryField);
+      this.descriptionField = new EditBox(this.font, fieldX, 32 + this.rowGap, 300, 20, Component.translatable("screen.command-gui.machine.description"));
+      this.descriptionField.setMaxLength(200);
+      this.descriptionField.setValue(this.descriptionText);
+      this.descriptionField.setResponder(text -> {
+         this.descriptionText = text;
+         this.setDirty();
+      });
+      this.addRenderableWidget(this.descriptionField);
+      this.botsField = new EditBox(this.font, fieldX, 32 + this.rowGap * 2, 224, 20, Component.translatable("screen.command-gui.machine.bots"));
+      this.botsField.setMaxLength(200);
+      this.botsField.setHint(Component.translatable("screen.command-gui.machine.bots_hint"));
+      this.botsField.setValue(String.join(",", this.machine.bots));
+      this.botsField.setResponder(text -> {
+         this.machine.bots = parseList(text);
+         this.setDirty();
+      });
+      this.addRenderableWidget(this.botsField);
+      this.intervalField = new DigitsOnlyEditBox(
+         this.font, fieldX + 300 - 72, 32 + this.rowGap * 2, 72, 20, Component.translatable("screen.command-gui.machine.switch_interval")
+      );
+      this.intervalField.setMaxLength(4);
+      this.intervalField.setValue(this.intervalText);
+      this.intervalField.setHint(Component.translatable("screen.command-gui.machine.switch_interval_hint"));
+      this.intervalField.setResponder(text -> {
+         this.intervalText = text;
+         this.setDirty();
+      });
+      this.addRenderableWidget(this.intervalField);
+      if (this.isConfigEditor) {
+         int permRowY = 32 + this.rowGap * 3;
+         this.permissionField = new EditBox(this.font, fieldX, permRowY, 60, 20, Component.translatable("screen.command-gui.machine.permission"));
+         this.permissionField.setMaxLength(1);
+         this.permissionField.setValue(this.permissionText);
+         this.permissionField.setHint(Component.translatable("screen.command-gui.machine.permission_hint"));
+         this.permissionField.setResponder(text -> {
+            this.permissionText = text;
+            this.setDirty();
+         });
+         this.addRenderableWidget(this.permissionField);
+         this.playersField = new EditBox(this.font, fieldX + 68, permRowY, 232, 20, Component.translatable("screen.command-gui.machine.players"));
+         this.playersField.setMaxLength(200);
+         this.playersField.setHint(Component.translatable("screen.command-gui.machine.players_hint"));
+         this.playersField.setValue(String.join(",", this.machine.bannedPlayers));
+         this.playersField.setResponder(text -> {
+            this.machine.bannedPlayers = parseList(text);
+            this.setDirty();
+         });
+         this.addRenderableWidget(this.playersField);
+      }
+
+      int timelineWidth = 69;
+      this.onTimelineButton = Button.builder(this.buildTimelineLabel(true), btn -> this.openTimelineEditor(true))
+         .bounds(fieldX, this.buttonsRowY, timelineWidth, 18)
+         .build();
+      this.addRenderableWidget(this.onTimelineButton);
+      this.offTimelineButton = Button.builder(this.buildTimelineLabel(false), btn -> this.openTimelineEditor(false))
+         .bounds(fieldX + timelineWidth + 8, this.buttonsRowY, timelineWidth, 18)
+         .build();
+      this.addRenderableWidget(this.offTimelineButton);
+      this.modesButton = Button.builder(this.buildModesLabel(), btn -> this.openModesEditor())
+         .bounds(fieldX + (timelineWidth + 8) * 2, this.buttonsRowY, timelineWidth, 18)
+         .build();
+      this.addRenderableWidget(this.modesButton);
+      this.detectionButton = Button.builder(this.buildDetectionLabel(), btn -> this.openDetectionEditor())
+         .bounds(fieldX + (timelineWidth + 8) * 3, this.buttonsRowY, timelineWidth, 18)
+         .build();
+      this.addRenderableWidget(this.detectionButton);
+      int barY = this.height - 22;
+      int barWidth = Math.min(80, 100);
+      int buttonCount = this.isNewMachine ? 2 : 3;
+      int barStartX = fieldX + (300 - (barWidth * buttonCount + 8 * (buttonCount - 1))) / 2;
+      this.addRenderableWidget(
+         Button.builder(Component.translatable("screen.command-gui.save"), btn -> this.saveAndClose()).bounds(barStartX, barY, barWidth, 18).build()
+      );
+      int barX = barStartX + barWidth + 8;
+      if (!this.isNewMachine && this.isConfigEditor) {
+         this.addRenderableWidget(
+            Button.builder(Component.translatable("screen.command-gui.delete"), btn -> this.confirmDelete()).bounds(barX, barY, barWidth, 18).build()
+         );
+         barX += barWidth + 8;
+      }
+
+      this.addRenderableWidget(
+         Button.builder(Component.translatable("screen.command-gui.back"), btn -> this.requestExit()).bounds(barX, barY, barWidth, 18).build()
+      );
+      if (this.pendingDraftPrompt) {
+         this.pendingDraftPrompt = false;
+         String time = this.draftTime;
+         this.minecraft
+            .gui
+            .setScreen(
+               new ConfirmScreen(
+                  this,
+                  Component.translatable("screen.command-gui.draft.title"),
+                  Component.translatable("screen.command-gui.draft.restore"),
+                  Component.translatable("screen.command-gui.draft.delete"),
+                  () -> this.minecraft.gui.setScreen(this),
+                  () -> {
+                     DraftStore.clear(this.draftKey);
+                     this.reloadAfterDraftDelete = true;
+                     MachineNetworkManager.sendRequestSync();
+                     this.minecraft.gui.setScreen(this);
+                  },
+                  Component.translatable("screen.command-gui.draft.message", new Object[]{time})
+               )
+            );
+      }
+
+      this.initializing = false;
+   }
+
+   private void openTimelineEditor(boolean onTimeline) {
+      MachineDebug.log(
+         "[MachineEditor.openTimeline] on="
+            + onTimeline
+            + " machineHash="
+            + System.identityHashCode(this.machine)
+            + " onTimelineHash="
+            + System.identityHashCode(this.machine.onTimeline)
+            + " steps="
+            + this.machine.onTimeline.steps.size()
+            + " firstCommands="
+            + (this.machine.onTimeline.steps.isEmpty() ? "[]" : MachineDebug.commandsString(this.machine.onTimeline.steps.get(0).commands))
+      );
+      this.minecraft
+         .gui
+         .setScreen(
+            new TimelineEditorScreen(
+               this,
+               Component.translatable(onTimeline ? "screen.command-gui.machine.boot_process_title" : "screen.command-gui.machine.shutdown_process_title"),
+               onTimeline ? this.machine.onTimeline : this.machine.offTimeline,
+               onTimeline,
+               true,
+               () -> this.updateTimelineButtons(),
+               this.machine.bots
+            )
+         );
+   }
+
+   private void openModesEditor() {
+      this.minecraft.gui.setScreen(new ModesEditorScreen(this, this.machine.modes, this.machine.bots, () -> {
+         this.modesEdited = true;
+         this.updateTimelineButtons();
+      }));
+   }
+
+   private void openDetectionEditor() {
+      this.minecraft.gui.setScreen(new DetectionScreen(this, this.machine.detection, detection -> {
+         this.machine.detection = detection;
+         this.detectionButton.setMessage(this.buildDetectionLabel());
+         this.setDirty();
+      }));
+   }
+
+   private void updateTimelineButtons() {
+      this.setDirty();
+      if (this.onTimelineButton != null) {
+         this.onTimelineButton.setMessage(this.buildTimelineLabel(true));
+      }
+
+      if (this.offTimelineButton != null) {
+         this.offTimelineButton.setMessage(this.buildTimelineLabel(false));
+      }
+
+      if (this.modesButton != null) {
+         this.modesButton.setMessage(this.buildModesLabel());
+      }
+
+      if (this.detectionButton != null) {
+         this.detectionButton.setMessage(this.buildDetectionLabel());
+      }
+   }
+
+   private void setDirty() {
+      if (!this.initializing) {
+         this.dirty = true;
+         this.syncWorkingFromText();
+         DraftStore.save(this.draftKey, GSON.toJson(this.machine));
+      }
+   }
+
+   private void syncWorkingFromText() {
+      this.machine.name = this.nameText != null ? this.nameText.trim() : "";
+      this.machine.description = this.descriptionText != null ? this.descriptionText.trim() : "";
+      this.machine.category = this.categoryText != null ? this.categoryText.trim() : "";
+
       try {
-        machine.permissionLevel = Integer.parseInt(permissionField.getValue().trim());
-      } catch (NumberFormatException ignored) {
-        machine.permissionLevel = 0;
+         this.machine.switchInterval = Math.max(1, Math.min(1200, Integer.parseInt(this.intervalText.trim())));
+      } catch (NumberFormatException var3) {
+         this.machine.switchInterval = 20;
       }
-      machine.permissionLevel = Math.max(0, Math.min(machine.permissionLevel, 4));
-    }
 
-    boolean isNew = machine.id == null || machine.id.isEmpty();
-    if (isNew) {
-      machine.id = generateId(name);
-    }
-    if (isNew) {
-      MachineNetworkManager.sendAdd(machine);
-    } else {
-      // Save first (the server releases the lock on success), then release the lock explicitly so
-      // a rejected save (e.g. stale revision) does not leave it held.
-      MachineNetworkManager.sendEdit(machine, baseRevision);
-      MachineNetworkManager.sendEditSession(machine.id, false);
-    }
-    this.minecraft.gui.setScreen(parent);
-  }
+      if (this.permissionText != null) {
+         try {
+            this.machine.permissionLevel = Integer.parseInt(this.permissionText.trim());
+         } catch (NumberFormatException var2) {
+            this.machine.permissionLevel = 0;
+         }
 
-  /**
-   * Always leaves the screen. When the machine validates, it is saved first; otherwise it exits
-   * WITHOUT saving (the session is discarded) and releases the edit lock so the machine is not
-   * stuck for other players.
-   */
-  private void backAndClose() {
-    if (validateMachine().isEmpty()) {
-      saveAndClose();
-      return;
-    }
-    if (!isNewMachine && machine.id != null && !machine.id.isEmpty()) {
-      MachineNetworkManager.sendEditSession(machine.id, false);
-    }
-    this.minecraft.gui.setScreen(parent);
-  }
-
-  @Override
-  public void onClose() {
-    // Safety net: release the edit lock whenever the screen is closed by the game
-    if (!isNewMachine && machine.id != null && !machine.id.isEmpty()) {
-      MachineNetworkManager.sendEditSession(machine.id, false);
-    }
-    super.onClose();
-  }
-
-  /**
-   * Generates a unique machine id from the name (lowercase, dashes) and de-duplicates against
-   * existing machines by appending a counter.
-   */
-  private String generateId(String name) {
-    String base = name.toLowerCase().replaceAll("[^a-z0-9_-]+", "-");
-    if (base.isEmpty()) {
-      base = "machine";
-    }
-    String candidate = base;
-    int n = 2;
-    while (MachineNetworkManager.getMachine(candidate) != null) {
-      candidate = base + "-" + n;
-      n++;
-    }
-    return candidate;
-  }
-
-  /**
-   * Parses a comma / space / Chinese-comma separated string into a trimmed non-empty list.
-   */
-  private static List<String> parseList(String text) {
-    List<String> result = new ArrayList<>();
-    if (text == null) {
-      return result;
-    }
-    for (String part : text.split("[,，;；\\s]+")) {
-      if (!part.isEmpty()) {
-        result.add(part);
+         this.machine.permissionLevel = Math.max(0, Math.min(this.machine.permissionLevel, 4));
       }
-    }
-    return result;
-  }
+   }
 
-  @Override
-  public boolean keyPressed(KeyEvent keyEvent) {
-    if (keyEvent.key() == GLFW.GLFW_KEY_ENTER || keyEvent.key() == GLFW.GLFW_KEY_KP_ENTER) {
-      saveAndClose();
-      return true;
-    }
-    if (keyEvent.key() == GLFW.GLFW_KEY_ESCAPE) {
-      backAndClose();
-      return true;
-    }
-    return super.keyPressed(keyEvent);
-  }
+   private void restoreFormal() {
+      this.machine = this.formalMachine != null
+         ? (MachineModels.MachineData)GSON.fromJson(GSON.toJson(this.formalMachine), MachineModels.MachineData.class)
+         : new MachineModels.MachineData();
+      this.nameText = this.machine.name != null ? this.machine.name : "";
+      this.descriptionText = this.machine.description != null ? this.machine.description : "";
+      this.categoryText = this.machine.category != null ? this.machine.category : "";
+      this.intervalText = String.valueOf(this.machine.switchInterval);
+      this.permissionText = this.isNewMachine ? "" : String.valueOf(this.machine.permissionLevel);
+      this.dirty = false;
+   }
 
-  @Override
-  public void extractRenderState(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY,
-      float partialTick) {
-    super.extractRenderState(guiGraphics, mouseX, mouseY, partialTick);
+   @Override
+   public void tick() {
+      super.tick();
+      if (this.reloadAfterDraftDelete && MachineNetworkManager.getSyncVersion() != this.syncVersionAtOpen) {
+         this.reloadAfterDraftDelete = false;
+         MachineModels.MachineData fresh = MachineNetworkManager.getMachine(this.machine.id);
+         if (fresh != null) {
+            this.machine = (MachineModels.MachineData)GSON.fromJson(GSON.toJson(fresh), MachineModels.MachineData.class);
+            this.formalMachine = (MachineModels.MachineData)GSON.fromJson(GSON.toJson(fresh), MachineModels.MachineData.class);
+            this.baseRevision = fresh.revision;
+            this.restoreFormal();
+            this.rebuildWidgets();
+         } else {
+            this.restoreFormal();
+         }
+      }
+   }
 
-    int fieldX = (this.width - FIELD_WIDTH) / 2;
-    guiGraphics.centeredText(this.font, this.title, this.width / 2, 4, 0xFFFFFFFF);
+   private void requestExit() {
+      if (!this.dirty) {
+         this.closeEditor();
+      } else {
+         this.minecraft
+            .gui
+            .setScreen(
+               new UnsavedExitScreen(
+                  this,
+                  Component.translatable("screen.command-gui.unsaved.title"),
+                  Component.translatable("screen.command-gui.unsaved.message"),
+                  this::trySaveFromExit,
+                  () -> {
+                     DraftStore.save(this.draftKey, GSON.toJson(this.machine));
+                     this.releaseEditLock();
+                     this.minecraft.gui.setScreen(this.parent);
+                  }
+               )
+            );
+      }
+   }
 
-    renderLabel(guiGraphics, fieldX, 32,
-        Component.translatable("screen.command-gui.machine.name"));
-    renderLabel(guiGraphics, fieldX + HALF_FIELD_WIDTH + FIELD_GAP, 32,
-        Component.translatable("screen.command-gui.machine.category"));
-    renderLabel(guiGraphics, fieldX, 32 + rowGap,
-        Component.translatable("screen.command-gui.machine.description"));
-    renderLabel(guiGraphics, fieldX, 32 + rowGap * 2,
-        Component.translatable("screen.command-gui.machine.bots"));
-    renderLabel(guiGraphics, fieldX + FIELD_WIDTH - 72, 32 + rowGap * 2,
-        Component.translatable("screen.command-gui.machine.switch_interval"));
-    if (isConfigEditor) {
-      renderLabel(guiGraphics, fieldX, 32 + rowGap * 3,
-          Component.translatable("screen.command-gui.machine.permission"));
-      renderLabel(guiGraphics, fieldX + 68, 32 + rowGap * 3,
-          Component.translatable("screen.command-gui.machine.players"));
-    }
+   private void trySaveFromExit() {
+      this.errorMessage = "";
+      if (!this.validateMachine().isEmpty()) {
+         this.minecraft.gui.setScreen(this);
+      } else {
+         this.saveAndClose();
+      }
+   }
 
-    if (!errorMessage.isEmpty()) {
-      guiGraphics.text(this.font, Component.literal(errorMessage),
-          fieldX, buttonsRowY + 26, 0xFFFF5555);
-    }
-  }
+   private void closeEditor() {
+      this.releaseEditLock();
+      this.minecraft.gui.setScreen(this.parent);
+   }
 
-  private void renderLabel(GuiGraphicsExtractor guiGraphics, int x, int fieldY, Component label) {
-    guiGraphics.text(this.font, label, x, fieldY - 12, 0xFFAAAAAA);
-  }
+   private void releaseEditLock() {
+      if (!this.isNewMachine && this.machine.id != null && !this.machine.id.isEmpty()) {
+         MachineNetworkManager.sendEditSession(this.machine.id, false);
+      }
+   }
+
+   private Component buildTimelineLabel(boolean onTimeline) {
+      int steps = (onTimeline ? this.machine.onTimeline : this.machine.offTimeline).steps.size();
+      return Component.translatable(
+         onTimeline ? "screen.command-gui.machine.boot_process_short" : "screen.command-gui.machine.shutdown_process_short", new Object[]{steps}
+      );
+   }
+
+   private Component buildModesLabel() {
+      return Component.translatable("screen.command-gui.machine.modes_short", new Object[]{this.machine.modes.size()});
+   }
+
+   private Component buildDetectionLabel() {
+      return Component.translatable("screen.command-gui.machine.detection_on_short");
+   }
+
+   private String validateMachine() {
+      String name = this.nameField.getValue().trim();
+      if (name.isEmpty()) {
+         return Component.translatable("screen.command-gui.machine.error_name").getString();
+      } else if (this.machine.bots.isEmpty()) {
+         return Component.translatable("screen.command-gui.machine.error_bots").getString();
+      } else if (!MachineModels.isSpawnCommand(MachineModels.firstCommand(this.machine.onTimeline))) {
+         return Component.translatable("screen.command-gui.machine.spawn_required").getString();
+      } else {
+         String stepsError = MachineModels.validateSteps("开机流程", this.machine.onTimeline);
+         if (stepsError != null) {
+            return stepsError;
+         } else {
+            stepsError = MachineModels.validateSteps("关机流程", this.machine.offTimeline);
+            if (stepsError != null) {
+               return stepsError;
+            } else {
+               for (MachineModels.ModeData mode : this.machine.modes) {
+                  if (mode.name == null || mode.name.isBlank()) {
+                     return Component.translatable("screen.command-gui.machine.error_mode_name").getString();
+                  }
+
+                  if (!MachineModels.isSpawnCommand(MachineModels.firstCommand(mode.onTimeline))) {
+                     return Component.translatable("screen.command-gui.machine.error_mode_spawn", new Object[]{mode.name}).getString();
+                  }
+
+                  stepsError = MachineModels.validateSteps("模式「" + mode.name + "」开启流程", mode.onTimeline);
+                  if (stepsError != null) {
+                     return stepsError;
+                  }
+
+                  stepsError = MachineModels.validateSteps("模式「" + mode.name + "」关机流程", mode.offTimeline);
+                  if (stepsError != null) {
+                     return stepsError;
+                  }
+               }
+
+               return "";
+            }
+         }
+      }
+   }
+
+   private void saveAndClose() {
+      this.errorMessage = "";
+      String error = this.validateMachine();
+      if (!error.isEmpty()) {
+         this.errorMessage = error;
+      } else {
+         String name = this.nameField.getValue().trim();
+         this.machine.name = name;
+         this.machine.description = this.descriptionField.getValue().trim();
+         this.machine.category = this.categoryField.getValue().trim();
+
+         try {
+            this.machine.switchInterval = Math.max(1, Math.min(1200, Integer.parseInt(this.intervalField.getValue().trim())));
+         } catch (NumberFormatException var5) {
+            this.machine.switchInterval = 20;
+         }
+
+         if (this.permissionField != null) {
+            try {
+               this.machine.permissionLevel = Integer.parseInt(this.permissionField.getValue().trim());
+            } catch (NumberFormatException var4) {
+               this.machine.permissionLevel = 0;
+            }
+
+            this.machine.permissionLevel = Math.max(0, Math.min(this.machine.permissionLevel, 4));
+         }
+
+         boolean isNew = this.machine.id == null || this.machine.id.isEmpty();
+         if (isNew) {
+            this.machine.id = this.generateId(name);
+         }
+
+         if (isNew) {
+            MachineNetworkManager.sendAdd(this.machine);
+         } else {
+            MachineNetworkManager.sendEdit(this.machine, this.baseRevision);
+            MachineNetworkManager.sendEditSession(this.machine.id, false);
+         }
+
+         DraftStore.clear(this.draftKey);
+         this.dirty = false;
+         this.minecraft.gui.setScreen(this.parent);
+      }
+   }
+
+   @Override
+   public void onClose() {
+      this.releaseEditLock();
+      super.onClose();
+   }
+
+   private String generateId(String name) {
+      String base = name.toLowerCase().replaceAll("[^a-z0-9_-]+", "-");
+      if (base.isEmpty()) {
+         base = "machine";
+      }
+
+      String candidate = base;
+
+      for (int n = 2; MachineNetworkManager.getMachine(candidate) != null; n++) {
+         candidate = base + "-" + n;
+      }
+
+      return candidate;
+   }
+
+   private static List<String> parseList(String text) {
+      List<String> result = new ArrayList<>();
+      if (text == null) {
+         return result;
+      } else {
+         for (String part : text.split("[,，;；\\s]+")) {
+            if (!part.isEmpty()) {
+               result.add(part);
+            }
+         }
+
+         return result;
+      }
+   }
+
+   public boolean keyPressed(KeyEvent keyEvent) {
+      if (keyEvent.key() != 257 && keyEvent.key() != 335) {
+         if (keyEvent.key() == 256) {
+            this.requestExit();
+            return true;
+         } else {
+            return super.keyPressed(keyEvent);
+         }
+      } else if (this.isAnyFieldFocused()) {
+         return true;
+      } else {
+         this.saveAndClose();
+         return true;
+      }
+   }
+
+   private boolean isAnyFieldFocused() {
+      return this.nameField != null && this.nameField.isFocused()
+         || this.categoryField != null && this.categoryField.isFocused()
+         || this.descriptionField != null && this.descriptionField.isFocused()
+         || this.botsField != null && this.botsField.isFocused()
+         || this.intervalField != null && this.intervalField.isFocused()
+         || this.permissionField != null && this.permissionField.isFocused()
+         || this.playersField != null && this.playersField.isFocused();
+   }
+
+   public void extractRenderState(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY, float partialTick) {
+      super.extractRenderState(guiGraphics, mouseX, mouseY, partialTick);
+      int fieldX = (this.width - 300) / 2;
+      MutableComponent title = this.title.copy();
+      if (this.dirty) {
+         title.append(" ").append(Component.translatable("screen.command-gui.unsaved_badge").withColor(-22016));
+      }
+
+      guiGraphics.centeredText(this.font, title, this.width / 2, 4, -1);
+      this.renderLabel(guiGraphics, fieldX, 32, Component.translatable("screen.command-gui.machine.name"));
+      this.renderLabel(guiGraphics, fieldX + 146 + 8, 32, Component.translatable("screen.command-gui.machine.category"));
+      this.renderLabel(guiGraphics, fieldX, 32 + this.rowGap, Component.translatable("screen.command-gui.machine.description"));
+      this.renderLabel(guiGraphics, fieldX, 32 + this.rowGap * 2, Component.translatable("screen.command-gui.machine.bots"));
+      this.renderLabel(guiGraphics, fieldX + 300 - 72, 32 + this.rowGap * 2, Component.translatable("screen.command-gui.machine.switch_interval"));
+      if (this.isConfigEditor) {
+         this.renderLabel(guiGraphics, fieldX, 32 + this.rowGap * 3, Component.translatable("screen.command-gui.machine.permission"));
+         this.renderLabel(guiGraphics, fieldX + 68, 32 + this.rowGap * 3, Component.translatable("screen.command-gui.machine.players"));
+      }
+
+      if (!this.errorMessage.isEmpty()) {
+         guiGraphics.text(this.font, Component.literal(this.errorMessage), fieldX, this.buttonsRowY + 26, -43691);
+      }
+   }
+
+   private void renderLabel(GuiGraphicsExtractor guiGraphics, int x, int fieldY, Component label) {
+      guiGraphics.text(this.font, label, x, fieldY - 12, -5592406);
+   }
+
+   private void confirmDelete() {
+      this.minecraft
+         .gui
+         .setScreen(
+            new ConfirmScreen(
+               this,
+               Component.translatable("screen.command-gui.machine.delete_title"),
+               Component.translatable("screen.command-gui.machine.delete_confirm"),
+               Component.translatable("screen.command-gui.cancel"),
+               () -> {
+                  MachineNetworkManager.sendDelete(this.machine.id);
+                  this.closeEditor();
+               },
+               Component.translatable("screen.command-gui.machine.delete_message", new Object[]{this.machine.name}),
+               Component.translatable("screen.command-gui.fakeplayer.remove_irreversible")
+            )
+         );
+   }
 }

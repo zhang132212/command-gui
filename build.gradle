@@ -64,6 +64,15 @@ java {
 	targetCompatibility = JavaVersion.VERSION_25
 }
 
+sourceSets {
+	main {
+		java {
+			srcDir 'server/src/main/java'
+		}
+	}
+}
+
+
 jar {
 	inputs.property "projectName", project.name
 
@@ -88,3 +97,25 @@ publishing {
 		// retrieving dependencies.
 	}
 }
+
+// Automatically bump mod version after each successful build.
+tasks.register("bumpVersion") {
+    doLast {
+        if (tasks.build.state.upToDate) {
+            println "Build was up-to-date, skip version bump"
+            return
+        }
+
+        def propsFile = file("gradle.properties")
+        def text = propsFile.getText("UTF-8")
+        def matcher = text =~ /mod_version=0\.2\.0-beta\.(\d+)/
+        if (matcher.find()) {
+            def nextVersion = Integer.parseInt(matcher.group(1)) + 1
+            def updated = text.replaceFirst(/mod_version=0\.2\.0-beta\.(\d+)/, "mod_version=0.2.0-beta.${nextVersion}")
+            propsFile.setText(updated, "UTF-8")
+            println "Version auto-bumped to 0.2.0-beta.${nextVersion} for the next build"
+        }
+    }
+}
+
+build.finalizedBy bumpVersion

@@ -13,139 +13,121 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.Minecraft;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.packs.resources.Resource;
 import net.minecraft.server.packs.resources.ResourceManager;
 
-/**
- * Preset command configuration manager. At resource pack load time, copies bundled preset JSON
- * files (e.g. vanilla.json, carpet.json) to the {@code config/command-gui/presets/} directory
- * (skipping files that already exist to preserve user edits), then reads all JSON files in that
- * directory (excluding custom.json) and builds a list of {@link Preset} objects.
- */
 public class PresetConfig {
+   private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
+   private static final Path PRESETS_DIR = FabricLoader.getInstance().getConfigDir().resolve("command-gui").resolve("presets");
+   private static final List<PresetConfig.Preset> presets = new ArrayList<>();
 
-  private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-  private static final Path PRESETS_DIR = FabricLoader.getInstance().getConfigDir()
-      .resolve("command-gui").resolve("presets");
-  private static final List<Preset> presets = new ArrayList<>();
+   public static void load() {
+      presets.clear();
+      copyDefaultPresetsIfNeeded();
+      loadFromConfigDir();
+   }
 
-  public static void load() {
-    presets.clear();
-    copyDefaultPresetsIfNeeded();
-    loadFromConfigDir();
-  }
-
-  private static void copyDefaultPresetsIfNeeded() {
-    try {
-      Files.createDirectories(PRESETS_DIR);
-
-      Minecraft mc = Minecraft.getInstance();
-        if (mc == null) {
+   private static void copyDefaultPresetsIfNeeded() {
+      try {
+         Files.createDirectories(PRESETS_DIR);
+         Minecraft mc = Minecraft.getInstance();
+         if (mc == null) {
             return;
-        }
+         }
 
-      ResourceManager resourceManager = mc.getResourceManager();
-      Map<Identifier, Resource> resources = resourceManager.listResources(
-          "presets",
-          path -> path.getPath().endsWith(".json")
-      );
+         ResourceManager resourceManager = mc.getResourceManager();
+         Map<Identifier, Resource> resources = resourceManager.listResources("presets", path -> path.getPath().endsWith(".json"));
 
-      for (Map.Entry<Identifier, Resource> entry : resources.entrySet()) {
-        Identifier location = entry.getKey();
-          if (!location.getNamespace().equals("command-gui")) {
-              continue;
-          }
-
-        String fileName = location.getPath().substring(location.getPath().lastIndexOf('/') + 1);
-        Path targetPath = PRESETS_DIR.resolve(fileName);
-
-// Only copy default presets if they don't already exist (preserve user modifications)
-          if (Files.exists(targetPath)) {
-              continue;
-          }
-
-        try (InputStream is = entry.getValue().open();
-            Reader reader = new InputStreamReader(is, StandardCharsets.UTF_8)) {
-          Preset preset = GSON.fromJson(reader, Preset.class);
-          if (preset != null && preset.id != null) {
-            try (Writer writer = Files.newBufferedWriter(targetPath, StandardCharsets.UTF_8)) {
-              GSON.toJson(preset, writer);
+         for (Entry<Identifier, Resource> entry : resources.entrySet()) {
+            Identifier location = entry.getKey();
+            if (location.getNamespace().equals("command-gui")) {
+               String fileName = location.getPath().substring(location.getPath().lastIndexOf(47) + 1);
+               Path targetPath = PRESETS_DIR.resolve(fileName);
+               if (!Files.exists(targetPath)) {
+                  try (
+                     InputStream is = entry.getValue().open();
+                     Reader reader = new InputStreamReader(is, StandardCharsets.UTF_8);
+                  ) {
+                     PresetConfig.Preset preset = (PresetConfig.Preset)GSON.fromJson(reader, PresetConfig.Preset.class);
+                     if (preset != null && preset.id != null) {
+                        try (Writer writer = Files.newBufferedWriter(targetPath, StandardCharsets.UTF_8)) {
+                           GSON.toJson(preset, writer);
+                        }
+                     }
+                  } catch (Exception var20) {
+                     CommandGUI.LOGGER.error("Failed to copy preset file: {}", fileName, var20);
+                  }
+               }
             }
-          }
-        } catch (Exception e) {
-          CommandGUI.LOGGER.error("Failed to copy preset file: {}", fileName, e);
-        }
+         }
+      } catch (Exception var21) {
+         CommandGUI.LOGGER.error("Failed to copy default presets", var21);
       }
-    } catch (Exception e) {
-      CommandGUI.LOGGER.error("Failed to copy default presets", e);
-    }
-  }
+   }
 
-  private static void loadFromConfigDir() {
-    if (!Files.exists(PRESETS_DIR)) {
-      return;
-    }
+   private static void loadFromConfigDir() {
+      if (Files.exists(PRESETS_DIR)) {
+         try {
+            Files.list(PRESETS_DIR)
+               .filter(p -> p.toString().endsWith(".json"))
+               .filter(p -> !p.getFileName().toString().equals("custom.json"))
+               .forEach(path -> {
+                  try (Reader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
+                     PresetConfig.Preset preset = (PresetConfig.Preset)GSON.fromJson(reader, PresetConfig.Preset.class);
+                     if (preset != null && preset.id != null) {
+                        PresetConfig.Preset existing = getPreset(preset.id);
+                        if (existing != null) {
+                           presets.remove(existing);
+                        }
 
-    try {
-      Files.list(PRESETS_DIR)
-          .filter(p -> p.toString().endsWith(".json"))
-          .filter(p -> !p.getFileName().toString().equals("custom.json"))
-          .forEach(path -> {
-            try (Reader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
-              Preset preset = GSON.fromJson(reader, Preset.class);
-              if (preset != null && preset.id != null) {
-                Preset existing = getPreset(preset.id);
-                if (existing != null) {
-                  presets.remove(existing);
-                }
-                presets.add(preset);
-              }
-            } catch (Exception e) {
-              CommandGUI.LOGGER.error("Failed to load preset: {}", path.getFileName(), e);
-            }
-          });
-    } catch (Exception e) {
-      CommandGUI.LOGGER.error("Failed to list preset files", e);
-    }
-  }
-
-  public static List<Preset> getPresets() {
-    return presets;
-  }
-
-  public static Preset getPreset(String id) {
-    for (Preset preset : presets) {
-      if (preset.id.equals(id)) {
-        return preset;
+                        presets.add(preset);
+                     }
+                  } catch (Exception var6) {
+                     CommandGUI.LOGGER.error("Failed to load preset: {}", path.getFileName(), var6);
+                  }
+               });
+         } catch (Exception var1) {
+            CommandGUI.LOGGER.error("Failed to list preset files", var1);
+         }
       }
-    }
-    return null;
-  }
+   }
 
-  public static class Preset {
+   public static List<PresetConfig.Preset> getPresets() {
+      return presets;
+   }
 
-    public String id;
-    public String nameKey;
-    public List<CommandGroup> groups = new ArrayList<>();
-  }
+   public static PresetConfig.Preset getPreset(String id) {
+      for (PresetConfig.Preset preset : presets) {
+         if (preset.id.equals(id)) {
+            return preset;
+         }
+      }
 
-  public static class CommandGroup {
+      return null;
+   }
 
-    public String nameKey;
-    public List<PresetCommand> commands = new ArrayList<>();
-  }
+   public static class CommandGroup {
+      public String nameKey;
+      public List<PresetConfig.PresetCommand> commands = new ArrayList<>();
+   }
 
-  public static class PresetCommand {
+   public static class Preset {
+      public String id;
+      public String nameKey;
+      public List<PresetConfig.CommandGroup> groups = new ArrayList<>();
+   }
 
-    public String nameKey;
-    public String command;
-    public String description;
-    public Integer minValue;
-    public Integer maxValue;
-    public int[] quickValues;
-    public String[] quickStrValues;
-  }
+   public static class PresetCommand {
+      public String nameKey;
+      public String command;
+      public String description;
+      public Integer minValue;
+      public Integer maxValue;
+      public int[] quickValues;
+      public String[] quickStrValues;
+   }
 }

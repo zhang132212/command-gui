@@ -6,394 +6,493 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import com.remrin.client.machine.MachineModels.MachineData;
-import com.remrin.client.machine.MachineModels.ModeData;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.Map.Entry;
+import java.util.function.Consumer;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents.Disconnect;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents.Join;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
-import net.minecraft.network.RegistryFriendlyByteBuf;
-import net.minecraft.network.codec.StreamCodec;
-import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
-import net.minecraft.resources.Identifier;
+import net.minecraft.client.Minecraft;
+import net.minecraft.server.level.ServerPlayer;
+import com.remrin.server.net.MachinePayloads;
 
-/**
- * Client-side network layer for the machine switch system.
- * <p>
- * Registers the payload types and the sync receiver, caches the machine list pushed by the server,
- * and provides methods for sending toggle / add / edit / delete actions.
- * <p>
- * When the server does not have the server mod installed, no sync packet is ever received and
- * {@link #isServerSupported()} stays {@code false}, so the machine switch tab stays hidden and the
- * mod behaves exactly as before.
- */
 public final class MachineNetworkManager {
+   private static final Gson GSON = new GsonBuilder().create();
+   private static final List<MachineModels.MachineData> machines = new ArrayList<>();
+   private static boolean serverSupported = false;
+   private static boolean canEdit = false;
+   private static boolean canConfig = false;
+   private static final Map<String, JsonObject> fakePlayerStates = new HashMap<>();
+   private static boolean fakePlayerStatesSupported = false;
+   private static int fakeStatesVersion = 0;
+   private static int syncVersion = 0;
+   private static int structureVersion = 0;
+   private static String structureSignature = "";
+   private static Consumer<String> blockQueryCallback = null;
+   private static final Map<String, MachineNetworkManager.PendingMachineEdit> pendingMachineEdits = new HashMap<>();
 
-  private static final Gson GSON = new GsonBuilder().create();
-  private static final List<MachineData> machines = new ArrayList<>();
-  private static boolean serverSupported = false;
-  private static boolean canEdit = false;
-  /** Whether the local player sees the full editing UI (permission / players rows): OP only. */
-  private static boolean canConfig = false;
-  private static int syncVersion = 0;
-  /**
-   * Incremented only when the machine list STRUCTURE changed (add / edit / delete / category
-   * changes). State-only syncs (running / detected flips) keep this stable so the GUI can refresh
-   * in place without resetting scroll position or pending mode selections.
-   */
-  private static int structureVersion = 0;
-  private static String structureSignature = "";
-  /** Pending block-query callback, consumed by the detection screen. */
-  private static java.util.function.Consumer<String> blockQueryCallback = null;
+   private MachineNetworkManager() {
+   }
 
-  private MachineNetworkManager() {
-  }
+   public static void init() {
+      registerPayload(() -> PayloadTypeRegistry.clientboundPlay().register(MachinePayloads.SyncPayload.TYPE, MachinePayloads.SyncPayload.CODEC));
+      registerPayload(() -> PayloadTypeRegistry.serverboundPlay().register(MachinePayloads.ActionPayload.TYPE, MachinePayloads.ActionPayload.CODEC));
+      registerPayload(() -> PayloadTypeRegistry.clientboundPlay().register(MachinePayloads.BlockQueryResultPayload.TYPE, MachinePayloads.BlockQueryResultPayload.CODEC));
+      registerPayload(() -> PayloadTypeRegistry.clientboundPlay().register(MachinePayloads.FakePlayerStatesPayload.TYPE, MachinePayloads.FakePlayerStatesPayload.CODEC));
+      ClientPlayNetworking.registerGlobalReceiver(MachinePayloads.SyncPayload.TYPE, (payload, context) -> applySync(payload.json()));
+      ClientPlayNetworking.registerGlobalReceiver(MachinePayloads.BlockQueryResultPayload.TYPE, (payload, context) -> {
+         Consumer<String> callback = blockQueryCallback;
+         blockQueryCallback = null;
+         if (callback != null) {
+            callback.accept(payload.json());
+         }
+      });
+      ClientPlayNetworking.registerGlobalReceiver(
+         MachinePayloads.FakePlayerStatesPayload.TYPE, (payload, context) -> applyFakePlayerStates(payload.json())
+      );
+      ClientPlayConnectionEvents.JOIN.register((Join)(listener, sender, client) -> {
+         MachineDebug.log("[Net] JOIN fired -> reset");
+         reset();
+      });
+      ClientPlayConnectionEvents.DISCONNECT.register((Disconnect)(listener, client) -> {
+         MachineDebug.log("[Net] DISCONNECT fired -> reset");
+         reset();
+         blockQueryCallback = null;
+      });
+   }
 
-  /**
-   * Registers payload types and receivers. Must be called once from the client initializer.
-   */
-  public static void init() {
-    PayloadTypeRegistry.clientboundPlay().register(SyncPayload.TYPE, SyncPayload.CODEC);
-    PayloadTypeRegistry.serverboundPlay().register(ActionPayload.TYPE, ActionPayload.CODEC);
-    PayloadTypeRegistry.clientboundPlay().register(
-        BlockQueryResultPayload.TYPE, BlockQueryResultPayload.CODEC);
-
-    ClientPlayNetworking.registerGlobalReceiver(SyncPayload.TYPE, (payload, context) ->
-        applySync(payload.json()));
-
-    ClientPlayNetworking.registerGlobalReceiver(BlockQueryResultPayload.TYPE, (payload, context) -> {
-      java.util.function.Consumer<String> callback = blockQueryCallback;
-      blockQueryCallback = null;
-      if (callback != null) {
-        callback.accept(payload.json());
+   private static void registerPayload(Runnable registration) {
+      try {
+         registration.run();
+      } catch (IllegalArgumentException e) {
       }
-    });
+   }
 
-    // Reset on EVERY server join, not just disconnect: with a velocity proxy a /server switch keeps
-    // the same connection, so DISCONNECT never fires and the previous server's machine list /
-    // support flag would otherwise leak into the new server (machines shown on a server without the
-    // mod). The join is followed by the server's own sync packet (if it supports machines), which
-    // repopulates the state.
-    ClientPlayConnectionEvents.JOIN.register((listener, sender, client) -> reset());
-    ClientPlayConnectionEvents.DISCONNECT.register((listener, client) -> {
-      reset();
-      blockQueryCallback = null;
-    });
-  }
+   public static void setBlockQueryCallback(Consumer<String> callback) {
+      blockQueryCallback = callback;
+   }
 
-  /**
-   * Sets the callback for the next block query result (single-shot). Used by the detection screen.
-   */
-  public static void setBlockQueryCallback(java.util.function.Consumer<String> callback) {
-    blockQueryCallback = callback;
-  }
+   public static void sendBlockQuery(String dimension, int x, int y, int z, long token) {
+      JsonObject action = new JsonObject();
+      action.addProperty("type", "queryBlock");
+      action.addProperty("dimension", dimension);
+      action.addProperty("x", x);
+      action.addProperty("y", y);
+      action.addProperty("z", z);
+      action.addProperty("token", token);
+      sendActionInternal(action.toString());
+   }
 
-  /**
-   * Sends a block query for the detection screen. The result arrives via
-   * {@link #setBlockQueryCallback}; the token is echoed back by the server so stale replies can
-   * be discarded.
-   */
-  public static void sendBlockQuery(String dimension, int x, int y, int z, long token) {
-    JsonObject action = new JsonObject();
-    action.addProperty("type", "queryBlock");
-    action.addProperty("dimension", dimension);
-    action.addProperty("x", x);
-    action.addProperty("y", y);
-    action.addProperty("z", z);
-    action.addProperty("token", token);
-    sendActionInternal(action.toString());
-  }
+   private static void applySync(String json) {
+      try {
+         MachineDebug.log("[Net] sync received, length=" + json.length());
+         JsonObject root = JsonParser.parseString(json).getAsJsonObject();
+         canEdit = root.has("canEdit") && root.get("canEdit").getAsBoolean();
+         canConfig = root.has("canConfig") && root.get("canConfig").getAsBoolean();
+         machines.clear();
+         if (root.has("machines")) {
+            for (JsonElement element : root.getAsJsonArray("machines")) {
+               MachineModels.MachineData machine = (MachineModels.MachineData)GSON.fromJson(element, MachineModels.MachineData.class);
+               if (machine != null) {
+                  machines.add(machine);
+               }
+            }
+         }
 
-  /**
-   * Applies a server sync packet: replaces the cached machine list and bumps the sync version so
-   * the GUI can refresh.
-   */
-  private static void applySync(String json) {
-    try {
-      JsonObject root = JsonParser.parseString(json).getAsJsonObject();
-      canEdit = root.has("canEdit") && root.get("canEdit").getAsBoolean();
-      canConfig = root.has("canConfig") && root.get("canConfig").getAsBoolean();
+         serverSupported = true;
+         syncVersion++;
+         String signature = computeStructureSignature();
+         if (!signature.equals(structureSignature)) {
+            structureSignature = signature;
+            structureVersion++;
+         }
+      } catch (Exception var6) {
+         MachineDebug.log("[Net] sync FAILED: " + var6);
+      }
+   }
+
+   private static String computeStructureSignature() {
+      StringBuilder sb = new StringBuilder();
+
+      for (MachineModels.MachineData machine : machines) {
+         sb.append(machine.id)
+            .append('|')
+            .append(machine.name)
+            .append('|')
+            .append(machine.category == null ? "" : machine.category)
+            .append('|')
+            .append(machine.description)
+            .append('|')
+            .append(String.join(",", machine.bots))
+            .append('|');
+         if (machine.detection != null) {
+            sb.append(machine.detection.enabled)
+               .append(':')
+               .append(machine.detection.blockId)
+               .append(':')
+               .append(machine.detection.property)
+               .append(':')
+               .append(String.join(",", machine.detection.onValues))
+               .append('/')
+               .append(String.join(",", machine.detection.offValues))
+               .append(':')
+               .append(machine.detection.x)
+               .append(',')
+               .append(machine.detection.y)
+               .append(',')
+               .append(machine.detection.z);
+         }
+
+         sb.append('|');
+         if (machine.modes != null) {
+            for (MachineModels.ModeData mode : machine.modes) {
+               sb.append(mode.id)
+                  .append(':')
+                  .append(mode.name)
+                  .append(':')
+                  .append(stepCount(mode.onTimeline))
+                  .append('/')
+                  .append(stepCount(mode.offTimeline))
+                  .append(';');
+            }
+         }
+
+         sb.append('|').append(stepCount(machine.onTimeline)).append('/').append(stepCount(machine.offTimeline)).append('\n');
+      }
+
+      return sb.toString();
+   }
+
+   private static int stepCount(MachineModels.Timeline timeline) {
+      if (timeline != null && timeline.steps != null) {
+         return timeline.steps.size();
+      }
+      return 0;
+   }
+
+   private static void reset() {
       machines.clear();
-      if (root.has("machines")) {
-        JsonArray array = root.getAsJsonArray("machines");
-        for (JsonElement element : array) {
-          MachineData machine = GSON.fromJson(element, MachineData.class);
-          if (machine != null) {
-            machines.add(machine);
-          }
-        }
-      }
-      serverSupported = true;
+      pendingMachineEdits.clear();
+      serverSupported = false;
+      canEdit = false;
+      canConfig = false;
+      fakePlayerStates.clear();
+      fakePlayerStatesSupported = false;
+      fakeStatesVersion++;
       syncVersion++;
-      String signature = computeStructureSignature();
-      if (!signature.equals(structureSignature)) {
-        structureSignature = signature;
-        structureVersion++;
+      structureSignature = "";
+      structureVersion++;
+   }
+
+   public static void markMachinePending(MachineModels.MachineData machine, int baseRevision) {
+      markMachinePending(machine, baseRevision, false);
+   }
+
+   public static void markMachinePending(MachineModels.MachineData machine, int baseRevision, boolean modesDirty) {
+      if (machine != null && machine.id != null && !machine.id.isEmpty()) {
+         boolean isNew = true;
+
+         for (int i = 0; i < machines.size(); i++) {
+            if (machine.id.equals(machines.get(i).id)) {
+               machines.set(i, machine);
+               isNew = false;
+               break;
+            }
+         }
+
+         if (isNew) {
+            machines.add(machine);
+         }
+
+         pendingMachineEdits.put(machine.id, new MachineNetworkManager.PendingMachineEdit(machine, baseRevision, isNew, modesDirty));
+         MachineDebug.log("[Pending] mark id=" + machine.id + " isNew=" + isNew + " modesDirty=" + modesDirty + " pending=" + pendingMachineEdits.size());
+         structureVersion++;
+         notifyLocalChange();
       }
-    } catch (Exception e) {
-      // Ignore malformed sync packets; keep the last known state.
-    }
-  }
+   }
 
-  /**
-   * Computes a structural signature of the machine list: identity, name, category, bots,
-   * mode/step structure and detection configuration. Runtime fields (running / detected) are
-   * excluded so state-only syncs keep the structure signature stable.
-   */
-  private static String computeStructureSignature() {
-    StringBuilder sb = new StringBuilder();
-    for (MachineData machine : machines) {
-      sb.append(machine.id).append('|').append(machine.name).append('|')
-          .append(machine.category == null ? "" : machine.category).append('|')
-          .append(machine.description).append('|')
-          .append(String.join(",", machine.bots)).append('|');
-      if (machine.detection != null) {
-        sb.append(machine.detection.enabled).append(':')
-            .append(machine.detection.blockId).append(':')
-            .append(machine.detection.property).append(':')
-            .append(String.join(",", machine.detection.onValues)).append('/')
-            .append(String.join(",", machine.detection.offValues)).append(':')
-            .append(machine.detection.x).append(',').append(machine.detection.y)
-            .append(',').append(machine.detection.z);
+   public static void notifyLocalChange() {
+      syncVersion++;
+      structureVersion++;
+   }
+
+   public static boolean isMachinePending(String machineId) {
+      return pendingMachineEdits.containsKey(machineId);
+   }
+
+   public static MachineNetworkManager.PendingMachineEdit getPendingMachineEdit(String machineId) {
+      return pendingMachineEdits.get(machineId);
+   }
+
+   public static boolean hasPendingMachines() {
+      return !pendingMachineEdits.isEmpty();
+   }
+
+   public static void uploadPendingMachines() {
+      if (!pendingMachineEdits.isEmpty()) {
+         for (MachineNetworkManager.PendingMachineEdit edit : pendingMachineEdits.values()) {
+            if (edit.isNew()) {
+               sendAdd(edit.machine());
+            } else {
+               sendEdit(edit.machine(), edit.baseRevision());
+            }
+         }
+
+         pendingMachineEdits.clear();
+         notifyLocalChange();
       }
-      sb.append('|');
-      if (machine.modes != null) {
-        for (ModeData mode : machine.modes) {
-          sb.append(mode.id).append(':').append(mode.name).append(':')
-              .append(stepCount(mode.onTimeline)).append('/').append(stepCount(mode.offTimeline))
-              .append(';');
-        }
+   }
+
+   private static void applyFakePlayerStates(String json) {
+      try {
+         JsonObject root = JsonParser.parseString(json).getAsJsonObject();
+         fakePlayerStatesSupported = root.has("supported") && root.get("supported").getAsBoolean();
+         fakePlayerStates.clear();
+         if (root.has("players")) {
+            JsonObject players = root.getAsJsonObject("players");
+
+            for (Entry<String, JsonElement> entry : players.entrySet()) {
+               fakePlayerStates.put(entry.getKey(), entry.getValue().getAsJsonObject());
+            }
+         }
+
+         fakeStatesVersion++;
+      } catch (Exception var5) {
       }
-      sb.append('|').append(stepCount(machine.onTimeline)).append('/')
-          .append(stepCount(machine.offTimeline)).append('\n');
-    }
-    return sb.toString();
-  }
+   }
 
-  private static int stepCount(MachineModels.Timeline timeline) {
-    return timeline == null || timeline.steps == null ? 0 : timeline.steps.size();
-  }
+   public static void refreshLocalCarpetFakePlayers() {
+      if (fakePlayerStatesSupported) {
+         return;
+      }
 
-  private static void reset() {
-    machines.clear();
-    serverSupported = false;
-    canEdit = false;
-    canConfig = false;
-    syncVersion++;
-    structureSignature = "";
-    structureVersion++;
-  }
+      Minecraft mc = Minecraft.getInstance();
+      if (mc == null || !mc.hasSingleplayerServer() || mc.getSingleplayerServer() == null) {
+         return;
+      }
 
-  // ── Actions ─────────────────────────────────────────────────────
+      try {
+         Class<?> fakePlayerClass = Class.forName("carpet.patches.EntityPlayerMPFake");
+         fakePlayerStates.clear();
+         for (ServerPlayer player : mc.getSingleplayerServer().getPlayerList().getPlayers()) {
+            if (fakePlayerClass.isInstance(player)) {
+               fakePlayerStates.put(player.getGameProfile().name(), new JsonObject());
+            }
+         }
 
-  public static void sendToggle(String machineId) {
-    sendAction("toggle", machineId, null);
-  }
+         fakePlayerStatesSupported = true;
+         fakeStatesVersion++;
+      } catch (Exception var4) {
+      }
+   }
 
-  /**
-   * Asks the server to push a fresh sync immediately (used when a screen opens so runtime states
-   * like mode running flags are not stale).
-   */
-  public static void sendRequestSync() {
-    JsonObject action = new JsonObject();
-    action.addProperty("type", "requestSync");
-    sendActionInternal(action.toString());
-  }
+   public static void sendToggle(String machineId) {
+      sendAction("toggle", machineId, null);
+   }
 
-  /**
-   * Acquires or releases the hard edit lock for a machine.
-   */
-  public static void sendEditSession(String machineId, boolean open) {
-    JsonObject action = new JsonObject();
-    action.addProperty("type", "editSession");
-    action.addProperty("machineId", machineId);
-    action.addProperty("open", open);
-    sendActionInternal(action.toString());
-  }
+   public static void sendRequestSync() {
+      JsonObject action = new JsonObject();
+      action.addProperty("type", "requestSync");
+      sendActionInternal(action.toString());
+   }
 
-  /**
-   * Sends the DESIRED set of active mode ids: the machine's mode state converges to this set —
-   * running modes that are not in the set are shut down (in the configured stop order) before the
-   * missing ones are booted (in the configured start order).
-   */
-  public static void sendSetModes(String machineId, List<String> targetIds) {
-    JsonObject action = new JsonObject();
-    action.addProperty("type", "setModes");
-    action.addProperty("machineId", machineId);
-    JsonArray array = new JsonArray();
-    for (String modeId : targetIds) {
-      array.add(modeId);
-    }
-    action.add("modeIds", array);
-    sendActionInternal(action.toString());
-  }
+   public static void sendRequestFakeStates() {
+      JsonObject action = new JsonObject();
+      action.addProperty("type", "fakeStatesRequest");
+      sendActionInternal(action.toString());
+   }
 
-  public static void sendAdd(MachineData machine) {
-    sendMachineAction("add", machine);
-  }
+   public static void sendUnsubscribeFakeStates() {
+      JsonObject action = new JsonObject();
+      action.addProperty("type", "fakeStatesUnsubscribe");
+      sendActionInternal(action.toString());
+   }
 
-  /**
-   * Sends an edit with the base revision captured when the editor was opened, so the server can
-   * reject saves based on a stale snapshot.
-   */
-  public static void sendEdit(MachineData machine, int baseRevision) {
-    sendMachineAction("edit", machine, baseRevision);
-  }
-
-  public static void sendDelete(String machineId) {
-    sendAction("delete", machineId, null);
-  }
-
-  /**
-   * Asks the server to force re-detect the machine's detection block state (loading the chunk
-   * if needed) and report the result.
-   */
-  public static void sendRefreshDetection(String machineId) {
-    sendAction("refreshDetection", machineId, null);
-  }
-
-  /**
-   * Asks the server to clear the given category from all machines (OP only).
-   */
-  public static void sendClearCategory(String categoryId) {
-    JsonObject action = new JsonObject();
-    action.addProperty("type", "clearCategory");
-    action.addProperty("categoryId", categoryId);
-    sendActionInternal(action.toString());
-  }
-
-  private static void sendMachineAction(String type, MachineData machine) {
-    sendMachineAction(type, machine, -1);
-  }
-
-  private static void sendMachineAction(String type, MachineData machine, int baseRevision) {
-    JsonObject action = new JsonObject();
-    action.addProperty("type", type);
-    action.add("machine", GSON.toJsonTree(machine));
-    action.addProperty("baseRevision", baseRevision);
-    sendActionInternal(action.toString());
-  }
-
-  private static void sendAction(String type, String machineId, MachineData machine) {
-    JsonObject action = new JsonObject();
-    action.addProperty("type", type);
-    if (machineId != null) {
+   public static void sendEditSession(String machineId, boolean open) {
+      JsonObject action = new JsonObject();
+      action.addProperty("type", "editSession");
       action.addProperty("machineId", machineId);
-    }
-    if (machine != null) {
-      action.add("machine", GSON.toJsonTree(machine));
-    }
-    sendActionInternal(action.toString());
-  }
+      action.addProperty("open", open);
+      sendActionInternal(action.toString());
+   }
 
-  private static void sendActionInternal(String json) {
-    ClientPlayNetworking.send(new ActionPayload(json));
-  }
+   public static void sendSetModes(String machineId, List<String> targetIds) {
+      JsonObject action = new JsonObject();
+      action.addProperty("type", "setModes");
+      action.addProperty("machineId", machineId);
+      JsonArray array = new JsonArray();
 
-  // ── Accessors ───────────────────────────────────────────────────
-
-  /**
-   * Whether the connected server supports machine switches (a sync packet has been received).
-   */
-  public static boolean isServerSupported() {
-    return serverSupported;
-  }
-
-  /**
-   * Whether the local player may edit machines (server-side permission result).
-   */
-  public static boolean canEdit() {
-    return canEdit;
-  }
-
-  /**
-   * Whether the local player sees the full editing UI (permission level / allowed players rows):
-   * only true for operators; whitelisted non-OP editors are excluded.
-   */
-  public static boolean canConfig() {
-    return canConfig;
-  }
-
-  public static List<MachineData> getMachines() {
-    return machines;
-  }
-
-  public static MachineData getMachine(String id) {
-    for (MachineData machine : machines) {
-      if (machine.id != null && machine.id.equals(id)) {
-        return machine;
+      for (String modeId : targetIds) {
+         array.add(modeId);
       }
-    }
-    return null;
-  }
 
-  /**
-   * Incremented on every sync application or disconnect; GUI tabs poll this to know when to
-   * rebuild their button lists.
-   */
-  public static int getSyncVersion() {
-    return syncVersion;
-  }
+      action.add("modeIds", array);
+      sendActionInternal(action.toString());
+   }
 
-  /**
-   * Incremented only when the machine list structure changed (add / edit / delete). State-only
-   * syncs (running / detected flips) keep this stable.
-   */
-  public static int getStructureVersion() {
-    return structureVersion;
-  }
+   public static void sendAdd(MachineModels.MachineData machine) {
+      sendMachineAction("add", machine);
+   }
 
-  // ── Payloads ────────────────────────────────────────────────────
+   public static void sendEdit(MachineModels.MachineData machine, int baseRevision) {
+      sendMachineAction("edit", machine, baseRevision);
+   }
 
-  /** Server-to-client sync payload (identical wire format to the server mod). */
-  public record SyncPayload(String json) implements CustomPacketPayload {
+   public static void sendDelete(String machineId) {
+      sendAction("delete", machineId, null);
+   }
 
-    public static final CustomPacketPayload.Type<SyncPayload> TYPE =
-        new CustomPacketPayload.Type<>(Identifier.parse("command-gui-server:machines"));
+   public static void sendRefreshDetection(String machineId) {
+      sendAction("refreshDetection", machineId, null);
+   }
 
-    public static final StreamCodec<RegistryFriendlyByteBuf, SyncPayload> CODEC =
-        StreamCodec.of(
-            (buf, payload) -> buf.writeUtf(payload.json(), 1048576),
-            buf -> new SyncPayload(buf.readUtf(1048576)));
+   public static void sendClearCategory(String categoryId) {
+      JsonObject action = new JsonObject();
+      action.addProperty("type", "clearCategory");
+      action.addProperty("categoryId", categoryId);
+      sendActionInternal(action.toString());
+   }
 
-    @Override
-    public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
-      return TYPE;
-    }
-  }
+   public static void sendRenameCategory(String oldName, String newName) {
+      if (oldName != null && !oldName.isBlank() && newName != null && !newName.isBlank()) {
+         for (MachineModels.MachineData machine : machines) {
+            String category = machine.category == null ? "" : machine.category.trim();
+            if (category.equals(oldName)) {
+               MachineModels.MachineData copy = (MachineModels.MachineData)GSON.fromJson(GSON.toJsonTree(machine), MachineModels.MachineData.class);
+               if (copy != null) {
+                  copy.category = newName;
+                  sendEditSession(machine.id, true);
+                  sendEdit(copy, machine.revision);
+                  sendEditSession(machine.id, false);
+               }
+            }
+         }
+      }
+   }
 
-  /** Client-to-server action payload (identical wire format to the server mod). */
-  public record ActionPayload(String json) implements CustomPacketPayload {
+   private static void sendMachineAction(String type, MachineModels.MachineData machine) {
+      sendMachineAction(type, machine, -1);
+   }
 
-    public static final CustomPacketPayload.Type<ActionPayload> TYPE =
-        new CustomPacketPayload.Type<>(Identifier.parse("command-gui-server:action"));
+   private static void sendMachineAction(String type, MachineModels.MachineData machine, int baseRevision) {
+      JsonObject action = new JsonObject();
+      action.addProperty("type", type);
+      action.add("machine", GSON.toJsonTree(machine));
+      action.addProperty("baseRevision", baseRevision);
+      sendActionInternal(action.toString());
+   }
 
-    public static final StreamCodec<RegistryFriendlyByteBuf, ActionPayload> CODEC =
-        StreamCodec.of(
-            (buf, payload) -> buf.writeUtf(payload.json(), 1048576),
-            buf -> new ActionPayload(buf.readUtf(1048576)));
+   private static void sendAction(String type, String machineId, MachineModels.MachineData machine) {
+      JsonObject action = new JsonObject();
+      action.addProperty("type", type);
+      if (machineId != null) {
+         action.addProperty("machineId", machineId);
+      }
 
-    @Override
-    public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
-      return TYPE;
-    }
-  }
+      if (machine != null) {
+         action.add("machine", GSON.toJsonTree(machine));
+      }
 
-  /** Server-to-client block query result payload (identical wire format to the server mod). */
-  public record BlockQueryResultPayload(String json) implements CustomPacketPayload {
+      sendActionInternal(action.toString());
+   }
 
-    public static final CustomPacketPayload.Type<BlockQueryResultPayload> TYPE =
-        new CustomPacketPayload.Type<>(Identifier.parse("command-gui-server:block-query"));
+   private static void sendActionInternal(String json) {
+      // FIX: 未进入游戏时（标题界面打开 GUI、或断线后残留的界面 tick）不能发包，
+      // 否则 ClientPlayNetworking.send 抛 IllegalStateException: Cannot send packets when not in game!
+      // 复现：标题界面 -> 模组菜单进入 GUI -> 切到「假人控制」标签 -> updateTabDependentWidgets
+      //       调 sendRequestFakeStates() -> 崩溃（crash-2026-09-01_12.57.16-client.txt）
+      if (Minecraft.getInstance().getConnection() == null) {
+         return;
+      }
 
-    public static final StreamCodec<RegistryFriendlyByteBuf, BlockQueryResultPayload> CODEC =
-        StreamCodec.of(
-            (buf, payload) -> buf.writeUtf(payload.json(), 1048576),
-            buf -> new BlockQueryResultPayload(buf.readUtf(1048576)));
+      if (!ClientPlayNetworking.canSend(MachinePayloads.ActionPayload.TYPE)) {
+         return;
+      }
 
-    @Override
-    public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
-      return TYPE;
-    }
-  }
+      ClientPlayNetworking.send(new MachinePayloads.ActionPayload(json));
+   }
+
+   public static boolean isServerSupported() {
+      return serverSupported;
+   }
+
+   public static boolean canEdit() {
+      return canEdit;
+   }
+
+   public static boolean canConfig() {
+      return canConfig;
+   }
+
+   public static boolean isFakePlayerStatesSupported() {
+      return fakePlayerStatesSupported;
+   }
+
+   public static int getFakeStatesVersion() {
+      return fakeStatesVersion;
+   }
+
+   public static Set<String> getServerFakePlayers() {
+      return Collections.unmodifiableSet(fakePlayerStates.keySet());
+   }
+
+   public static boolean isServerFakePlayer(String name) {
+      return fakePlayerStates.containsKey(name);
+   }
+
+   public static void removeLocalFakePlayer(String name) {
+      fakePlayerStates.remove(name);
+   }
+
+   public static boolean fakeActionActive(String name, String key) {
+      JsonObject state = fakePlayerStates.get(name);
+      return state != null && state.has(key) && state.get(key).getAsBoolean();
+   }
+
+   public static int fakeActionIntervalTicks(String name, String ticksKey) {
+      JsonObject state = fakePlayerStates.get(name);
+      if (state != null && state.has(ticksKey)) {
+         try {
+            return state.get(ticksKey).getAsInt();
+         } catch (Exception var4) {
+            return 0;
+         }
+      } else {
+         return 0;
+      }
+   }
+
+   public static List<MachineModels.MachineData> getMachines() {
+      return machines;
+   }
+
+   public static MachineModels.MachineData getMachine(String id) {
+      for (MachineModels.MachineData machine : machines) {
+         if (machine.id != null && machine.id.equals(id)) {
+            return machine;
+         }
+      }
+
+      return null;
+   }
+
+   public static int getSyncVersion() {
+      return syncVersion;
+   }
+
+   public static int getStructureVersion() {
+      return structureVersion;
+   }
+
+   public static record PendingMachineEdit(MachineModels.MachineData machine, int baseRevision, boolean isNew, boolean modesDirty) {
+   }
+
+
 }

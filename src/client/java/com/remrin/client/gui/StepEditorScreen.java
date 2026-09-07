@@ -1,512 +1,713 @@
 package com.remrin.client.gui;
 
-import com.remrin.client.machine.MachineModels.Step;
+import com.remrin.client.machine.MachineModels;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.regex.Pattern;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.CommandSuggestions;
 import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
-import org.lwjgl.glfw.GLFW;
 
-/**
- * Editor screen for a single timeline step: the fake player id, the delay in ticks and the command
- * list to execute.
- * <p>
- * The fake player id is shown as its real name; quick buttons insert commands using the CURRENT
- * bot's real name (the {@code {bot}} placeholder is resolved at insert time, and the command
- * field's cached text is cleared first). Switching the bot renames the already-typed commands.
- * The tab-completion popup follows the command field (see {@code CommandSuggestionsMixin}).
- * <p>
- * Edits the step object in place; "保存" just returns to the timeline editor (the parent rebuilds
- * its rows via the {@code onChanged} callback).
- */
-public class StepEditorScreen extends BaseParentedScreen<TimelineEditorScreen> {
+public class StepEditorScreen extends BaseParentedScreen<TimelineEditorScreen> implements StepCommandHost {
+   private static final int FIELD_WIDTH = 360;
+   private static final int FIELD_HEIGHT = 20;
+   private static final int BTN_GAP = 4;
+   private static final int COL_GAP = 6;
+   private static final int COMMAND_WIDTH = 280;
+   private static final String[] CUSTOM_SUGGESTIONS = PlaceholderResolver.ALL_PLACEHOLDERS.toArray(new String[0]);
+   private static final int SUGGESTION_ROW_HEIGHT = 16;
+   private static final int DESC_FIELD_Y = 26;
+   private static final int BOT_FIELD_Y = 64;
+   private static final int QUICK_BTN_Y = 88;
+   private static final int CMD_LABEL_Y = 112;
+   private static final int CMD_FIELD_Y = 124;
+   private static final int LIST_LABEL_Y = 154;
+   private static final int LIST_TOP = 166;
+   private static final int LIST_ROW_HEIGHT = 12;
+   private static final int MOVE_BTN_W = 48;
+   private static final int COPY_BTN_W = 30;
+   private static final int REMOVE_BTN_W = 30;
+   private static final int ROW_ACTION_GAP = 1;
+   private static final int ROW_NUMBER_W = 18;
+   private static final int RIGHT_RESERVED = 16;
+   private final MachineModels.Step step;
+   private final List<String> botNames;
+   private final Runnable onChanged;
+   private final List<String> commandList = new ArrayList<>();
+   private final List<Boolean> commandValid = new ArrayList<>();
+   private final List<Button> removeButtons = new ArrayList<>();
+   private final List<Button> moveUpButtons = new ArrayList<>();
+   private final List<Button> moveDownButtons = new ArrayList<>();
+   private final List<Button> copyButtons = new ArrayList<>();
+   private EditBox descriptionField;
+   private EditBox botField;
+   private EditBox delayField;
+   private EditBox commandField;
+   private CommandSuggestions commandSuggestions;
+   private String descriptionText = "";
+   private String botText = "";
+   private String delayText = "";
+   private String commandText = "";
+   private int commandScroll = 0;
+   private ScrollbarHandle commandScrollbar = null;
+   private boolean draggingCommandScrollbar = false;
+   private double commandScrollbarGrabOffset = 0.0;
+   private boolean customSuggestionsActive = false;
+   private int customSuggestionIndex = 0;
 
-  private static final int FIELD_WIDTH = 360;
-  private static final int FIELD_HEIGHT = 20;
-  private static final int BTN_GAP = 4;
-  private static final int COL_GAP = 6;
-  private static final int COMMAND_WIDTH = 280;
+   public StepEditorScreen(TimelineEditorScreen parent, MachineModels.Step step, List<String> botNames, Runnable onChanged) {
+      super(Component.translatable("screen.command-gui.machine.step_title"), parent);
+      this.step = step;
+      this.botNames = botNames;
+      this.onChanged = onChanged;
+      if (step.commands != null) {
+         this.commandList.addAll(step.commands);
+      }
 
-  private static final String[] CUSTOM_SUGGESTIONS = {"{bot}", "{player}"};
-  private static final int SUGGESTION_ROW_HEIGHT = 16;
+      for (String command : this.commandList) {
+         this.commandValid.add(CommandHelper.validateCommandFormat(command) == null);
+      }
 
-  private final Step step;
-  private final List<String> botNames;
-  private final Runnable onChanged;
-  private final List<String> commandList = new ArrayList<>();
-  private final List<Button> removeButtons = new ArrayList<>();
-  private EditBox botField;
-  private EditBox delayField;
-  private EditBox commandField;
-  private CommandSuggestions commandSuggestions;
-  /** Live text backups so typed input survives screen re-init (setScreen re-inits the target). */
-  private String botText = "";
-  private String delayText = "";
-  private String commandText = "";
-  /** Custom {bot}/{player} completion popup state. */
-  private boolean customSuggestionsActive = false;
-  private int customSuggestionIndex = 0;
+      this.descriptionText = step.description != null ? step.description : "";
+      this.botText = this.currentBotName();
+      this.delayText = String.valueOf(step.commandDelay);
+   }
 
-  public StepEditorScreen(TimelineEditorScreen parent, Step step, List<String> botNames,
-      Runnable onChanged) {
-    super(Component.translatable("screen.command-gui.machine.step_title"), parent);
-    this.step = step;
-    this.botNames = botNames;
-    this.onChanged = onChanged;
-    if (step.commands != null) {
-      this.commandList.addAll(step.commands);
-    }
-    this.botText = currentBotName();
-    this.delayText = String.valueOf(step.delay);
-  }
-
-  @Override
-  protected void init() {
-    super.init();
-
-    int fieldX = (this.width - FIELD_WIDTH) / 2;
-
-    // ── Row 1: bot name + delay on one line ──
-    botField = new EditBox(this.font, fieldX, 26, 110, FIELD_HEIGHT,
-        Component.translatable("screen.command-gui.machine.step_bot"));
-    botField.setMaxLength(20);
-    botField.setValue(botText);
-    botField.setResponder(text -> {
-      botText = text;
-      onBotTextChanged(text);
-    });
-    this.addRenderableWidget(botField);
-
-    this.addRenderableWidget(Button.builder(
-        Component.translatable("screen.command-gui.machine.step_pick"),
-        btn -> this.minecraft.gui.setScreen(new BotSelectScreen(this, botNames))
-    ).bounds(fieldX + 116, 26, 45, FIELD_HEIGHT).build());
-
-    delayField = new EditBox(this.font, fieldX + 167, 26, 110, FIELD_HEIGHT,
-        Component.translatable("screen.command-gui.machine.step_delay"));
-    delayField.setMaxLength(7);
-    delayField.setValue(delayText);
-    delayField.setResponder(text -> delayText = text);
-    this.addRenderableWidget(delayField);
-
-    this.addRenderableWidget(Button.builder(
-        Component.translatable("screen.command-gui.machine.step_pick"),
-        btn -> openDelayPicker()
-    ).bounds(fieldX + 283, 26, 45, FIELD_HEIGHT).build());
-
-    // ── Row 2: quick-command buttons on their own line ──
-    int btnW = (FIELD_WIDTH - 5 * BTN_GAP) / 6;
-    int x = fieldX;
-    x = addQuickButton(x, 50, btnW, "spawn",
-        () -> this.minecraft.gui.setScreen(new SpawnOptionScreen(this)));
-    x = addQuickButton(x, 50, btnW, "kill",
-        () -> insertQuickCommand("/player {bot} kill"));
-    x = addQuickButton(x, 50, btnW,
-        Component.translatable("screen.command-gui.machine.step_attack_use"),
-        () -> this.minecraft.gui.setScreen(new ActionOptionScreen(this)));
-    x = addQuickButton(x, 50, btnW,
-        Component.translatable("screen.command-gui.machine.step_sneak"),
-        () -> insertQuickCommand("/player {bot} sneak"));
-    x = addQuickButton(x, 50, btnW,
-        Component.translatable("screen.command-gui.machine.step_mount"),
-        () -> insertQuickCommand("/player {bot} mount"));
-    addQuickButton(x, 50, btnW,
-        Component.translatable("screen.command-gui.machine.step_stop"),
-        () -> insertQuickCommand("/player {bot} stop"));
-
-    // ── Row 3: command field + add-to-list (the tab-completion popup follows the field) ──
-    commandField = new EditBox(this.font, fieldX, 74, COMMAND_WIDTH, FIELD_HEIGHT,
-        Component.translatable("screen.command-gui.command"));
-    commandField.setMaxLength(256);
-    commandField.setValue(commandText);
-    this.addRenderableWidget(commandField);
-
-    this.commandSuggestions = new CommandSuggestions(this.minecraft, this, commandField,
-        this.font, false, true, 0, 7, false, Integer.MIN_VALUE);
-    this.commandSuggestions.setAllowSuggestions(true);
-    this.commandSuggestions.updateCommandInfo();
-    commandField.setResponder(text -> {
-      commandText = text;
+   protected void init() {
+      super.init();
+      int fieldX = (this.width - 360) / 2;
+      this.descriptionField = new EditBox(this.font, fieldX, 26, 360, 20, Component.translatable("screen.command-gui.machine.step_description"));
+      this.descriptionField.setMaxLength(100);
+      this.descriptionField.setValue(this.descriptionText);
+      this.descriptionField.setHint(Component.translatable("screen.command-gui.machine.step_description_hint"));
+      this.descriptionField.setResponder(text -> this.descriptionText = text);
+      this.addRenderableWidget(this.descriptionField);
+      this.botField = new EditBox(this.font, fieldX, 64, 110, 20, Component.translatable("screen.command-gui.machine.step_bot"));
+      this.botField.setMaxLength(20);
+      this.botField.setValue(this.botText);
+      this.botField.setResponder(text -> {
+         this.botText = text;
+         this.onBotTextChanged(text);
+      });
+      this.addRenderableWidget(this.botField);
+      int pickBtnW = 45;
+      this.addRenderableWidget(
+         Button.builder(
+               Component.translatable("screen.command-gui.machine.step_pick"), btn -> this.minecraft.gui.setScreen(new BotSelectScreen(this, this.botNames))
+            )
+            .bounds(fieldX + 116, 64, pickBtnW, 20)
+            .build()
+      );
+      int quickRight = fieldX + 360;
+      int delayFieldW = 110;
+      int delayPickX = quickRight - pickBtnW;
+      int delayFieldX = delayPickX - 4 - delayFieldW;
+      this.delayField = new DigitsOnlyEditBox(this.font, delayFieldX, 64, delayFieldW, 20, Component.translatable("screen.command-gui.machine.step_delay"));
+      this.delayField.setMaxLength(7);
+      this.delayField.setValue(this.delayText);
+      this.delayField.setResponder(text -> this.delayText = text);
+      this.delayField.setTooltip(Tooltip.create(Component.translatable("screen.command-gui.machine.step_delay_hint")));
+      this.addRenderableWidget(this.delayField);
+      this.addRenderableWidget(
+         Button.builder(Component.translatable("screen.command-gui.machine.step_pick"), btn -> this.openDelayPicker())
+            .bounds(delayPickX, 64, pickBtnW, 20)
+            .build()
+      );
+      int baseBtnW = 56;
+      int leftover = 340 - baseBtnW * 6;
+      int x = this.addQuickButton(fieldX, 88, baseBtnW + (leftover-- > 0 ? 1 : 0), "spawn", () -> this.minecraft.gui.setScreen(new SpawnOptionScreen(this)));
+      x = this.addQuickButton(x, 88, baseBtnW + (leftover-- > 0 ? 1 : 0), "kill", () -> this.insertQuickCommand("/player {bot} kill"));
+      x = this.addQuickButton(
+         x,
+         88,
+         baseBtnW + (leftover-- > 0 ? 1 : 0),
+         Component.translatable("screen.command-gui.machine.step_attack_use"),
+         () -> this.minecraft.gui.setScreen(new ActionOptionScreen(this))
+      );
+      x = this.addQuickButton(
+         x,
+         88,
+         baseBtnW + (leftover-- > 0 ? 1 : 0),
+         Component.translatable("screen.command-gui.machine.step_sneak"),
+         () -> this.insertQuickCommand("/player {bot} sneak")
+      );
+      x = this.addQuickButton(
+         x,
+         88,
+         baseBtnW + (leftover-- > 0 ? 1 : 0),
+         Component.translatable("screen.command-gui.machine.step_mount"),
+         () -> this.insertQuickCommand("/player {bot} mount")
+      );
+      this.addQuickButton(
+         x,
+         88,
+         baseBtnW + (leftover-- > 0 ? 1 : 0),
+         Component.translatable("screen.command-gui.machine.step_stop"),
+         () -> this.insertQuickCommand("/player {bot} stop")
+      );
+      this.commandField = new EditBox(this.font, fieldX, 124, 280, 20, Component.translatable("screen.command-gui.command"));
+      this.commandField.setMaxLength(256);
+      this.commandField.setValue(this.commandText);
+      this.addRenderableWidget(this.commandField);
+      this.commandSuggestions = new CommandSuggestions(this.minecraft, this, this.commandField, this.font, false, true, 0, 7, false, Integer.MIN_VALUE);
+      this.commandSuggestions.setAllowSuggestions(true);
       this.commandSuggestions.updateCommandInfo();
-      updateCustomSuggestions(text);
-    });
-    updateCustomSuggestions(commandText);
+      this.commandField.setResponder(text -> {
+         this.commandText = text;
+         this.commandSuggestions.updateCommandInfo();
+         this.updateCustomSuggestions(text);
+      });
+      this.updateCustomSuggestions(this.commandText);
+      this.addRenderableWidget(
+         Button.builder(Component.translatable("screen.command-gui.add_command_line"), btn -> this.addCommand()).bounds(fieldX + 280 + 6, 124, 74, 20).build()
+      );
+      this.rebuildListButtons();
+      int barY = this.height - 22;
+      int barWidth = Math.min(70, 90);
+      int barStartX = fieldX + (360 - barWidth * 2 - 8) / 2;
+      this.addRenderableWidget(
+         Button.builder(Component.translatable("screen.command-gui.save"), btn -> this.saveAndClose()).bounds(barStartX, barY, barWidth, 18).build()
+      );
+      this.addRenderableWidget(
+         Button.builder(Component.translatable("screen.command-gui.back"), btn -> this.saveAndClose())
+            .bounds(barStartX + barWidth + 8, barY, barWidth, 18)
+            .build()
+      );
+   }
 
-    this.addRenderableWidget(Button.builder(
-        Component.translatable("screen.command-gui.add_command_line"),
-        btn -> addCommand()
-    ).bounds(fieldX + COMMAND_WIDTH + COL_GAP, 74, FIELD_WIDTH - COMMAND_WIDTH - COL_GAP,
-        FIELD_HEIGHT).build());
+   private int addQuickButton(int x, int y, int width, String label, Runnable action) {
+      return this.addQuickButton(x, y, width, Component.literal(label), action);
+   }
 
-    rebuildRemoveButtons();
+   private int addQuickButton(int x, int y, int width, Component label, Runnable action) {
+      PassiveButton button = new PassiveButton(x, y, width, 20, label, btn -> action.run());
+      this.addRenderableWidget(button);
+      return x + width + 4;
+   }
 
-    int barY = this.height - 22;
-    int barWidth = Math.min(70, FIELD_WIDTH / 4);
-    int barStartX = fieldX + (FIELD_WIDTH - barWidth * 2 - 8) / 2;
-    this.addRenderableWidget(Button.builder(
-        Component.translatable("screen.command-gui.save"),
-        btn -> saveAndClose()
-    ).bounds(barStartX, barY, barWidth, 18).build());
-    // Back commits the step: edits must never be silently discarded
-    this.addRenderableWidget(Button.builder(
-        Component.translatable("screen.command-gui.back"),
-        btn -> saveAndClose()
-    ).bounds(barStartX + barWidth + 8, barY, barWidth, 18).build());
-  }
-
-  private int addQuickButton(int x, int y, int width, String label, Runnable action) {
-    return addQuickButton(x, y, width, Component.literal(label), action);
-  }
-
-  private int addQuickButton(int x, int y, int width, Component label, Runnable action) {
-    Button button = Button.builder(label, btn -> action.run())
-        .bounds(x, y, width, FIELD_HEIGHT).build();
-    this.addRenderableWidget(button);
-    return x + width + BTN_GAP;
-  }
-
-  // ── Bot name handling ────────────────────────────────────────────
-
-  /**
-   * The bot name commands should target: the real name of the step's current bot.
-   */
-  private String currentBotName() {
-    if (step.bot >= 0 && step.bot < botNames.size()) {
-      return botNames.get(step.bot);
-    }
-    return "bot" + step.bot;
-  }
-
-  /**
-   * Called when the bot name text changes: resolves the name to the bot index and replaces the
-   * previous bot's name inside the typed commands with the new bot's name.
-   */
-  private void onBotTextChanged(String text) {
-    int index = botNames.indexOf(text.trim());
-    if (index < 0 || index == step.bot) {
-      return;
-    }
-    String oldName = currentBotName();
-    step.bot = index;
-    String newName = currentBotName();
-    if (!oldName.isEmpty() && !oldName.equals(newName)) {
-      replaceBotNameInCommands(oldName, newName);
-    }
-  }
-
-  /**
-   * Sets the step's bot by name (used by the bot picker screen), renaming any typed commands.
-   */
-  public void selectBotByName(String name) {
-    int index = botNames.indexOf(name);
-    if (index < 0 || index == step.bot) {
-      return;
-    }
-    String oldName = currentBotName();
-    step.bot = index;
-    replaceBotNameInCommands(oldName, name);
-    botField.setValue(name);
-  }
-
-  private void replaceBotNameInCommands(String oldName, String newName) {
-    String pattern = "\\b" + Pattern.quote(oldName) + "\\b";
-    String newCommandText = commandText.replaceAll(pattern, newName);
-    if (!newCommandText.equals(commandText)) {
-      commandText = newCommandText;
-      commandField.setValue(commandText);
-    }
-    for (int i = 0; i < commandList.size(); i++) {
-      commandList.set(i, commandList.get(i).replaceAll(pattern, newName));
-    }
-    if (step.commands != null) {
-      for (int i = 0; i < step.commands.size(); i++) {
-        step.commands.set(i, step.commands.get(i).replaceAll(pattern, newName));
+   private String currentBotName() {
+      if (this.step.bot >= 0 && this.step.bot < this.botNames.size()) {
+         return this.botNames.get(this.step.bot);
       }
-    }
-  }
+      return "bot" + this.step.bot;
+   }
 
-  // ── Custom {bot} / {player} completion ──────────────────────────
-
-  private void updateCustomSuggestions(String text) {
-    String token = lastToken(text);
-    boolean active = token.startsWith("{") && commandField != null && commandField.isFocused();
-    if (active && commandSuggestions != null) {
-      commandSuggestions.hide();
-    }
-    customSuggestionsActive = active;
-    if (!active) {
-      customSuggestionIndex = 0;
-    }
-  }
-
-  private static String lastToken(String text) {
-    if (text == null) {
-      return "";
-    }
-    int space = text.lastIndexOf(' ');
-    return space >= 0 ? text.substring(space + 1) : text;
-  }
-
-  private void insertCustomSuggestion() {
-    String candidate = CUSTOM_SUGGESTIONS[customSuggestionIndex % CUSTOM_SUGGESTIONS.length];
-    String text = commandText;
-    int space = text.lastIndexOf(' ');
-    String newText = space >= 0 ? text.substring(0, space + 1) + candidate : candidate;
-    commandField.setValue(newText);
-    customSuggestionIndex = (customSuggestionIndex + 1) % CUSTOM_SUGGESTIONS.length;
-    this.setFocused(commandField);
-  }
-
-  /**
-   * Y of the custom {bot}/{player} popup: just below the command field, matching the relocated
-   * vanilla popup.
-   */
-  private int suggestionPopupY() {
-    return commandField.getY() + commandField.getHeight() + 4;
-  }
-
-  private void renderCustomSuggestions(GuiGraphicsExtractor guiGraphics) {
-    if (!customSuggestionsActive || commandField == null || !commandField.isFocused()) {
-      return;
-    }
-    int fieldX = (this.width - FIELD_WIDTH) / 2;
-    int popupW = 100;
-    int popupY = suggestionPopupY();
-    int popupH = CUSTOM_SUGGESTIONS.length * SUGGESTION_ROW_HEIGHT;
-    guiGraphics.fill(fieldX - 1, popupY - 1, fieldX + popupW + 1,
-        popupY + popupH + 1, 0xFF000000);
-    for (int i = 0; i < CUSTOM_SUGGESTIONS.length; i++) {
-      int y = popupY + i * SUGGESTION_ROW_HEIGHT;
-      if (i == customSuggestionIndex % CUSTOM_SUGGESTIONS.length) {
-        guiGraphics.fill(fieldX, y, fieldX + popupW, y + SUGGESTION_ROW_HEIGHT, 0xFF3355CC);
+   private void onBotTextChanged(String text) {
+      int index = this.botNames.indexOf(text.trim());
+      if (index >= 0 && index != this.step.bot) {
+         String oldName = this.currentBotName();
+         this.step.bot = index;
+         String newName = this.currentBotName();
+         if (!oldName.isEmpty() && !oldName.equals(newName)) {
+            this.replaceBotNameInCommands(oldName, newName);
+         }
       }
-      guiGraphics.text(this.font, Component.literal(CUSTOM_SUGGESTIONS[i]),
-          fieldX + 4, y + 3, 0xFFFFFFFF);
-    }
-  }
+   }
 
-  // ── Quick inserts ───────────────────────────────────────────────
-
-  private void openDelayPicker() {
-    NumberInputScreen picker = new NumberInputScreen(
-        this,
-        Component.translatable("screen.command-gui.machine.step_delay"),
-        null,
-        0,
-        72000,
-        new int[]{0, 1, 5, 10, 20, 40, 100, 200, 400, 600, 1200, 2400}
-    ) {
-      @Override
-      protected void onNumberConfirmed(String number) {
-        delayField.setValue(number);
-        StepEditorScreen.this.minecraft.gui.setScreen(StepEditorScreen.this);
+   @Override
+   public void selectBotByName(String name) {
+      int index = this.botNames.indexOf(name);
+      if (index >= 0 && index != this.step.bot) {
+         String oldName = this.currentBotName();
+         this.step.bot = index;
+         this.replaceBotNameInCommands(oldName, name);
+         this.botField.setValue(name);
       }
-    };
-    this.minecraft.gui.setScreen(picker);
-  }
+   }
 
-  /**
-   * Inserts a quick command: clears the command field's cached text FIRST (commands already added
-   * to the list are kept), then appends the resolved command.
-   */
-  private void insertQuickCommand(String command) {
-    commandField.setValue("");
-    appendCommand(command);
-  }
-
-  /**
-   * Appends a complete command template to the command field, resolving the {@code {bot}}
-   * placeholder to the CURRENT bot's real name.
-   */
-  public void appendCommand(String command) {
-    String resolved = command.replace("{bot}", currentBotName());
-    String current = commandField.getValue();
-    if (!current.isEmpty()) {
-      current += " ";
-    }
-    commandField.setValue(current + resolved);
-    this.setFocused(commandField);
-  }
-
-  private void addCommand() {
-    String command = commandField.getValue().trim();
-    if (!command.isEmpty()) {
-      if (!command.startsWith("/")) {
-        command = "/" + command;
+   private void replaceBotNameInCommands(String oldName, String newName) {
+      String pattern = "\\b" + Pattern.quote(oldName) + "\\b";
+      String newCommandText = this.commandText.replaceAll(pattern, newName);
+      if (!newCommandText.equals(this.commandText)) {
+         this.commandText = newCommandText;
+         this.commandField.setValue(this.commandText);
       }
-      commandList.add(command);
-      commandField.setValue("");
-      rebuildRemoveButtons();
-    }
-  }
 
-  /**
-   * Inserts a sequence of commands directly into the step's command list (in order), resolving
-   * {@code {bot}} to the CURRENT bot's real name. Used by the spawn / action popups. Clears the
-   * command field's cached text first (list entries are kept).
-   */
-  public void insertCommandSequence(List<String> commands) {
-    if (commands == null) {
-      return;
-    }
-    commandField.setValue("");
-    for (String command : commands) {
-      if (command == null || command.isEmpty()) {
-        continue;
+      for (int i = 0; i < this.commandList.size(); i++) {
+         this.commandList.set(i, this.commandList.get(i).replaceAll(pattern, newName));
       }
-      String resolved = command.replace("{bot}", currentBotName());
-      String cmd = resolved.startsWith("/") ? resolved : "/" + resolved;
-      commandList.add(cmd);
-    }
-    rebuildRemoveButtons();
-  }
 
-  private void rebuildRemoveButtons() {
-    for (Button button : removeButtons) {
-      this.removeWidget(button);
-    }
-    removeButtons.clear();
-
-    int fieldX = (this.width - FIELD_WIDTH) / 2;
-    int maxRows = Math.max(1, (this.height - 22 - 116) / 12);
-    for (int i = 0; i < commandList.size() && i < maxRows; i++) {
-      final int index = i;
-      Button removeBtn = Button.builder(
-          Component.translatable("screen.command-gui.remove_command"),
-          btn -> {
-            commandList.remove(index);
-            rebuildRemoveButtons();
-          }
-      ).bounds(fieldX + FIELD_WIDTH - 14, 116 + i * 12, 14, 12).build();
-      removeButtons.add(removeBtn);
-      this.addRenderableWidget(removeBtn);
-    }
-  }
-
-  private void saveAndClose() {
-    // Read the live widgets directly (the backups only serve re-init restoration)
-    String botName = botField.getValue().trim();
-    int botIndex = botNames.indexOf(botName);
-    if (botIndex >= 0) {
-      step.bot = botIndex;
-    }
-    step.bot = Math.max(0, Math.min(step.bot, Math.max(0, botNames.size() - 1)));
-    try {
-      step.delay = Integer.parseInt(delayField.getValue().trim());
-    } catch (NumberFormatException ignored) {
-    }
-    step.delay = Math.max(0, step.delay);
-    // Save both the added commands and the current command field text (like the base editor)
-    List<String> all = new ArrayList<>(commandList);
-    String current = commandField.getValue().trim();
-    if (!current.isEmpty()) {
-      if (!current.startsWith("/")) {
-        current = "/" + current;
+      if (this.step.commands != null) {
+         for (int i = 0; i < this.step.commands.size(); i++) {
+            this.step.commands.set(i, this.step.commands.get(i).replaceAll(pattern, newName));
+         }
       }
-      all.add(current);
-    }
-    step.commands = all;
-    if (onChanged != null) {
-      onChanged.run();
-    }
-    this.minecraft.gui.setScreen(parent);
-  }
+   }
 
-  @Override
-  public boolean keyPressed(KeyEvent keyEvent) {
-    int keyCode = keyEvent.key();
-
-    if (keyCode == GLFW.GLFW_KEY_TAB) {
-      if (customSuggestionsActive) {
-        insertCustomSuggestion();
-        return true;
+   private void updateCustomSuggestions(String text) {
+      String token = lastToken(text);
+      boolean active = token.startsWith("{") && this.commandField != null && this.commandField.isFocused();
+      if (active && this.commandSuggestions != null) {
+         this.commandSuggestions.hide();
       }
-      if (this.commandSuggestions.keyPressed(keyEvent)) {
-        return true;
+
+      this.customSuggestionsActive = active;
+      if (!active) {
+         this.customSuggestionIndex = 0;
       }
-      return true;
-    }
+   }
 
-    if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
-      if (customSuggestionsActive) {
-        insertCustomSuggestion();
-        return true;
+   private static String lastToken(String text) {
+      if (text == null) {
+         return "";
+      } else {
+         int space = text.lastIndexOf(32);
+         if (space >= 0) {
+            return text.substring(space + 1);
+         }
+         return text;
       }
-      saveAndClose();
-      return true;
-    }
-    if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
-      saveAndClose();
-      return true;
-    }
-    return super.keyPressed(keyEvent);
-  }
+   }
 
-  @Override
-  public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
-    if (this.commandSuggestions.mouseScrolled(scrollY)) {
-      return true;
-    }
-    return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
-  }
+   private void insertCustomSuggestion() {
+      String candidate = CUSTOM_SUGGESTIONS[this.customSuggestionIndex % CUSTOM_SUGGESTIONS.length];
+      String text = this.commandText;
+      int space = text.lastIndexOf(32);
+      String newText = space >= 0 ? text.substring(0, space + 1) + candidate : candidate;
+      this.commandField.setValue(newText);
+      this.customSuggestionIndex = (this.customSuggestionIndex + 1) % CUSTOM_SUGGESTIONS.length;
+      this.setFocused(this.commandField);
+   }
 
-  @Override
-  public boolean mouseClicked(MouseButtonEvent mouseEvent, boolean focused) {
-    if (customSuggestionsActive && mouseEvent.button() == 0) {
-      int fieldX = (this.width - FIELD_WIDTH) / 2;
-      int popupW = 100;
-      int popupY = suggestionPopupY();
-      if (mouseEvent.x() >= fieldX && mouseEvent.x() <= fieldX + popupW
-          && mouseEvent.y() >= popupY
-          && mouseEvent.y() < popupY
-              + CUSTOM_SUGGESTIONS.length * SUGGESTION_ROW_HEIGHT) {
-        int index = (int) ((mouseEvent.y() - popupY) / SUGGESTION_ROW_HEIGHT);
-        customSuggestionIndex = index;
-        insertCustomSuggestion();
-        return true;
+   private int suggestionPopupY() {
+      return this.commandField.getY() + this.commandField.getHeight() + 4;
+   }
+
+   private void renderCustomSuggestions(GuiGraphicsExtractor guiGraphics) {
+      if (this.customSuggestionsActive && this.commandField != null && this.commandField.isFocused()) {
+         int fieldX = (this.width - 360) / 2;
+         int popupW = 100;
+         int popupY = this.suggestionPopupY();
+         int popupH = CUSTOM_SUGGESTIONS.length * 16;
+         guiGraphics.fill(fieldX - 1, popupY - 1, fieldX + popupW + 1, popupY + popupH + 1, -16777216);
+
+         for (int i = 0; i < CUSTOM_SUGGESTIONS.length; i++) {
+            int y = popupY + i * 16;
+            if (i == this.customSuggestionIndex % CUSTOM_SUGGESTIONS.length) {
+               guiGraphics.fill(fieldX, y, fieldX + popupW, y + 16, -13412916);
+            }
+
+            guiGraphics.text(this.font, Component.literal(CUSTOM_SUGGESTIONS[i]), fieldX + 4, y + 3, -1);
+         }
       }
-    }
-    if (this.commandSuggestions.mouseClicked(mouseEvent)) {
-      return true;
-    }
-    return super.mouseClicked(mouseEvent, focused);
-  }
+   }
 
-  @Override
-  public void resize(int width, int height) {
-    super.resize(width, height);
-    rebuildRemoveButtons();
-  }
+   private void openDelayPicker() {
+      NumberInputScreen picker = new NumberInputScreen(
+         this, Component.translatable("screen.command-gui.machine.step_delay"), null, 1, 72000, new int[]{1, 5, 10, 20, 40, 100, 200, 400, 600, 1200, 2400}
+      ) {
 
-  @Override
-  public void extractRenderState(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY,
-      float partialTick) {
-    super.extractRenderState(guiGraphics, mouseX, mouseY, partialTick);
+         @Override
+         protected void onNumberConfirmed(String number) {
+            StepEditorScreen.this.delayField.setValue(number);
+            StepEditorScreen.this.minecraft.gui.setScreen(StepEditorScreen.this);
+         }
+      };
+      this.minecraft.gui.setScreen(picker);
+   }
 
-    int fieldX = (this.width - FIELD_WIDTH) / 2;
-    guiGraphics.centeredText(this.font, this.title, this.width / 2, 4, 0xFFFFFFFF);
+   private void insertQuickCommand(String command) {
+      this.commandField.setValue("");
+      this.appendCommand(command);
+   }
 
-    guiGraphics.text(this.font,
-        Component.translatable("screen.command-gui.machine.step_bot"), fieldX, 14, 0xFFAAAAAA);
-    guiGraphics.text(this.font,
-        Component.translatable("screen.command-gui.machine.step_delay"), fieldX + 167, 14,
-        0xFFAAAAAA);
+   @Override
+   public void appendCommand(String command) {
+      String resolved = command.replace("{bot}", this.currentBotName());
+      String current = this.commandField.getValue();
+      if (!current.isEmpty()) {
+         current = current + " ";
+      }
 
-    guiGraphics.text(this.font,
-        Component.translatable("screen.command-gui.commands_label"), fieldX, 104, 0xFFAAAAAA);
-    int maxRows = Math.max(1, (this.height - 22 - 116) / 12);
-    for (int i = 0; i < commandList.size() && i < maxRows; i++) {
-      String display = this.font.plainSubstrByWidth(commandList.get(i), FIELD_WIDTH - 20);
-      guiGraphics.text(this.font, display, fieldX + 4, 116 + i * 12, 0xFF55FF55);
-    }
+      this.commandField.setValue(current + resolved);
+      this.setFocused(this.commandField);
+   }
 
-    this.commandSuggestions.extractRenderState(guiGraphics, mouseX, mouseY);
-    renderCustomSuggestions(guiGraphics);
-  }
+   private void addCommand() {
+      String command = this.commandField.getValue().trim();
+      if (!command.isEmpty()) {
+         if (!command.startsWith("/")) {
+            command = "/" + command;
+         }
+
+         this.commandList.add(command);
+         this.commandValid.add(CommandHelper.validateCommandFormat(command) == null);
+         this.commandField.setValue("");
+         this.commandScroll = Math.max(0, this.commandList.size() - this.getMaxListRows());
+         this.rebuildListButtons();
+      }
+   }
+
+   @Override
+   public void insertCommandSequence(List<String> commands) {
+      if (commands != null) {
+         this.commandField.setValue("");
+
+         for (String command : commands) {
+            if (command != null && !command.isEmpty()) {
+               String resolved = command.replace("{bot}", this.currentBotName());
+               String cmd = resolved.startsWith("/") ? resolved : "/" + resolved;
+               this.commandList.add(cmd);
+               this.commandValid.add(CommandHelper.validateCommandFormat(cmd) == null);
+            }
+         }
+
+         this.commandScroll = Math.max(0, this.commandList.size() - this.getMaxListRows());
+         this.rebuildListButtons();
+      }
+   }
+
+   private int getMaxListRows() {
+      return Math.max(1, (this.height - 22 - 166) / 12);
+   }
+
+   private int getListBottom() {
+      return this.height - 22 - 4;
+   }
+
+   private void rebuildListButtons() {
+      for (Button button : this.removeButtons) {
+         this.removeWidget(button);
+      }
+
+      for (Button button : this.moveUpButtons) {
+         this.removeWidget(button);
+      }
+
+      for (Button button : this.moveDownButtons) {
+         this.removeWidget(button);
+      }
+
+      for (Button button : this.copyButtons) {
+         this.removeWidget(button);
+      }
+
+      this.removeButtons.clear();
+      this.moveUpButtons.clear();
+      this.moveDownButtons.clear();
+      this.copyButtons.clear();
+      int fieldX = (this.width - 360) / 2;
+      int maxRows = this.getMaxListRows();
+      int maxScroll = Math.max(0, this.commandList.size() - maxRows);
+      this.commandScroll = Math.min(this.commandScroll, maxScroll);
+      int removeX = fieldX + 360 - 16 - 30;
+      int copyX = removeX - 30 - 1;
+      int downX = copyX - 48 - 1;
+      int upX = downX - 48 - 1;
+
+      for (int i = 0; i < maxRows; i++) {
+         int index = this.commandScroll + i;
+         if (index >= this.commandList.size()) {
+            break;
+         }
+
+         int y = 166 + i * 12;
+         Button upBtn = Button.builder(Component.translatable("screen.command-gui.step_up_short"), btn -> this.moveCommandUp(index))
+            .bounds(upX, y, 48, 12)
+            .build();
+         upBtn.active = index > 0;
+         upBtn.setTooltip(Tooltip.create(Component.translatable("screen.command-gui.step_up")));
+         this.moveUpButtons.add(upBtn);
+         this.addRenderableWidget(upBtn);
+         Button downBtn = Button.builder(Component.translatable("screen.command-gui.step_down_short"), btn -> this.moveCommandDown(index))
+            .bounds(downX, y, 48, 12)
+            .build();
+         downBtn.active = index < this.commandList.size() - 1;
+         downBtn.setTooltip(Tooltip.create(Component.translatable("screen.command-gui.step_down")));
+         this.moveDownButtons.add(downBtn);
+         this.addRenderableWidget(downBtn);
+         Button copyBtn = Button.builder(Component.translatable("screen.command-gui.step_copy_short"), btn -> this.copyCommandToClipboard(index))
+            .bounds(copyX, y, 30, 12)
+            .build();
+         copyBtn.setTooltip(Tooltip.create(Component.translatable("screen.command-gui.step_copy_tip")));
+         this.copyButtons.add(copyBtn);
+         this.addRenderableWidget(copyBtn);
+         Button removeBtn = Button.builder(Component.translatable("screen.command-gui.delete"), btn -> {
+            this.commandList.remove(index);
+            this.commandValid.remove(index);
+            this.rebuildListButtons();
+         }).bounds(removeX, y, 30, 12).build();
+         this.removeButtons.add(removeBtn);
+         this.addRenderableWidget(removeBtn);
+      }
+   }
+
+   private void moveCommandUp(int index) {
+      if (index > 0 && index < this.commandList.size()) {
+         Collections.swap(this.commandList, index, index - 1);
+         Collections.swap(this.commandValid, index, index - 1);
+         this.rebuildListButtons();
+      }
+   }
+
+   private void moveCommandDown(int index) {
+      if (index >= 0 && index < this.commandList.size() - 1) {
+         Collections.swap(this.commandList, index, index + 1);
+         Collections.swap(this.commandValid, index, index + 1);
+         this.rebuildListButtons();
+      }
+   }
+
+   private void copyCommandToClipboard(int index) {
+      if (index >= 0 && index < this.commandList.size()) {
+         Minecraft mc = Minecraft.getInstance();
+         mc.keyboardHandler.setClipboard(this.commandList.get(index));
+         mc.gui.hud.getChat().addClientSystemMessage(Component.translatable("screen.command-gui.copied"));
+      }
+   }
+
+   private void saveAndClose() {
+      this.step.description = this.descriptionField.getValue().trim();
+      String botName = this.botField.getValue().trim();
+      int botIndex = this.botNames.indexOf(botName);
+      if (botIndex >= 0) {
+         this.step.bot = botIndex;
+      }
+
+      this.step.bot = Math.max(0, Math.min(this.step.bot, Math.max(0, this.botNames.size() - 1)));
+
+      try {
+         this.step.commandDelay = Integer.parseInt(this.delayField.getValue().trim());
+      } catch (NumberFormatException var5) {
+      }
+
+      this.step.commandDelay = Math.max(1, Math.min(72000, this.step.commandDelay));
+      List<String> all = new ArrayList<>(this.commandList);
+      String current = this.commandField.getValue().trim();
+      if (!current.isEmpty()) {
+         if (!current.startsWith("/")) {
+            current = "/" + current;
+         }
+
+         all.add(current);
+      }
+
+      this.step.commands = all;
+      if (this.onChanged != null) {
+         this.onChanged.run();
+      }
+
+      this.minecraft.gui.setScreen(this.parent);
+   }
+
+   public boolean keyPressed(KeyEvent keyEvent) {
+      int keyCode = keyEvent.key();
+      if (keyCode == 258) {
+         if (this.customSuggestionsActive) {
+            this.insertCustomSuggestion();
+            return true;
+         } else {
+            if (this.commandSuggestions.keyPressed(keyEvent)) {
+               return true;
+            }
+            return true;
+         }
+      } else if (keyCode != 257 && keyCode != 335) {
+         if (keyCode == 256) {
+            this.saveAndClose();
+            return true;
+         } else {
+            return super.keyPressed(keyEvent);
+         }
+      } else if (this.customSuggestionsActive) {
+         this.insertCustomSuggestion();
+         return true;
+      } else if (this.commandField.isFocused()) {
+         this.addCommand();
+         return true;
+      } else if (this.delayField.isFocused()) {
+         this.applyDelayField();
+         return true;
+      } else if (!this.descriptionField.isFocused() && !this.botField.isFocused()) {
+         this.saveAndClose();
+         return true;
+      } else {
+         return true;
+      }
+   }
+
+   private void applyDelayField() {
+      try {
+         this.step.commandDelay = Math.max(1, Math.min(72000, Integer.parseInt(this.delayField.getValue().trim())));
+      } catch (NumberFormatException var2) {
+      }
+
+      this.delayField.setValue(String.valueOf(this.step.commandDelay));
+      this.setFocused(this.delayField);
+   }
+
+   public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+      if (this.commandSuggestions.mouseScrolled(scrollY)) {
+         return true;
+      } else {
+         int fieldX = (this.width - 360) / 2;
+         if (mouseX >= (double)fieldX && mouseX <= (double)(fieldX + 360) && mouseY >= 166.0 && mouseY < (double)this.getListBottom()) {
+            int maxScroll = Math.max(0, this.commandList.size() - this.getMaxListRows());
+            if (scrollY > 0.0 && this.commandScroll > 0) {
+               this.commandScroll--;
+               this.rebuildListButtons();
+            } else if (scrollY < 0.0 && this.commandScroll < maxScroll) {
+               this.commandScroll++;
+               this.rebuildListButtons();
+            }
+
+            return true;
+         } else {
+            return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
+         }
+      }
+   }
+
+   public boolean mouseClicked(MouseButtonEvent mouseEvent, boolean focused) {
+      if (this.customSuggestionsActive && mouseEvent.button() == 0) {
+         int fieldX = (this.width - 360) / 2;
+         int popupW = 100;
+         int popupY = this.suggestionPopupY();
+         if (mouseEvent.x() >= (double)fieldX
+            && mouseEvent.x() <= (double)(fieldX + popupW)
+            && mouseEvent.y() >= (double)popupY
+            && mouseEvent.y() < (double)(popupY + CUSTOM_SUGGESTIONS.length * 16)) {
+            int index = (int)((mouseEvent.y() - (double)popupY) / 16.0);
+            this.customSuggestionIndex = index;
+            this.insertCustomSuggestion();
+            return true;
+         }
+      }
+
+      if (this.commandSuggestions.mouseClicked(mouseEvent)) {
+         return true;
+      } else if (mouseEvent.button() == 0 && this.isOverCommandScrollbar(mouseEvent.x(), mouseEvent.y())) {
+         int maxScroll = Math.max(0, this.commandList.size() - this.getMaxListRows());
+         int thumbTop = this.commandScrollbar.thumbTop(this.commandScroll, maxScroll, this.getMaxListRows(), Math.max(1, this.commandList.size()));
+         this.commandScrollbarGrabOffset = mouseEvent.y() - (double)thumbTop;
+         this.draggingCommandScrollbar = true;
+         return true;
+      } else {
+         return super.mouseClicked(mouseEvent, focused);
+      }
+   }
+
+   public boolean mouseDragged(MouseButtonEvent mouseEvent, double dragX, double dragY) {
+      if (this.draggingCommandScrollbar && this.commandScrollbar != null) {
+         int maxScroll = Math.max(0, this.commandList.size() - this.getMaxListRows());
+         int offset = this.commandScrollbar
+            .offsetFromY(mouseEvent.y(), this.commandScrollbarGrabOffset, maxScroll, this.getMaxListRows(), Math.max(1, this.commandList.size()));
+         this.commandScroll = Math.max(0, Math.min(offset, maxScroll));
+         this.rebuildListButtons();
+         return true;
+      } else {
+         return super.mouseDragged(mouseEvent, dragX, dragY);
+      }
+   }
+
+   public boolean mouseReleased(MouseButtonEvent mouseEvent) {
+      this.draggingCommandScrollbar = false;
+      return super.mouseReleased(mouseEvent);
+   }
+
+   private boolean isOverCommandScrollbar(double mouseX, double mouseY) {
+      if (this.commandScrollbar == null) {
+         return false;
+      }
+      return this.commandScrollbar.contains(mouseX, mouseY);
+   }
+
+   @Override
+   public void resize(int width, int height) {
+      super.resize(width, height);
+      this.rebuildListButtons();
+   }
+
+   public void extractRenderState(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY, float partialTick) {
+      super.extractRenderState(guiGraphics, mouseX, mouseY, partialTick);
+      int fieldX = (this.width - 360) / 2;
+      guiGraphics.centeredText(this.font, this.title, this.width / 2, 4, -1);
+      guiGraphics.text(this.font, Component.translatable("screen.command-gui.machine.step_description"), fieldX, 14, -5592406);
+      guiGraphics.text(this.font, Component.translatable("screen.command-gui.machine.step_bot"), fieldX, 52, -5592406);
+      int labelQuickRight = fieldX + 360;
+      int labelDelayFieldX = labelQuickRight - 45 - 4 - 110;
+      guiGraphics.text(this.font, Component.translatable("screen.command-gui.machine.step_delay_label"), labelDelayFieldX, 52, -5592406);
+      guiGraphics.text(this.font, Component.translatable("screen.command-gui.machine.command_input"), fieldX, 112, -5592406);
+      guiGraphics.text(this.font, Component.translatable("screen.command-gui.commands_label"), fieldX, 154, -5592406);
+      int legendX = fieldX + this.font.width(Component.translatable("screen.command-gui.commands_label")) + 6;
+      guiGraphics.text(this.font, Component.translatable("screen.command-gui.machine.cmd_legend_green"), legendX, 154, -11141291);
+      guiGraphics.text(
+         this.font,
+         Component.translatable("screen.command-gui.machine.cmd_legend_red"),
+         legendX + this.font.width(Component.translatable("screen.command-gui.machine.cmd_legend_green")) + 4,
+         154,
+         -43691
+      );
+      int maxRows = this.getMaxListRows();
+      int textWidth = 155;
+
+      for (int i = 0; i < maxRows; i++) {
+         int index = this.commandScroll + i;
+         if (index >= this.commandList.size()) {
+            break;
+         }
+
+         String command = this.commandList.get(index);
+         boolean valid = this.commandValid.get(index);
+         String display = this.font.plainSubstrByWidth(command, textWidth);
+         int y = 166 + i * 12;
+         guiGraphics.text(this.font, Component.literal("#" + (index + 1)), fieldX + 4, y, -5592406);
+         guiGraphics.text(this.font, Component.literal(display), fieldX + 4 + 18, y, valid ? -11141291 : -43691);
+         int textLeft = fieldX + 4 + 18;
+         if (mouseY >= y && mouseY < y + 12 && mouseX >= textLeft && mouseX < textLeft + textWidth) {
+            this.renderFullCommandTooltip(guiGraphics, command, (double)mouseX, (double)mouseY);
+         }
+      }
+
+      int maxScroll = Math.max(0, this.commandList.size() - maxRows);
+      int scrollbarX = fieldX + 360 - 12;
+      this.commandScrollbar = new ScrollbarHandle(scrollbarX, 166, 12, this.getListBottom() - 166);
+      boolean hovered = this.commandScrollbar.contains((double)mouseX, (double)mouseY);
+      this.commandScrollbar.render(guiGraphics, this.commandScroll, maxScroll, maxRows, Math.max(1, this.commandList.size()), hovered);
+      this.commandSuggestions.extractRenderState(guiGraphics, mouseX, mouseY);
+      this.renderCustomSuggestions(guiGraphics);
+   }
+
+   private void renderFullCommandTooltip(GuiGraphicsExtractor guiGraphics, String command, double mouseX, double mouseY) {
+      int maxWidth = 352;
+      List<String> lines = new ArrayList<>();
+      String rest = command;
+
+      while (!rest.isEmpty()) {
+         String line = this.font.plainSubstrByWidth(rest, maxWidth);
+         if (line.isEmpty()) {
+            line = rest;
+         }
+
+         lines.add(line);
+         rest = rest.substring(line.length());
+      }
+
+      if (lines.isEmpty()) {
+         lines.add(command);
+      }
+
+      int boxW = maxWidth + 8;
+      int boxH = lines.size() * 9 + 6;
+      int boxX = (int)Math.max(4.0, Math.min(mouseX - (double)(boxW / 2), (double)(this.width - boxW - 4)));
+      int boxY = (int)mouseY - boxH - 4;
+      if (boxY < 4) {
+         boxY = (int)mouseY + 8;
+      }
+
+      guiGraphics.fill(boxX, boxY, boxX + boxW, boxY + boxH, -301989888);
+      guiGraphics.fill(boxX + 1, boxY + 1, boxX + boxW - 1, boxY + boxH - 1, -299752926);
+
+      for (int i = 0; i < lines.size(); i++) {
+         guiGraphics.text(this.font, Component.literal(lines.get(i)), boxX + 4, boxY + 3 + i * 9, -1);
+      }
+   }
 }
