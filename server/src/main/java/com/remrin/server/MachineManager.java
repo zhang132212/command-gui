@@ -538,10 +538,13 @@ public final class MachineManager {
          if (machine == null) {
             sendMessage(player, "机器不存在: " + machineId);
          } else {
+            String requester = player.getGameProfile().name();
             MachineManager.EditLock lock = editLocks.get(machineId);
-            if (lock != null) {
+            // 仅当锁被【其他】玩家持有时拦截；锁在自己名下（或无人持锁）允许删除
+            if (lock != null && !lock.editor().equals(requester)) {
                sendMessage(player, "机器「" + machine.name + "」正在被 " + lock.editor() + " 编辑，无法删除");
             } else {
+               editLocks.remove(machineId);
                MachineConfig.removeMachine(machineId);
                MachineScheduler.invalidate(machineId);
                MachineModeChain.invalidate(machineId);
