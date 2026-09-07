@@ -20,6 +20,9 @@ public final class MachineScheduler {
    private static final Map<String, MachineScheduler.Runtime> runtimes = new HashMap<>();
    private static final int SPAWN_GRACE_TICKS = 60;
    private static final int AWAIT_SPAWN_TIMEOUT = 300;
+   /** spawn 后等待假人上线的总超时（tick）。首 spawn 从未上线过的假人可能较慢，放宽到 45 秒。
+    *  注意：超时后是显式失败中止时间线，不是静默跳过——避免后续指令被吞。 */
+   private static final int SPAWN_WAIT_TIMEOUT = 900;
    private static final Map<String, Map<String, Integer>> botLastTick = new HashMap<>();
    private static final Map<String, MachineDetector.MachineState> detectedModeState = new HashMap<>();
    private static final Map<String, Integer> lastSwitchTick = new HashMap<>();
@@ -109,15 +112,39 @@ public final class MachineScheduler {
                      runtime.commandWaitTicks = delayAfter;
                      if (isSpawnCommand(pending.command)) {
                         runtime.awaitBot = pending.botName;
-                        runtime.awaitTimeout = 300;
+                        runtime.awaitTimeout = SPAWN_WAIT_TIMEOUT;
+                        runtime.awaitReadyTicks = 0;
                      }
                   }
                }
             } else if (runtime.awaitBot != null) {
-               if (server.getPlayerList().getPlayerByName(runtime.awaitBot) != null) {
-                  runtime.awaitBot = null;
+               // spawn 后等待假人真正上线。上线后仍需少量 tick 缓冲以确认可执行指令
+               // （首 spawn 从未上线过的假人可能慢于预期，等待期间绝不推进后续步骤）。
+               ServerPlayer spawned = server.getPlayerList().getPlayerByName(runtime.awaitBot);
+               if (spawned != null) {
+                  if (runtime.awaitReadyTicks <= 0) {
+                     // 假人已存在：再等极短缓冲让 Carpet 完成实体注册，然后继续
+                     runtime.awaitReadyTicks = 2;
+                  }
+                  if (--runtime.awaitReadyTicks <= 0) {
+                     runtime.awaitBot = null;
+                     runtime.awaitReadyTicks = 0;
+                     runtime.awaitTimeout = 0;
+                  }
                } else if (--runtime.awaitTimeout <= 0) {
-                  runtime.awaitBot = null;
+                  // ★ 超时：不得静默继续（后续指令会打到不存在的假人被吞）。
+                  // 标记失败并终止该时间线，向触发者给出明确反馈。
+                  MachineMod.LOGGER.warn("Machine '{}': fake player '{}' failed to spawn within {} ticks, aborting timeline",
+                     new Object[]{runtime.machine.id, runtime.awaitBot, SPAWN_WAIT_TIMEOUT});
+                  runtime.hadFailures = true;
+                  runtime.failedReason = "假人 " + runtime.awaitBot + " 召唤超时（" + (SPAWN_WAIT_TIMEOUT / 20) + " 秒），已中止";
+                  runtime.finished = true;
+                  runtime.pending.clear();
+                  if (!runtime.key.contains("#")) {
+                     MachineManager.onSwitchCommandFailed(
+                        runtime.machine, runtime.isOffTimeline, runtime.triggerPlayer, "spawn " + runtime.awaitBot, runtime.failedReason
+                     );
+                  }
                }
 
             } else if (runtime.finished) {
@@ -139,12 +166,6 @@ public final class MachineScheduler {
                MachineManager.onMachineFinished(runtime.machine.id);
             } else if (runtime.waitTicks > 0) {
                runtime.waitTicks--;
-            } else if (runtime.awaitBot != null) {
-               if (server.getPlayerList().getPlayerByName(runtime.awaitBot) != null) {
-                  runtime.awaitBot = null;
-               } else if (--runtime.awaitTimeout <= 0) {
-                  runtime.awaitBot = null;
-               }
             } else {
                scheduleStep(server, runtime);
             }
@@ -567,6 +588,7 @@ public final class MachineScheduler {
       int commandWaitTicks = 0;
       String awaitBot = null;
       int awaitTimeout = 0;
+      int awaitReadyTicks = 0;
 
       Runtime(String key, MachineConfig.MachineData machine, MachineConfig.Timeline timeline, String triggerPlayer, boolean isOffTimeline) {
          this.key = key;
