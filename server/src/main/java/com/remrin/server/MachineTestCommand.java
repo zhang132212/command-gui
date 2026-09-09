@@ -152,6 +152,15 @@ public final class MachineTestCommand {
          return 0;
       }
       String trigger = playerName.equals("-") ? "" : playerName;
+      // 与产品路径(toggle/editSession)一致：机器被【其他】玩家编辑时禁止直接启动时序
+      // （本测试通道此前可直接绕过编辑锁启动，见 lock_bypass 场景）。
+      if (!trigger.isEmpty()) {
+         String blocked = MachineManager.editingLockedByOtherMachineId(machineId, trigger);
+         if (blocked != null) {
+            ctx.getSource().sendFailure(Component.literal(blocked));
+            return 0;
+         }
+      }
       MachineScheduler.start(machine, off ? machine.offTimeline : machine.onTimeline, trigger, off);
       ctx.getSource().sendSuccess(() -> Component.literal("已启动 " + machineId + " " + (off ? "关机" : "开机") + " 时间线 (trigger=" + (trigger.isEmpty() ? "console" : trigger) + ")"), false);
       return 1;

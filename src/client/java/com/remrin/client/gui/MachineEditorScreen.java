@@ -406,7 +406,7 @@ public class MachineEditorScreen extends BaseParentedScreen<CommandGUIScreen> {
       this.minecraft.gui.setScreen(this.parent);
    }
 
-   private void releaseEditLock() {
+   void releaseEditLock() {
       if (!this.isNewMachine && this.machine.id != null && !this.machine.id.isEmpty()) {
          MachineNetworkManager.sendEditSession(this.machine.id, false);
       }

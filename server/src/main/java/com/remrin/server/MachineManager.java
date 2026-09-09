@@ -486,7 +486,16 @@ public final class MachineManager {
 
    private static void cleanupExpiredLocks() {
       long now = System.currentTimeMillis();
-      editLocks.entrySet().removeIf(entry -> now - entry.getValue().acquiredAt() > EDIT_LOCK_TTL_MS);
+      MinecraftServer server = MachineMod.getCurrentServer();
+      editLocks.entrySet().removeIf(entry -> {
+         MachineManager.EditLock lock = entry.getValue();
+         if (now - lock.acquiredAt() > EDIT_LOCK_TTL_MS) {
+            return true;
+         }
+         // 兜底：属主已不在线（掉线事件缺失/假人移除等异常路径）的锁视为可回收，
+         // 避免残锁把机器卡到 60 分钟 TTL。正常在线编辑者不受影响（在线即保留）。
+         return server != null && server.getPlayerList().getPlayerByName(lock.editor()) == null;
+      });
    }
 
    /**

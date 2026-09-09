@@ -22,6 +22,28 @@ public abstract class BaseParentedScreen<P extends Screen> extends Screen {
       this.minecraft.gui.setScreen(this.parent);
    }
 
+   /**
+    * 玩家死亡时 Minecraft 用 setScreen 把当前界面强制切到死亡界面，旧屏幕只走 removed()
+    * （Gui.setScreen 只调 Screen.removed，不调 onClose），编辑锁的释放（onClose）不会执行，
+    * 会造成服务端编辑锁滞留到 TTL。这里在 removed() 里检测"玩家已死亡/濒死"，沿 parent 链
+    * 冒泡到所属 MachineEditorScreen 释放机器编辑锁（死亡即永久离开编辑器，与子屏/父屏导航不同，
+    * 导航时玩家存活不会触发）。
+    */
+   @Override
+   public void removed() {
+      super.removed();
+      if (this.minecraft != null && this.minecraft.player != null && this.minecraft.player.isDeadOrDying()) {
+         Screen screen = this;
+         while (screen instanceof BaseParentedScreen<?> bp) {
+            if (bp instanceof MachineEditorScreen editor) {
+               editor.releaseEditLock();
+               return;
+            }
+            screen = bp.parent;
+         }
+      }
+   }
+
    public void resize(int width, int height) {
       if (this.parent != null) {
          this.parent.resize(width, height);
