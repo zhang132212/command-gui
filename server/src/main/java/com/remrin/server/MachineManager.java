@@ -502,6 +502,26 @@ public final class MachineManager {
       return null;
    }
 
+   /** 测试用：导出全部编辑锁状态（/cgtest lock list）。 */
+   public static String debugLocksDump() {
+      cleanupExpiredLocks();
+      if (editLocks.isEmpty()) {
+         return "编辑锁: (无)";
+      }
+      StringBuilder sb = new StringBuilder("编辑锁 (").append(editLocks.size()).append("):");
+      for (var entry : editLocks.entrySet()) {
+         MachineConfig.MachineData m = MachineConfig.getMachine(entry.getKey());
+         String name = m != null ? m.name : entry.getKey();
+         long ageSec = (System.currentTimeMillis() - entry.getValue().acquiredAt()) / 1000L;
+         sb.append("\n  ")
+            .append(entry.getKey())
+            .append(" (").append(name).append(") → ")
+            .append(entry.getValue().editor())
+            .append(" 持锁 ").append(ageSec).append("s");
+      }
+      return sb.toString();
+   }
+
    /** 机器编辑锁是否被【指定持有者以外】的玩家占用（供异步路径（模式编排链）认锁）。 */
    public static String editingLockedByOtherMachineId(String machineId, String self) {
       MachineConfig.MachineData machine = MachineConfig.getMachine(machineId);

@@ -21,12 +21,36 @@ public final class MachineScheduler {
    private static final int SPAWN_GRACE_TICKS = 60;
    private static final int AWAIT_SPAWN_TIMEOUT = 300;
    /** spawn 后等待假人上线的总超时（tick）。首 spawn 从未上线过的假人可能较慢，放宽到 45 秒。
-   *  超时后显式失败中止时间线（不静默跳过，避免后续指令打向不存在的假人被吞）。 */
+    *  注意：超时后是显式失败中止时间线，不是静默跳过——避免后续指令被吞。 */
    private static final int SPAWN_WAIT_TIMEOUT = 900;
    private static final Map<String, Map<String, Integer>> botLastTick = new HashMap<>();
    private static final Map<String, MachineDetector.MachineState> detectedModeState = new HashMap<>();
    private static final Map<String, Integer> lastSwitchTick = new HashMap<>();
    private static final Map<String, Integer> lastModeSwitchTick = new HashMap<>();
+
+   /** 测试用：命令执行时间线（环形缓冲，记录 tick 级执行顺序，/cgtest timeline 读取）。 */
+   private static final java.util.ArrayDeque<String> execTrace = new java.util.ArrayDeque<>();
+   private static final int EXEC_TRACE_CAP = 500;
+
+   public static void clearExecTrace() {
+      execTrace.clear();
+   }
+
+   public static List<String> dumpExecTrace() {
+      return new ArrayList<>(execTrace);
+   }
+
+   private static void recordExec(String key, String command) {
+      int tick = -1;
+      MinecraftServer server = MachineMod.getCurrentServer();
+      if (server != null) {
+         tick = server.getTickCount();
+      }
+      execTrace.addLast("tick=" + tick + " | " + key + " | " + command);
+      if (execTrace.size() > EXEC_TRACE_CAP) {
+         execTrace.removeFirst();
+      }
+   }
 
    private MachineScheduler() {
    }
@@ -83,22 +107,22 @@ public final class MachineScheduler {
 
                      runtime.finished = true;
                      runtime.pending.clear();
-                  } else if (result == MachineScheduler.CommandResult.NO_OP && !isSpawnCommand(pending.command)) {
-                     // NOOP 且非 spawn：目标假人不存在/无法操作（如被其他玩家 kill）。
-                     // 中止时间线并明确报错，避免后续指令全部静默吞掉、机器"假完成"。
-                     MachineMod.LOGGER.warn("Machine '{}': command no-op'd (fake player '{}' likely removed), aborting: {}",
-                        new Object[]{runtime.machine.id, pending.botName, pending.command});
-                     runtime.hadFailures = true;
-                     runtime.failureMessage = pending.command;
-                     runtime.failedReason = "假人 " + pending.botName + " 不存在或无法操作（可能已被移除/击杀）";
-                     int hashIndex = runtime.key.indexOf(35);
-                     if (hashIndex >= 0) {
-                        MachineManager.onModeCommandFailed(runtime.machine, runtime.key.substring(hashIndex + 1), runtime.isOffTimeline, runtime.triggerPlayer, pending.command, runtime.failedReason);
-                     } else {
-                        MachineManager.onSwitchCommandFailed(runtime.machine, runtime.isOffTimeline, runtime.triggerPlayer, pending.command, runtime.failedReason);
-                     }
-                     runtime.finished = true;
-                     runtime.pending.clear();
+                   } else if (result == MachineScheduler.CommandResult.NO_OP && !isSpawnCommand(pending.command)) {
+                      // NOOP 且非 spawn：目标假人不存在/无法操作（如被其他玩家 kill）。
+                      // 中止时间线并明确报错，避免后续指令全部静默吞掉、机器"假完成"。
+                      MachineMod.LOGGER.warn("Machine '{}': command no-op'd (fake player '{}' likely removed), aborting: {}",
+                         new Object[]{runtime.machine.id, pending.botName, pending.command});
+                      runtime.hadFailures = true;
+                      runtime.failureMessage = pending.command;
+                      runtime.failedReason = "假人 " + pending.botName + " 不存在或无法操作（可能已被移除/击杀）";
+                      int hashIndex = runtime.key.indexOf(35);
+                      if (hashIndex >= 0) {
+                         MachineManager.onModeCommandFailed(runtime.machine, runtime.key.substring(hashIndex + 1), runtime.isOffTimeline, runtime.triggerPlayer, pending.command, runtime.failedReason);
+                      } else {
+                         MachineManager.onSwitchCommandFailed(runtime.machine, runtime.isOffTimeline, runtime.triggerPlayer, pending.command, runtime.failedReason);
+                      }
+                      runtime.finished = true;
+                      runtime.pending.clear();
                   } else {
                      botLastTick.computeIfAbsent(runtime.machine.id, k -> new HashMap<>()).put(pending.botName, tick);
                      runtime.commandWaitTicks = delayAfter;
@@ -110,11 +134,12 @@ public final class MachineScheduler {
                   }
                }
             } else if (runtime.awaitBot != null) {
-               // spawn 后等待假人真正上线。上线后再等极短缓冲确认可执行指令后再继续，
-               // 等待期间绝不推进后续步骤（防慢 spawn / 假人被临时移除导致后续指令被吞）。
+               // spawn 后等待假人真正上线。上线后仍需少量 tick 缓冲以确认可执行指令
+               // （首 spawn 从未上线过的假人可能慢于预期，等待期间绝不推进后续步骤）。
                ServerPlayer spawned = server.getPlayerList().getPlayerByName(runtime.awaitBot);
                if (spawned != null) {
                   if (runtime.awaitReadyTicks <= 0) {
+                     // 假人已存在：再等极短缓冲让 Carpet 完成实体注册，然后继续
                      runtime.awaitReadyTicks = 2;
                   }
                   if (--runtime.awaitReadyTicks <= 0) {
@@ -123,7 +148,8 @@ public final class MachineScheduler {
                      runtime.awaitTimeout = 0;
                   }
                } else if (--runtime.awaitTimeout <= 0) {
-                  // 超时：显式失败并中止时间线，避免后续指令打向不存在的假人被静默吞掉。
+                  // ★ 超时：不得静默继续（后续指令会打到不存在的假人被吞）。
+                  // 标记失败并终止该时间线，向触发者给出明确反馈。
                   MachineMod.LOGGER.warn("Machine '{}': fake player '{}' failed to spawn within {} ticks, aborting timeline",
                      new Object[]{runtime.machine.id, runtime.awaitBot, SPAWN_WAIT_TIMEOUT});
                   runtime.hadFailures = true;
@@ -310,6 +336,41 @@ public final class MachineScheduler {
       return runtime != null && runtime.isOffTimeline;
    }
 
+   /** 测试用：导出全部 runtime 内部状态（/cgtest sched 读取）。 */
+   public static String dumpRuntimeState() {
+      if (runtimes.isEmpty()) {
+         return "scheduler: (无运行中的时序)";
+      }
+      StringBuilder sb = new StringBuilder("scheduler runtimes (").append(runtimes.size()).append("):");
+      for (MachineScheduler.Runtime rt : runtimes.values()) {
+         sb.append("\n  [")
+            .append(rt.key)
+            .append("] stepIndex=")
+            .append(rt.stepIndex)
+            .append("/")
+            .append(rt.steps.size())
+            .append(" waitTicks=")
+            .append(rt.waitTicks)
+            .append(" cmdWait=")
+            .append(rt.commandWaitTicks)
+            .append(" pending=")
+            .append(rt.pending.size())
+            .append(" loops=")
+            .append(rt.completedLoops)
+            .append(" loopCount=")
+            .append(rt.timeline != null ? rt.timeline.loopCount : 0)
+            .append(" finished=")
+            .append(rt.finished)
+            .append(" awaitBot=")
+            .append(rt.awaitBot)
+            .append(" trigger=")
+            .append(rt.triggerPlayer)
+            .append(" isOff=")
+            .append(rt.isOffTimeline);
+      }
+      return sb.toString();
+   }
+
    public static void recordSwitchTick(String machineId, int tick) {
       lastSwitchTick.put(machineId, tick);
    }
@@ -444,16 +505,20 @@ public final class MachineScheduler {
          int result = server.getCommands().getDispatcher().execute(server.getCommands().getDispatcher().parse(stripLeadingSlash(command), source));
          if (result > 0) {
             MachineMod.LOGGER.info("Machine command executed: {}", command);
+            recordExec(runtime.key, "OK   " + command);
             return MachineScheduler.CommandResult.SUCCESS;
          } else {
             MachineMod.LOGGER.warn("Machine command no-op (no permission or invalid): {}", command);
+            recordExec(runtime.key, "NOOP " + command);
             return MachineScheduler.CommandResult.NO_OP;
          }
       } catch (CommandSyntaxException var5) {
          MachineMod.LOGGER.warn("Machine command REJECTED (no permission or invalid command): {} - {}", command, var5.getMessage());
+         recordExec(runtime.key, "REJ  " + command);
          return MachineScheduler.CommandResult.REJECTED;
       } catch (Exception var6) {
          MachineMod.LOGGER.warn("Failed to execute machine command '{}': {}", command, var6.getMessage());
+         recordExec(runtime.key, "ERR  " + command);
          return MachineScheduler.CommandResult.REJECTED;
       }
    }

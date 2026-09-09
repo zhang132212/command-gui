@@ -95,6 +95,7 @@ public class MachineMod implements ModInitializer {
          MachineManager.onPlayerDisconnect(listener.getPlayer().getGameProfile().name());
       });
       CommandRegistrationCallback.EVENT.register(MachineAdminCommand::register);
+      CommandRegistrationCallback.EVENT.register(MachineTestCommand::register);
       ServerChunkEvents.CHUNK_UNLOAD.register(MachineBlockCache::onChunkUnload);
       ServerTickEvents.END_SERVER_TICK.register((EndTick)server -> {
          currentServer = server;
