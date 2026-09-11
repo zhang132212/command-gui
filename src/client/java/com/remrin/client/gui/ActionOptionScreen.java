@@ -76,12 +76,12 @@ public class ActionOptionScreen extends BaseParentedScreen<Screen> {
       int barWidth = Math.min(70, 100);
       int barStartX = fieldX + (180 - barWidth * 2 - 8) / 2;
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.machine.spawn_insert"), btnx -> this.insertAndClose())
+         GuiButton.themed(Component.translatable("screen.command-gui.machine.spawn_insert"), btnx -> this.insertAndClose())
             .bounds(barStartX, barY, barWidth, 18)
             .build()
       );
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.back"), btnx -> this.minecraft.gui.setScreen(this.parent))
+         GuiButton.themed(Component.translatable("screen.command-gui.back"), btnx -> this.minecraft.gui.setScreen(this.parent))
             .bounds(barStartX + barWidth + 8, barY, barWidth, 18)
             .build()
       );

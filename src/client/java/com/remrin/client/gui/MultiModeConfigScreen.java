@@ -86,10 +86,10 @@ public class MultiModeConfigScreen extends BaseParentedScreen<ModesEditorScreen>
       int barWidth = 70;
       int barStartX = this.listLeft + (listWidth - barWidth * 2 - 8) / 2;
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.save"), b -> this.saveAndClose()).bounds(barStartX, barY, barWidth, 18).build()
+         GuiButton.themed(Component.translatable("screen.command-gui.save"), b -> this.saveAndClose()).bounds(barStartX, barY, barWidth, 18).build()
       );
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.back"), b -> this.minecraft.gui.setScreen(this.parent))
+         GuiButton.themed(Component.translatable("screen.command-gui.back"), b -> this.minecraft.gui.setScreen(this.parent))
             .bounds(barStartX + barWidth + 8, barY, barWidth, 18)
             .build()
       );
@@ -130,12 +130,12 @@ public class MultiModeConfigScreen extends BaseParentedScreen<ModesEditorScreen>
                label = label + "...";
             }
 
-            this.rowButtons.add(Button.builder(Component.literal(label), b -> {
+            this.rowButtons.add(GuiButton.themed(Component.literal(label), b -> {
             }).bounds(colX, y, labelW, 18).build());
             int x = colX + labelW + 2;
             int colFinal = col;
             int idx = i;
-            Button upBtn = Button.builder(Component.translatable("screen.command-gui.step_up_short"), b -> this.move(colFinal, idx, -1))
+            Button upBtn = GuiButton.themed(Component.translatable("screen.command-gui.step_up_short"), b -> this.move(colFinal, idx, -1))
                .bounds(x, y, actionW, 18)
                .build();
             upBtn.active = idx > 0;
@@ -146,7 +146,7 @@ public class MultiModeConfigScreen extends BaseParentedScreen<ModesEditorScreen>
             upBtn.setTooltip(Tooltip.create(Component.translatable("screen.command-gui.step_up")));
             this.rowButtons.add(upBtn);
             x += actionW + 1;
-            Button downBtn = Button.builder(Component.translatable("screen.command-gui.step_down_short"), b -> this.move(colFinal, idx, 1))
+            Button downBtn = GuiButton.themed(Component.translatable("screen.command-gui.step_down_short"), b -> this.move(colFinal, idx, 1))
                .bounds(x, y, actionW, 18)
                .build();
             downBtn.active = idx < list.size() - 1;

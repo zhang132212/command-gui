@@ -19,16 +19,16 @@ public class AddMachineCategoryScreen extends BaseParentedScreen<CommandGUIScree
       super.init();
       int centerX = this.width / 2;
       int centerY = this.height / 2;
-      this.nameField = new EditBox(this.font, centerX - 100, centerY - 20, 200, 20, Component.translatable("screen.command-gui.machine.add_category_name"));
+      this.nameField = new GuiEditBox(this.font, centerX - 100, centerY - 20, 200, 20, Component.translatable("screen.command-gui.machine.add_category_name"));
       this.nameField.setHint(Component.translatable("screen.command-gui.machine.add_category_name"));
       this.nameField.setMaxLength(30);
       this.addRenderableWidget(this.nameField);
       this.setInitialFocus(this.nameField);
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.save"), button -> this.saveAndOpen()).bounds(centerX - 102, centerY + 15, 100, 20).build()
+         GuiButton.themed(Component.translatable("screen.command-gui.save"), button -> this.saveAndOpen()).bounds(centerX - 102, centerY + 15, 100, 20).build()
       );
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.cancel"), button -> this.minecraft.gui.setScreen(this.parent))
+         GuiButton.themed(Component.translatable("screen.command-gui.cancel"), button -> this.minecraft.gui.setScreen(this.parent))
             .bounds(centerX + 2, centerY + 15, 100, 20)
             .build()
       );

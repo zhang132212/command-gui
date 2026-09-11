@@ -53,10 +53,10 @@ public class SelectCategoryScreen extends BaseParentedScreen<Screen> {
 
       int buttonRowY = startY + (row + (col > 0 ? 1 : 0)) * 24 + 10;
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.confirm"), btn -> this.confirm()).bounds(this.width / 2 - 104, buttonRowY, 100, 20).build()
+         GuiButton.themed(Component.translatable("screen.command-gui.confirm"), btn -> this.confirm()).bounds(this.width / 2 - 104, buttonRowY, 100, 20).build()
       );
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.cancel"), btn -> this.minecraft.gui.setScreen(this.parent))
+         GuiButton.themed(Component.translatable("screen.command-gui.cancel"), btn -> this.minecraft.gui.setScreen(this.parent))
             .bounds(this.width / 2 + 4, buttonRowY, 100, 20)
             .build()
       );

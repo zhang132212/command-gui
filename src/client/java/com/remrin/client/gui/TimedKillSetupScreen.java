@@ -29,7 +29,7 @@ public class TimedKillSetupScreen extends BaseParentedScreen<Screen> {
       int y = centerY - 25;
       int totalTimeWidth = 163;
       int timeStartX = centerX - totalTimeWidth / 2;
-      this.hoursField = new EditBox(this.font, timeStartX, y, 45, 20, Component.literal("H"));
+      this.hoursField = new GuiEditBox(this.font, timeStartX, y, 45, 20, Component.literal("H"));
       this.hoursField.setMaxLength(5);
       this.hoursField.setValue(String.valueOf(this.hours));
       this.hoursField.setResponder(s -> {
@@ -40,7 +40,7 @@ public class TimedKillSetupScreen extends BaseParentedScreen<Screen> {
          }
       });
       this.addRenderableWidget(this.hoursField);
-      this.minutesField = new EditBox(this.font, timeStartX + 45 + 14, y, 45, 20, Component.literal("M"));
+      this.minutesField = new GuiEditBox(this.font, timeStartX + 45 + 14, y, 45, 20, Component.literal("M"));
       this.minutesField.setMaxLength(5);
       this.minutesField.setValue(String.valueOf(this.minutes));
       this.minutesField.setResponder(s -> {
@@ -51,7 +51,7 @@ public class TimedKillSetupScreen extends BaseParentedScreen<Screen> {
          }
       });
       this.addRenderableWidget(this.minutesField);
-      this.secondsField = new EditBox(this.font, timeStartX + 118, y, 45, 20, Component.literal("S"));
+      this.secondsField = new GuiEditBox(this.font, timeStartX + 118, y, 45, 20, Component.literal("S"));
       this.secondsField.setMaxLength(5);
       this.secondsField.setValue(String.valueOf(this.seconds));
       this.secondsField.setResponder(s -> {
@@ -63,14 +63,14 @@ public class TimedKillSetupScreen extends BaseParentedScreen<Screen> {
       });
       this.addRenderableWidget(this.secondsField);
       y += 52;
-      this.addRenderableWidget(Button.builder(Component.translatable("screen.command-gui.save"), btn -> {
+      this.addRenderableWidget(GuiButton.themed(Component.translatable("screen.command-gui.save"), btn -> {
          if (this.hours > 0 || this.minutes > 0 || this.seconds > 0) {
             TimedTaskManager.addKillTask(this.playerName, this.hours, this.minutes, this.seconds);
             this.minecraft.gui.setScreen(this.parent);
          }
       }).bounds(centerX - 102, y, 100, 20).build());
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.cancel"), btn -> this.minecraft.gui.setScreen(this.parent))
+         GuiButton.themed(Component.translatable("screen.command-gui.cancel"), btn -> this.minecraft.gui.setScreen(this.parent))
             .bounds(centerX + 2, y, 100, 20)
             .build()
       );

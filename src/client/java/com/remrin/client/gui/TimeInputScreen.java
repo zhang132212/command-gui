@@ -27,7 +27,7 @@ public class TimeInputScreen extends BaseParentedScreen<Screen> {
       super.init();
       int centerX = this.width / 2;
       int centerY = this.height / 2;
-      this.inputField = new EditBox(this.font, centerX - 50, centerY - 40, 100, 20, Component.literal(""));
+      this.inputField = new GuiEditBox(this.font, centerX - 50, centerY - 40, 100, 20, Component.literal(""));
       this.inputField.setMaxLength(20);
       this.inputField.setHint(Component.literal("1s, 20t, 0.5d"));
       this.addRenderableWidget(this.inputField);
@@ -47,12 +47,12 @@ public class TimeInputScreen extends BaseParentedScreen<Screen> {
          int row = i / 5;
          int x = startX + col * 64;
          int y = startY + row * 24;
-         this.addRenderableWidget(Button.builder(Component.literal(value), btn -> this.executeWithValue(value)).bounds(x, y, 60, 20).build());
+         this.addRenderableWidget(GuiButton.themed(Component.literal(value), btn -> this.executeWithValue(value)).bounds(x, y, 60, 20).build());
       }
 
       int closeBtnY = Math.min(centerY + 10 + visibleRows * 24, this.height - 20 - 4);
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.back"), btn -> this.minecraft.gui.setScreen(this.parent))
+         GuiButton.themed(Component.translatable("screen.command-gui.back"), btn -> this.minecraft.gui.setScreen(this.parent))
             .bounds(centerX - 50, closeBtnY, 100, 20)
             .build()
       );

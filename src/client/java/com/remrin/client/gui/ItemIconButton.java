@@ -21,6 +21,7 @@ public class ItemIconButton extends Button {
 
    public ItemIconButton(int x, int y, int width, int height, ItemStack icon, Component tooltip, OnPress onPress) {
       this(x, y, width, height, icon, onPress);
+      this.setMessage(tooltip);
       this.setTooltip(Tooltip.create(tooltip));
    }
 
@@ -29,6 +30,7 @@ public class ItemIconButton extends Button {
    }
 
    protected void extractContents(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY, float partialTick) {
+      GuiTheme.button(guiGraphics, this, false, this.active);
       int iconX = this.getX() + (this.getWidth() - ICON_SIZE) / 2;
       int iconY = this.getY() + (this.getHeight() - ICON_SIZE) / 2;
       Matrix3x2fStack pose = guiGraphics.pose();

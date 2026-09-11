@@ -76,7 +76,7 @@ public class PlayerSelectorScreen extends BaseParentedScreen<Screen> {
       this.buildPlayerButtons();
       int closeBtnY = this.height - 28;
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.back"), button -> this.minecraft.gui.setScreen(this.parent))
+         GuiButton.themed(Component.translatable("screen.command-gui.back"), button -> this.minecraft.gui.setScreen(this.parent))
             .bounds(this.width / 2 - 75, closeBtnY, 150, 20)
             .build()
       );
@@ -147,7 +147,7 @@ public class PlayerSelectorScreen extends BaseParentedScreen<Screen> {
          int row = i / 4;
          int x = this.layoutStartX + col * 95;
          int y = 40 + row * 24;
-         Button playerBtn = Button.builder(Component.literal("   " + playerName), btn -> this.selectPlayer(playerName)).bounds(x, y, 90, 20).build();
+         Button playerBtn = GuiButton.themed(Component.literal("   " + playerName), btn -> this.selectPlayer(playerName)).bounds(x, y, 90, 20).build();
          this.playerButtons.add(playerBtn);
          this.addRenderableWidget(playerBtn);
       }

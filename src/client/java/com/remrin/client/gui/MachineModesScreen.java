@@ -76,7 +76,7 @@ public class MachineModesScreen extends BaseParentedScreen<CommandGUIScreen> {
       this.chipWidth = (this.listRight - this.listLeft - 16 - 12) / 3;
       this.rebuildChips();
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.machine.refresh_detection"), b -> this.refreshDetection())
+         GuiButton.themed(Component.translatable("screen.command-gui.machine.refresh_detection"), b -> this.refreshDetection())
             .bounds(this.listRight - 100, 24, 100, 18)
             .build()
       );
@@ -84,12 +84,12 @@ public class MachineModesScreen extends BaseParentedScreen<CommandGUIScreen> {
       int barWidth = Math.min(80, listWidth / 3);
       int barStartX = this.listLeft + (listWidth - barWidth * 2 - 8) / 2;
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.machine.confirm_modes"), b -> this.applyPending())
+         GuiButton.themed(Component.translatable("screen.command-gui.machine.confirm_modes"), b -> this.applyPending())
             .bounds(barStartX, barY, barWidth, 18)
             .build()
       );
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.back"), b -> this.minecraft.gui.setScreen(this.parent))
+         GuiButton.themed(Component.translatable("screen.command-gui.back"), b -> this.minecraft.gui.setScreen(this.parent))
             .bounds(barStartX + barWidth + 8, barY, barWidth, 18)
             .build()
       );

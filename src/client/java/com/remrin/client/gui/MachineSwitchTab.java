@@ -20,12 +20,8 @@ import net.minecraft.client.gui.components.Button.OnPress;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
-import net.minecraft.resources.Identifier;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
 
 public class MachineSwitchTab extends AbstractCommandTab {
    private static final int ACTION_BTN_WIDTH = 14;
@@ -35,11 +31,7 @@ public class MachineSwitchTab extends AbstractCommandTab {
    private static final int DELETE_BTN_W = 28;
    private static final int ACTION_CLUSTER_WIDTH = 77;
    private static final int MAX_CLUSTER_WIDTH = 135;
-   private static final ItemStack EDIT_ICON = new ItemStack(Items.WRITABLE_BOOK);
    private static final int CATEGORY_COLUMN_MARGIN = 4;
-   private static final ItemStack DELETE_ICON = new ItemStack(Items.LAVA_BUCKET);
-   private static final ItemStack REFRESH_ICON = new ItemStack(Items.CLOCK);
-   private static final ItemStack MODES_ICON = new ItemStack(Items.IRON_PICKAXE);
    private final List<MachineModels.MachineData> filteredMachines = new ArrayList<>();
    private final List<Button> extraButtons = new ArrayList<>();
    private Button addCategoryButton = null;
@@ -62,8 +54,7 @@ public class MachineSwitchTab extends AbstractCommandTab {
    }
 
    private int categoryColumnX() {
-      int sidebarRight = this.area.left() + this.sidebarOffset() + this.categoryTabWidth();
-      return Math.max(0, (sidebarRight - this.categoryColumnWidth()) / 2);
+      return this.area.left() + this.sidebarOffset();
    }
 
    private int categoryColumnWidth() {
@@ -84,7 +75,7 @@ public class MachineSwitchTab extends AbstractCommandTab {
    }
 
    private int categoryBottomReserve() {
-      return GuiTuning.getInt("MachineSwitchTab.CATEGORY_BOTTOM_RESERVE", 18);
+      return Math.max(this.tunedCategoryRowHeight(), GuiTuning.getInt("MachineSwitchTab.CATEGORY_BOTTOM_RESERVE", 24));
    }
 
    private int maxClusterWidth() {
@@ -92,7 +83,7 @@ public class MachineSwitchTab extends AbstractCommandTab {
    }
 
    private int clusterGap() {
-      return GuiTuning.getInt("MachineSwitchTab.CLUSTER_GAP", 1);
+      return GuiTuning.getInt("MachineSwitchTab.CLUSTER_GAP", 4);
    }
 
    public void setMachineFilter(MachineSwitchTab.MachineFilter filter) {
@@ -189,7 +180,7 @@ public class MachineSwitchTab extends AbstractCommandTab {
          }
 
          if (MachineNetworkManager.canEdit()) {
-            this.addCategoryButton = Button.builder(
+            this.addCategoryButton = GuiButton.themed(
                   Component.literal("+"), btn -> Minecraft.getInstance().gui.setScreen(new AddMachineCategoryScreen((CommandGUIScreen)this.parent))
                )
                .bounds(x, 0, columnWidth, this.tunedCategoryTabHeight())
@@ -230,7 +221,9 @@ public class MachineSwitchTab extends AbstractCommandTab {
          return 100;
       } else {
          int rowWidth = this.area.right() - this.getCommandAreaLeft();
-         return Math.max(100, rowWidth - this.maxClusterWidth() - this.tunedCategoryScrollbarWidth());
+         int actionsWidth = GuiTuning.getInt("MachineSwitchTab.MODES_BTN_W", MODES_BTN_W)
+            + GuiTuning.getInt("MachineSwitchTab.REFRESH_BTN_W", REFRESH_BTN_W) + this.clusterGap();
+         return Math.max(24, rowWidth - actionsWidth - 8);
       }
    }
 
@@ -331,8 +324,7 @@ public class MachineSwitchTab extends AbstractCommandTab {
          int visibleRows = Math.max(1, this.area.height() / this.tunedItemHeight());
          int start = Math.min(this.scrollOffset, Math.max(0, this.filteredMachines.size() - visibleRows));
          this.scrollOffset = start;
-         int rowStep = this.area.height() / visibleRows;
-         int remainder = this.area.height() % visibleRows;
+         int rowStep = this.tunedItemHeight();
 
          for (int i = 0; i < visibleRows; i++) {
             int index = start + i;
@@ -340,7 +332,7 @@ public class MachineSwitchTab extends AbstractCommandTab {
                break;
             }
 
-            int y = this.area.top() + i * rowStep + Math.min(i, remainder);
+            int y = this.area.top() + i * rowStep;
             this.buildRow(index, left, right, y, rowStep);
          }
       }
@@ -360,32 +352,32 @@ public class MachineSwitchTab extends AbstractCommandTab {
       int color;
       if (this.hasLocalDraft(machine)) {
          suffix = "（未保存）";
-         color = -22016;
+         color = GuiTheme.warning();
       } else if (!detectionEnabled) {
          suffix = "（未配置检测）";
          color = -7829368;
          locked = true;
       } else if (transition) {
          suffix = "off".equals(machine.transition) ? "（正在关机...）" : "（正在开机...）";
-         color = -22016;
+         color = GuiTheme.warning();
          locked = true;
       } else if ("abnormal".equals(detected)) {
          suffix = "（异常）";
-         color = -43691;
+         color = GuiTheme.danger();
          locked = true;
       } else if ("on".equals(detected)) {
          suffix = "（已开机）";
-         color = -11141291;
+         color = GuiTheme.accent();
       } else {
          suffix = "（已关机）";
          color = -1;
       }
 
-      int textMaxW = switchWidth * 2 / 3;
+      int textMaxW = switchWidth - 16;
       int nameMaxW = Math.max(20, textMaxW - font.width(suffix));
-      String name = font.plainSubstrByWidth(machine.name, nameMaxW);
+      String name = machine.name;
       if (font.width(machine.name) > nameMaxW) {
-         name = name + "...";
+         name = font.plainSubstrByWidth(machine.name, Math.max(0, nameMaxW - font.width("…"))) + "…";
       }
 
       MutableComponent label = Component.literal(name + suffix).withColor(color);
@@ -433,7 +425,7 @@ public class MachineSwitchTab extends AbstractCommandTab {
       DarkSelectButton refreshBtn = new DarkSelectButton(
          0, y, GuiTuning.getInt("MachineSwitchTab.REFRESH_BTN_W", REFRESH_BTN_W), h, Component.translatable("screen.command-gui.machine.refresh_short"), btn -> MachineNetworkManager.sendRefreshDetection(machine.id)
       );
-      refreshBtn.setDarkSelected(() -> !detectionEnabled, -1);
+      refreshBtn.setVisualMuted(!detectionEnabled);
       refreshBtn.setTooltip(
          Tooltip.create(
             detectionEnabled
@@ -744,22 +736,9 @@ public class MachineSwitchTab extends AbstractCommandTab {
       }
 
       protected void extractContents(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY, float partialTick) {
-         Font font = Minecraft.getInstance().font;
-         if (this.visualDisabled) {
-            guiGraphics.blitSprite(
-               RenderPipelines.GUI_TEXTURED,
-               Identifier.parse("minecraft:widget/button_disabled"),
-               this.getX(),
-               this.getY(),
-               this.getWidth(),
-               this.getHeight(),
-               -1
-            );
-         } else {
-            this.extractDefaultSprite(guiGraphics);
-         }
-
-         guiGraphics.centeredText(font, this.getMessage(), this.getX() + this.getWidth() / 2, this.getY() + (this.getHeight() - 8) / 2, this.textColor);
+         GuiTheme.button(guiGraphics, this, false, !this.visualDisabled);
+         guiGraphics.fill(this.getX(), this.getY() + 3, this.getX() + 2, this.getY() + this.getHeight() - 3, this.textColor);
+         GuiTheme.label(guiGraphics, this, this.getMessage(), this.textColor, false);
       }
    }
 

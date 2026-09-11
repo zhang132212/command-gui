@@ -10,6 +10,7 @@ import java.util.List;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
@@ -110,7 +111,7 @@ public class MachineEditorScreen extends BaseParentedScreen<CommandGUIScreen> {
       this.rowGap = this.isConfigEditor ? 36 : 44;
       int fieldsEnd = this.isConfigEditor ? 4 : 3;
       this.buttonsRowY = 32 + this.rowGap * fieldsEnd;
-      this.nameField = new EditBox(this.font, fieldX, 32, 146, 20, Component.translatable("screen.command-gui.machine.name"));
+      this.nameField = new GuiEditBox(this.font, fieldX, 32, 146, 20, Component.translatable("screen.command-gui.machine.name"));
       this.nameField.setMaxLength(50);
       this.nameField.setValue(this.nameText);
       this.nameField.setResponder(text -> {
@@ -118,7 +119,7 @@ public class MachineEditorScreen extends BaseParentedScreen<CommandGUIScreen> {
          this.setDirty();
       });
       this.addRenderableWidget(this.nameField);
-      this.categoryField = new EditBox(this.font, fieldX + 146 + 8, 32, 146, 20, Component.translatable("screen.command-gui.machine.category"));
+      this.categoryField = new GuiEditBox(this.font, fieldX + 146 + 8, 32, 146, 20, Component.translatable("screen.command-gui.machine.category"));
       this.categoryField.setMaxLength(30);
       this.categoryField.setValue(this.categoryText);
       this.categoryField.setHint(Component.translatable("screen.command-gui.machine.category_hint"));
@@ -127,7 +128,7 @@ public class MachineEditorScreen extends BaseParentedScreen<CommandGUIScreen> {
          this.setDirty();
       });
       this.addRenderableWidget(this.categoryField);
-      this.descriptionField = new EditBox(this.font, fieldX, 32 + this.rowGap, 300, 20, Component.translatable("screen.command-gui.machine.description"));
+      this.descriptionField = new GuiEditBox(this.font, fieldX, 32 + this.rowGap, 300, 20, Component.translatable("screen.command-gui.machine.description"));
       this.descriptionField.setMaxLength(200);
       this.descriptionField.setValue(this.descriptionText);
       this.descriptionField.setResponder(text -> {
@@ -135,7 +136,7 @@ public class MachineEditorScreen extends BaseParentedScreen<CommandGUIScreen> {
          this.setDirty();
       });
       this.addRenderableWidget(this.descriptionField);
-      this.botsField = new EditBox(this.font, fieldX, 32 + this.rowGap * 2, 224, 20, Component.translatable("screen.command-gui.machine.bots"));
+      this.botsField = new GuiEditBox(this.font, fieldX, 32 + this.rowGap * 2, 224, 20, Component.translatable("screen.command-gui.machine.bots"));
       this.botsField.setMaxLength(200);
       this.botsField.setHint(Component.translatable("screen.command-gui.machine.bots_hint"));
       this.botsField.setValue(String.join(",", this.machine.bots));
@@ -157,16 +158,17 @@ public class MachineEditorScreen extends BaseParentedScreen<CommandGUIScreen> {
       this.addRenderableWidget(this.intervalField);
       if (this.isConfigEditor) {
          int permRowY = 32 + this.rowGap * 3;
-         this.permissionField = new EditBox(this.font, fieldX, permRowY, 60, 20, Component.translatable("screen.command-gui.machine.permission"));
+         this.permissionField = new GuiEditBox(this.font, fieldX, permRowY, 60, 20, Component.translatable("screen.command-gui.ui.permission_short"));
          this.permissionField.setMaxLength(1);
          this.permissionField.setValue(this.permissionText);
-         this.permissionField.setHint(Component.translatable("screen.command-gui.machine.permission_hint"));
+         this.permissionField.setHint(Component.literal("0–4"));
+         this.permissionField.setTooltip(Tooltip.create(Component.translatable("screen.command-gui.machine.permission_hint")));
          this.permissionField.setResponder(text -> {
             this.permissionText = text;
             this.setDirty();
          });
          this.addRenderableWidget(this.permissionField);
-         this.playersField = new EditBox(this.font, fieldX + 68, permRowY, 232, 20, Component.translatable("screen.command-gui.machine.players"));
+         this.playersField = new GuiEditBox(this.font, fieldX + 68, permRowY, 232, 20, Component.translatable("screen.command-gui.machine.players"));
          this.playersField.setMaxLength(200);
          this.playersField.setHint(Component.translatable("screen.command-gui.machine.players_hint"));
          this.playersField.setValue(String.join(",", this.machine.bannedPlayers));
@@ -178,19 +180,19 @@ public class MachineEditorScreen extends BaseParentedScreen<CommandGUIScreen> {
       }
 
       int timelineWidth = 69;
-      this.onTimelineButton = Button.builder(this.buildTimelineLabel(true), btn -> this.openTimelineEditor(true))
+      this.onTimelineButton = GuiButton.themed(this.buildTimelineLabel(true), btn -> this.openTimelineEditor(true))
          .bounds(fieldX, this.buttonsRowY, timelineWidth, 18)
          .build();
       this.addRenderableWidget(this.onTimelineButton);
-      this.offTimelineButton = Button.builder(this.buildTimelineLabel(false), btn -> this.openTimelineEditor(false))
+      this.offTimelineButton = GuiButton.themed(this.buildTimelineLabel(false), btn -> this.openTimelineEditor(false))
          .bounds(fieldX + timelineWidth + 8, this.buttonsRowY, timelineWidth, 18)
          .build();
       this.addRenderableWidget(this.offTimelineButton);
-      this.modesButton = Button.builder(this.buildModesLabel(), btn -> this.openModesEditor())
+      this.modesButton = GuiButton.themed(this.buildModesLabel(), btn -> this.openModesEditor())
          .bounds(fieldX + (timelineWidth + 8) * 2, this.buttonsRowY, timelineWidth, 18)
          .build();
       this.addRenderableWidget(this.modesButton);
-      this.detectionButton = Button.builder(this.buildDetectionLabel(), btn -> this.openDetectionEditor())
+      this.detectionButton = GuiButton.themed(this.buildDetectionLabel(), btn -> this.openDetectionEditor())
          .bounds(fieldX + (timelineWidth + 8) * 3, this.buttonsRowY, timelineWidth, 18)
          .build();
       this.addRenderableWidget(this.detectionButton);
@@ -199,18 +201,18 @@ public class MachineEditorScreen extends BaseParentedScreen<CommandGUIScreen> {
       int buttonCount = this.isNewMachine ? 2 : 3;
       int barStartX = fieldX + (300 - (barWidth * buttonCount + 8 * (buttonCount - 1))) / 2;
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.save"), btn -> this.saveAndClose()).bounds(barStartX, barY, barWidth, 18).build()
+         GuiButton.themed(Component.translatable("screen.command-gui.save"), btn -> this.saveAndClose()).bounds(barStartX, barY, barWidth, 18).build()
       );
       int barX = barStartX + barWidth + 8;
       if (!this.isNewMachine && this.isConfigEditor) {
          this.addRenderableWidget(
-            Button.builder(Component.translatable("screen.command-gui.delete"), btn -> this.confirmDelete()).bounds(barX, barY, barWidth, 18).build()
+            GuiButton.themed(Component.translatable("screen.command-gui.delete"), btn -> this.confirmDelete()).bounds(barX, barY, barWidth, 18).build()
          );
          barX += barWidth + 8;
       }
 
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.back"), btn -> this.requestExit()).bounds(barX, barY, barWidth, 18).build()
+         GuiButton.themed(Component.translatable("screen.command-gui.back"), btn -> this.requestExit()).bounds(barX, barY, barWidth, 18).build()
       );
       if (this.pendingDraftPrompt) {
          this.pendingDraftPrompt = false;
@@ -592,7 +594,7 @@ public class MachineEditorScreen extends BaseParentedScreen<CommandGUIScreen> {
       this.renderLabel(guiGraphics, fieldX, 32 + this.rowGap * 2, Component.translatable("screen.command-gui.machine.bots"));
       this.renderLabel(guiGraphics, fieldX + 300 - 72, 32 + this.rowGap * 2, Component.translatable("screen.command-gui.machine.switch_interval"));
       if (this.isConfigEditor) {
-         this.renderLabel(guiGraphics, fieldX, 32 + this.rowGap * 3, Component.translatable("screen.command-gui.machine.permission"));
+         this.renderLabel(guiGraphics, fieldX, 32 + this.rowGap * 3, Component.translatable("screen.command-gui.ui.permission_short"));
          this.renderLabel(guiGraphics, fieldX + 68, 32 + this.rowGap * 3, Component.translatable("screen.command-gui.machine.players"));
       }
 
@@ -602,7 +604,7 @@ public class MachineEditorScreen extends BaseParentedScreen<CommandGUIScreen> {
    }
 
    private void renderLabel(GuiGraphicsExtractor guiGraphics, int x, int fieldY, Component label) {
-      guiGraphics.text(this.font, label, x, fieldY - 12, -5592406);
+      guiGraphics.text(this.font, label, x, fieldY - 12, GuiTheme.muted());
    }
 
    private void confirmDelete() {

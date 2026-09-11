@@ -22,7 +22,7 @@ public class EditCategoryScreen extends BaseParentedScreen<CommandGUIScreen> {
       super.init();
       int centerX = this.width / 2;
       int centerY = this.height / 2;
-      this.nameField = new EditBox(this.font, centerX - 100, centerY - 20, 200, 20, Component.translatable("screen.command-gui.category_name_hint"));
+      this.nameField = new GuiEditBox(this.font, centerX - 100, centerY - 20, 200, 20, Component.translatable("screen.command-gui.category_name_hint"));
       this.nameField.setMaxLength(50);
       this.nameField.setValue(this.initialName());
       this.nameField.setHint(Component.translatable("screen.command-gui.category_name_hint"));
@@ -31,10 +31,10 @@ public class EditCategoryScreen extends BaseParentedScreen<CommandGUIScreen> {
       this.setInitialFocus(this.nameField);
       int startX = centerX - 154;
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.save"), button -> this.saveRename()).bounds(startX, centerY + 15, 100, 20).build()
+         GuiButton.themed(Component.translatable("screen.command-gui.save"), button -> this.saveRename()).bounds(startX, centerY + 15, 100, 20).build()
       );
       boolean hasCommands = this.category != null && !this.category.commands.isEmpty();
-      Button deleteButton = Button.builder(Component.translatable("screen.command-gui.delete_category"), button -> this.confirmDelete())
+      Button deleteButton = GuiButton.themed(Component.translatable("screen.command-gui.delete_category"), button -> this.confirmDelete())
          .bounds(startX + 104, centerY + 15, 100, 20)
          .build();
       deleteButton.active = !hasCommands;
@@ -43,7 +43,7 @@ public class EditCategoryScreen extends BaseParentedScreen<CommandGUIScreen> {
       );
       this.addRenderableWidget(deleteButton);
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.cancel"), button -> this.minecraft.gui.setScreen(this.parent))
+         GuiButton.themed(Component.translatable("screen.command-gui.cancel"), button -> this.minecraft.gui.setScreen(this.parent))
             .bounds(startX + 208, centerY + 15, 100, 20)
             .build()
       );

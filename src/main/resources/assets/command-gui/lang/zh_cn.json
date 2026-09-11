@@ -597,5 +597,12 @@
     "screen.command-gui.machine.step_delay_label":  "本步骤各项指令执行延时(tick)",
     "screen.command-gui.machine.step_delay_hint":  "本步骤内各条子指令之间的统一执行延时（每条子指令执行前等待）",
     "screen.command-gui.machine.step_commands_hint":  "下方子指令按顺序执行，每条之间等待上面的本步骤各项指令执行延时",
-    "screen.command-gui.machine.step_delay_edit_hint":  "步骤间延时：上一步执行完成后（第一步为触发时）等待的 tick 数，然后才执行本步骤；点击延时条直接修改（范围 1-72000 tick）"
+    "screen.command-gui.machine.step_delay_edit_hint":  "步骤间延时：上一步执行完成后（第一步为触发时）等待的 tick 数，然后才执行本步骤；点击延时条直接修改（范围 1-72000 tick）",
+  "screen.command-gui.ui.command_hint": "左键执行 · 右键编辑",
+  "screen.command-gui.ui.empty_category": "这里还没有内容",
+  "screen.command-gui.ui.empty_help": "选择其他分类，或从下方添加",
+  "screen.command-gui.ui.no_results": "没有找到匹配的内容",
+  "screen.command-gui.ui.player_hint": "选择假人 · 在右侧管理动作",
+  "screen.command-gui.ui.search_help": "试试更短的关键词，或清空搜索",
+  "screen.command-gui.ui.permission_short": "权限等级"
 }

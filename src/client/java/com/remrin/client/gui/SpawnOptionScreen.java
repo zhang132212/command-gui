@@ -104,31 +104,31 @@ public class SpawnOptionScreen extends BaseParentedScreen<Screen> {
       posBtn.setDarkSelected(() -> this.usePlayerPosition, -1);
       this.registerContent(posBtn);
       this.registerContent(
-         Button.builder(Component.translatable("screen.command-gui.machine.spawn_own_rotation"), btn -> this.fillOwnRotation())
+         GuiButton.themed(Component.translatable("screen.command-gui.machine.spawn_own_rotation"), btn -> this.fillOwnRotation())
             .bounds(fieldX + 87 + 4, 58, 87, 16)
             .build()
       );
-      this.xField = new EditBox(this.font, fieldX, 94, 56, 16, Component.literal("X"));
+      this.xField = new GuiEditBox(this.font, fieldX, 94, 56, 16, Component.literal("X"));
       this.xField.setMaxLength(12);
       this.xField.setValue(this.xText);
       this.xField.setResponder(text -> this.xText = text);
       this.registerContent(this.xField);
-      this.yField = new EditBox(this.font, fieldX + 56 + 6, 94, 56, 16, Component.literal("Y"));
+      this.yField = new GuiEditBox(this.font, fieldX + 56 + 6, 94, 56, 16, Component.literal("Y"));
       this.yField.setMaxLength(12);
       this.yField.setValue(this.yText);
       this.yField.setResponder(text -> this.yText = text);
       this.registerContent(this.yField);
-      this.zField = new EditBox(this.font, fieldX + 124, 94, 56, 16, Component.literal("Z"));
+      this.zField = new GuiEditBox(this.font, fieldX + 124, 94, 56, 16, Component.literal("Z"));
       this.zField.setMaxLength(12);
       this.zField.setValue(this.zText);
       this.zField.setResponder(text -> this.zText = text);
       this.registerContent(this.zField);
-      this.yawField = new EditBox(this.font, fieldX, 130, 87, 16, Component.literal("Yaw"));
+      this.yawField = new GuiEditBox(this.font, fieldX, 130, 87, 16, Component.literal("Yaw"));
       this.yawField.setMaxLength(10);
       this.yawField.setValue(this.yawText);
       this.yawField.setResponder(text -> this.yawText = text);
       this.registerContent(this.yawField);
-      this.pitchField = new EditBox(this.font, fieldX + 87 + 6, 130, 87, 16, Component.literal("Pitch"));
+      this.pitchField = new GuiEditBox(this.font, fieldX + 87 + 6, 130, 87, 16, Component.literal("Pitch"));
       this.pitchField.setMaxLength(10);
       this.pitchField.setValue(this.pitchText);
       this.pitchField.setResponder(text -> this.pitchText = text);
@@ -154,12 +154,12 @@ public class SpawnOptionScreen extends BaseParentedScreen<Screen> {
       int barWidth = Math.min(70, 100);
       int barStartX = fieldX + (180 - barWidth * 2 - 8) / 2;
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.machine.spawn_insert"), btn -> this.insertAndClose())
+         GuiButton.themed(Component.translatable("screen.command-gui.machine.spawn_insert"), btn -> this.insertAndClose())
             .bounds(barStartX, barY, barWidth, 18)
             .build()
       );
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.back"), btn -> this.minecraft.gui.setScreen(this.parent))
+         GuiButton.themed(Component.translatable("screen.command-gui.back"), btn -> this.minecraft.gui.setScreen(this.parent))
             .bounds(barStartX + barWidth + 8, barY, barWidth, 18)
             .build()
       );

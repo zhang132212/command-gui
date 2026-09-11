@@ -27,31 +27,31 @@ public class CoordinateInputScreen extends BaseParentedScreen<Screen> {
       int centerY = this.height / 2;
       int totalWidth = 190;
       int startX = centerX - totalWidth / 2;
-      this.xField = new EditBox(this.font, startX, centerY - 30, 60, 20, Component.literal("X"));
+      this.xField = new GuiEditBox(this.font, startX, centerY - 30, 60, 20, Component.literal("X"));
       this.xField.setMaxLength(10);
       this.xField.setHint(Component.literal("X"));
       this.addRenderableWidget(this.xField);
       this.setInitialFocus(this.xField);
-      this.yField = new EditBox(this.font, startX + 60 + 5, centerY - 30, 60, 20, Component.literal("Y"));
+      this.yField = new GuiEditBox(this.font, startX + 60 + 5, centerY - 30, 60, 20, Component.literal("Y"));
       this.yField.setMaxLength(10);
       this.yField.setHint(Component.literal("Y"));
       this.addRenderableWidget(this.yField);
-      this.zField = new EditBox(this.font, startX + 130, centerY - 30, 60, 20, Component.literal("Z"));
+      this.zField = new GuiEditBox(this.font, startX + 130, centerY - 30, 60, 20, Component.literal("Z"));
       this.zField.setMaxLength(10);
       this.zField.setHint(Component.literal("Z"));
       this.addRenderableWidget(this.zField);
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.coord.current"), btn -> this.fillCurrentPosition())
+         GuiButton.themed(Component.translatable("screen.command-gui.coord.current"), btn -> this.fillCurrentPosition())
             .bounds(centerX - 75, centerY + 5, 150, 20)
             .build()
       );
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.coord.current_block"), btn -> this.fillCurrentBlockPosition())
+         GuiButton.themed(Component.translatable("screen.command-gui.coord.current_block"), btn -> this.fillCurrentBlockPosition())
             .bounds(centerX - 75, centerY + 30, 150, 20)
             .build()
       );
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.back"), btn -> this.minecraft.gui.setScreen(this.parent))
+         GuiButton.themed(Component.translatable("screen.command-gui.back"), btn -> this.minecraft.gui.setScreen(this.parent))
             .bounds(centerX - 75, centerY + 60, 150, 20)
             .build()
       );

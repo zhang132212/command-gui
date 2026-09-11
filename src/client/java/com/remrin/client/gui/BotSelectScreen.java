@@ -37,7 +37,7 @@ public class BotSelectScreen extends BaseParentedScreen<Screen> {
 
       for (int i = 0; i < this.botNames.size() && y + 20 <= maxY; i++) {
          String name = this.botNames.get(i);
-         Button btn = Button.builder(Component.literal(name), b -> {
+         Button btn = GuiButton.themed(Component.literal(name), b -> {
             if (this.host != null) {
                this.host.selectBotByName(name);
                this.minecraft.gui.setScreen(this.parent);
@@ -51,7 +51,7 @@ public class BotSelectScreen extends BaseParentedScreen<Screen> {
 
       int barY = this.height - 22;
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.back"), btnx -> this.minecraft.gui.setScreen(this.parent))
+         GuiButton.themed(Component.translatable("screen.command-gui.back"), btnx -> this.minecraft.gui.setScreen(this.parent))
             .bounds(fieldX, barY, 80, 18)
             .build()
       );

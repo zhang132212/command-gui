@@ -598,5 +598,12 @@
     "screen.command-gui.machine.step_delay_label":  "Delay before each command in this step (tick)",
     "screen.command-gui.machine.step_delay_hint":  "Unified delay between the sub-commands of this step (wait before each sub-command)",
     "screen.command-gui.machine.step_commands_hint":  "Sub-commands below run in order, waiting the step delay above between each",
-    "screen.command-gui.machine.step_delay_edit_hint":  "Inter-step delay: ticks to wait after the previous step (or after triggering for the first step) before running this step; click this bar to edit (range 1-72000 tick)"
+    "screen.command-gui.machine.step_delay_edit_hint":  "Inter-step delay: ticks to wait after the previous step (or after triggering for the first step) before running this step; click this bar to edit (range 1-72000 tick)",
+  "screen.command-gui.ui.command_hint": "Left click: run  /  Right click: edit",
+  "screen.command-gui.ui.empty_category": "Nothing here yet",
+  "screen.command-gui.ui.empty_help": "Choose a category or add an item below",
+  "screen.command-gui.ui.no_results": "No matching results",
+  "screen.command-gui.ui.player_hint": "Select a player to manage actions",
+  "screen.command-gui.ui.search_help": "Try a shorter query or clear your search",
+  "screen.command-gui.ui.permission_short": "Permission"
 }

@@ -35,7 +35,7 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
    private static final int CMD_FIELD_Y = 128;
    private static final int LIST_LABEL_Y = 158;
    private static final int LIST_TOP = 170;
-   private static final int LIST_ROW_HEIGHT = 12;
+   private static final int LIST_ROW_HEIGHT = 22;
    private static final int MOVE_BTN_W = 48;
    private static final int COPY_BTN_W = 30;
    private static final int REMOVE_BTN_W = 30;
@@ -188,7 +188,7 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
       }
 
       int fieldX = this.fieldX();
-      this.nameField = new EditBox(this.font, fieldX, 26, 94, 20, Component.translatable("screen.command-gui.name"));
+      this.nameField = new GuiEditBox(this.font, fieldX, 26, 94, 20, Component.translatable("screen.command-gui.name"));
       this.nameField.setMaxLength(50);
       this.nameField.setValue(this.nameText);
       this.nameField.setHint(Component.translatable("screen.command-gui.name_hint"));
@@ -199,7 +199,7 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
       });
       this.addRenderableWidget(this.nameField);
       int descWidth = this.fakeMode ? 110 : 262;
-      this.descriptionField = new EditBox(this.font, fieldX + 94 + 4, 26, descWidth, 20, Component.translatable("screen.command-gui.description"));
+      this.descriptionField = new GuiEditBox(this.font, fieldX + 94 + 4, 26, descWidth, 20, Component.translatable("screen.command-gui.description"));
       this.descriptionField.setMaxLength(100);
       this.descriptionField.setValue(this.descriptionText);
       this.descriptionField.setHint(Component.translatable("screen.command-gui.description_hint"));
@@ -209,12 +209,12 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
       });
       this.addRenderableWidget(this.descriptionField);
       if (this.fakeMode) {
-         this.shortcutButton = Button.builder(Component.literal(this.shortcutMessage()), btn -> this.toggleShortcutCapture())
+         this.shortcutButton = GuiButton.themed(Component.literal(this.shortcutMessage()), btn -> this.toggleShortcutCapture())
             .bounds(fieldX + 94 + 4 + 110 + 4, 26, 100, 20)
             .build();
          this.shortcutButton.setTooltip(Tooltip.create(Component.literal(this.shortcutTooltip())));
          this.addRenderableWidget(this.shortcutButton);
-         this.shortcutResetButton = Button.builder(Component.translatable("screen.command-gui.shortcut.reset"), btn -> this.resetShortcut())
+         this.shortcutResetButton = GuiButton.themed(Component.translatable("screen.command-gui.shortcut.reset"), btn -> this.resetShortcut())
             .bounds(fieldX + 94 + 4 + 110 + 4 + 100 + 4, 26, 42, 20)
             .build();
          this.shortcutResetButton.setTooltip(Tooltip.create(Component.translatable("screen.command-gui.shortcut.reset_hint")));
@@ -223,7 +223,7 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
 
       this.refreshShortcutConflict();
       if (this.fakeMode && !this.playerCustomMode) {
-         this.botField = new EditBox(this.font, fieldX, 64, 110, 20, Component.translatable("screen.command-gui.machine.step_bot"));
+         this.botField = new GuiEditBox(this.font, fieldX, 64, 110, 20, Component.translatable("screen.command-gui.machine.step_bot"));
          this.botField.setMaxLength(20);
          this.botField.setValue(this.botText);
          this.botField.setResponder(text -> {
@@ -232,7 +232,7 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
          });
          this.addRenderableWidget(this.botField);
          this.addRenderableWidget(
-            Button.builder(
+            GuiButton.themed(
                   Component.translatable("screen.command-gui.machine.step_pick"),
                   btn -> this.minecraft.gui.setScreen(new BotSelectScreen(this, this.botNames()))
                )
@@ -255,16 +255,16 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
       this.delayField.setTooltip(Tooltip.create(Component.translatable("screen.command-gui.command_delay_hint")));
       this.addRenderableWidget(this.delayField);
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.machine.step_pick"), btn -> this.openDelayPicker()).bounds(delayPickX, 64, 45, 20).build()
+         GuiButton.themed(Component.translatable("screen.command-gui.machine.step_pick"), btn -> this.openDelayPicker()).bounds(delayPickX, 64, 45, 20).build()
       );
       if (!this.fakeMode) {
          int shortcutX = fieldX + 360 - 42 - 4 - 100;
-         this.shortcutButton = Button.builder(Component.literal(this.shortcutMessage()), btn -> this.toggleShortcutCapture())
+         this.shortcutButton = GuiButton.themed(Component.literal(this.shortcutMessage()), btn -> this.toggleShortcutCapture())
             .bounds(shortcutX, 64, 100, 20)
             .build();
          this.shortcutButton.setTooltip(Tooltip.create(Component.literal(this.shortcutTooltip())));
          this.addRenderableWidget(this.shortcutButton);
-         this.shortcutResetButton = Button.builder(Component.translatable("screen.command-gui.shortcut.reset"), btn -> this.resetShortcut())
+         this.shortcutResetButton = GuiButton.themed(Component.translatable("screen.command-gui.shortcut.reset"), btn -> this.resetShortcut())
             .bounds(shortcutX + 100 + 4, 64, 42, 20)
             .build();
          this.shortcutResetButton.setTooltip(Tooltip.create(Component.translatable("screen.command-gui.shortcut.reset_hint")));
@@ -308,7 +308,7 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
          this.buildPlaceholderRow(fieldX);
       }
 
-      this.commandField = new EditBox(this.font, fieldX, 128, 280, 20, Component.translatable("screen.command-gui.command"));
+      this.commandField = new GuiEditBox(this.font, fieldX, 128, 280, 20, Component.translatable("screen.command-gui.command"));
       this.commandField.setMaxLength(256);
       this.commandField.setValue(this.commandText);
       this.addRenderableWidget(this.commandField);
@@ -379,14 +379,14 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
          int btnW = editing ? 100 : 140;
          int gap = 8;
          int startX = fieldX + (360 - btnW * total - gap * (total - 1)) / 2;
-         this.saveButton = Button.builder(Component.translatable("screen.command-gui.save"), btn -> this.saveAndClose())
+         this.saveButton = GuiButton.themed(Component.translatable("screen.command-gui.save"), btn -> this.saveAndClose())
             .bounds(startX, barY, btnW, 20)
             .build();
          this.addRenderableWidget(this.saveButton);
          int nextX = startX + btnW + gap;
          if (editing) {
             this.addRenderableWidget(
-               Button.builder(Component.translatable("screen.command-gui.action.delete"), btn -> this.deleteCustomCommand())
+               GuiButton.themed(Component.translatable("screen.command-gui.action.delete"), btn -> this.deleteCustomCommand())
                   .bounds(nextX, barY, btnW, 20)
                   .build()
             );
@@ -394,7 +394,7 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
          }
 
          this.addRenderableWidget(
-            Button.builder(Component.translatable("screen.command-gui.cancel"), btn -> this.requestExit())
+            GuiButton.themed(Component.translatable("screen.command-gui.cancel"), btn -> this.requestExit())
                .bounds(nextX, barY, btnW, 20)
                .build()
          );
@@ -402,12 +402,12 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
          int btnW = 76;
          int gap = 4;
          int startX = fieldX + (360 - btnW * 4 - gap * 3) / 2;
-         this.saveButton = Button.builder(Component.translatable("screen.command-gui.save"), btn -> this.saveAndClose())
+         this.saveButton = GuiButton.themed(Component.translatable("screen.command-gui.save"), btn -> this.saveAndClose())
             .bounds(startX, barY, btnW, 20)
             .build();
          this.addRenderableWidget(this.saveButton);
          this.addRenderableWidget(
-            Button.builder(
+            GuiButton.themed(
                   Component.translatable("screen.command-gui.action.move"),
                   btn -> this.minecraft.gui.setScreen(new MoveCategoryScreen(this, this.editingName, category -> this.movedToCategory = category))
                )
@@ -415,12 +415,12 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
                .build()
          );
          this.addRenderableWidget(
-            Button.builder(Component.translatable("screen.command-gui.action.delete"), btn -> this.deleteAndClose())
+            GuiButton.themed(Component.translatable("screen.command-gui.action.delete"), btn -> this.deleteAndClose())
                .bounds(startX + (btnW + gap) * 2, barY, btnW, 20)
                .build()
          );
          this.addRenderableWidget(
-            Button.builder(Component.translatable("screen.command-gui.cancel"), btn -> this.requestExit())
+            GuiButton.themed(Component.translatable("screen.command-gui.cancel"), btn -> this.requestExit())
                .bounds(startX + (btnW + gap) * 3, barY, btnW, 20)
                .build()
          );
@@ -430,14 +430,14 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
          int btnW = multi ? 104 : 140;
          int gap = 8;
          int startX = fieldX + (360 - btnW * total - gap * (total - 1)) / 2;
-         this.saveButton = Button.builder(Component.translatable("screen.command-gui.save"), btn -> this.saveAndClose())
+         this.saveButton = GuiButton.themed(Component.translatable("screen.command-gui.save"), btn -> this.saveAndClose())
             .bounds(startX, barY, btnW, 20)
             .build();
          this.addRenderableWidget(this.saveButton);
          int nextX = startX + btnW + gap;
          if (multi) {
             this.addRenderableWidget(
-               Button.builder(Component.translatable("screen.command-gui.save_to_category_short"), btn -> this.openCategoryPicker())
+               GuiButton.themed(Component.translatable("screen.command-gui.save_to_category_short"), btn -> this.openCategoryPicker())
                   .bounds(nextX, barY, btnW, 20)
                   .build()
             );
@@ -445,7 +445,7 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
          }
 
          this.addRenderableWidget(
-            Button.builder(Component.translatable("screen.command-gui.cancel"), btn -> this.requestExit()).bounds(nextX, barY, btnW, 20).build()
+            GuiButton.themed(Component.translatable("screen.command-gui.cancel"), btn -> this.requestExit()).bounds(nextX, barY, btnW, 20).build()
          );
       }
    }
@@ -546,7 +546,7 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
    }
 
    private int getMaxListRows() {
-      return Math.max(1, (this.getListBottom() - 170) / 12);
+      return Math.max(1, (this.getListBottom() - LIST_TOP) / LIST_ROW_HEIGHT);
    }
 
    private int getListBottom() {
@@ -588,30 +588,30 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
             break;
          }
 
-         int y = 170 + i * 12;
-         Button upBtn = Button.builder(Component.translatable("screen.command-gui.step_up_short"), btn -> this.moveCommandUp(index))
-            .bounds(upX, y, 48, 12)
+         int y = LIST_TOP + i * LIST_ROW_HEIGHT;
+         Button upBtn = GuiButton.themed(Component.translatable("screen.command-gui.step_up_short"), btn -> this.moveCommandUp(index))
+            .bounds(upX, y, 48, 18)
             .build();
          upBtn.active = index > 0;
          this.moveUpButtons.add(upBtn);
          this.addRenderableWidget(upBtn);
-         Button downBtn = Button.builder(Component.translatable("screen.command-gui.step_down_short"), btn -> this.moveCommandDown(index))
-            .bounds(downX, y, 48, 12)
+         Button downBtn = GuiButton.themed(Component.translatable("screen.command-gui.step_down_short"), btn -> this.moveCommandDown(index))
+            .bounds(downX, y, 48, 18)
             .build();
          downBtn.active = index < this.commandList.size() - 1;
          this.moveDownButtons.add(downBtn);
          this.addRenderableWidget(downBtn);
-         Button copyBtn = Button.builder(Component.translatable("screen.command-gui.step_copy_short"), btn -> this.copyCommandToClipboard(index))
-            .bounds(copyX, y, 30, 12)
+         Button copyBtn = GuiButton.themed(Component.translatable("screen.command-gui.step_copy_short"), btn -> this.copyCommandToClipboard(index))
+            .bounds(copyX, y, 30, 18)
             .build();
          this.copyButtons.add(copyBtn);
          this.addRenderableWidget(copyBtn);
-         Button removeBtn = Button.builder(Component.translatable("screen.command-gui.delete"), btn -> {
+         Button removeBtn = GuiButton.themed(Component.translatable("screen.command-gui.delete"), btn -> {
             this.commandList.remove(index);
             this.commandValid.remove(index);
             this.markDirty();
             this.rebuildListButtons();
-         }).bounds(removeX, y, 30, 12).build();
+         }).bounds(removeX, y, 30, 18).build();
          this.removeButtons.add(removeBtn);
          this.addRenderableWidget(removeBtn);
       }
@@ -1095,35 +1095,35 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
       int fieldX = this.fieldX();
       Component title = this.title.copy();
       if (this.dirty) {
-         title = title.copy().append(" ").append(Component.translatable("screen.command-gui.unsaved_badge").withColor(-22016));
+         title = title.copy().append(" ").append(Component.translatable("screen.command-gui.unsaved_badge").withColor(GuiTheme.warning()));
       }
 
       guiGraphics.centeredText(this.font, title, this.width / 2, 4, -1);
-      guiGraphics.text(this.font, Component.translatable("screen.command-gui.name"), fieldX, 14, -5592406);
-      guiGraphics.text(this.font, Component.translatable("screen.command-gui.description"), fieldX + 98, 14, -5592406);
+      guiGraphics.text(this.font, Component.translatable("screen.command-gui.name"), fieldX, 14, GuiTheme.muted());
+      guiGraphics.text(this.font, Component.translatable("screen.command-gui.description"), fieldX + 98, 14, GuiTheme.muted());
       if (this.fakeMode) {
-         guiGraphics.text(this.font, Component.translatable("screen.command-gui.shortcut"), fieldX + 212, 14, -5592406);
+         guiGraphics.text(this.font, Component.translatable("screen.command-gui.shortcut"), fieldX + 212, 14, GuiTheme.muted());
       } else {
          int shortcutX = fieldX + 360 - 42 - 4 - 100;
-         guiGraphics.text(this.font, Component.translatable("screen.command-gui.shortcut"), shortcutX, 52, -5592406);
+         guiGraphics.text(this.font, Component.translatable("screen.command-gui.shortcut"), shortcutX, 52, GuiTheme.muted());
       }
 
       if (this.fakeMode && !this.playerCustomMode) {
-         guiGraphics.text(this.font, Component.translatable("screen.command-gui.machine.step_bot"), fieldX, 52, -5592406);
+         guiGraphics.text(this.font, Component.translatable("screen.command-gui.machine.step_bot"), fieldX, 52, GuiTheme.muted());
       }
 
       int labelDelayFieldX = this.fakeMode ? fieldX + 360 - 45 - 4 - 110 : fieldX;
-      guiGraphics.text(this.font, Component.translatable("screen.command-gui.machine.step_delay_label"), labelDelayFieldX, 52, -5592406);
-      guiGraphics.text(this.font, Component.translatable("screen.command-gui.machine.command_input"), fieldX, 116, -5592406);
-      guiGraphics.text(this.font, Component.translatable("screen.command-gui.commands_label"), fieldX, 158, -5592406);
+      guiGraphics.text(this.font, Component.translatable("screen.command-gui.machine.step_delay_label"), labelDelayFieldX, 52, GuiTheme.muted());
+      guiGraphics.text(this.font, Component.translatable("screen.command-gui.machine.command_input"), fieldX, 116, GuiTheme.muted());
+      guiGraphics.text(this.font, Component.translatable("screen.command-gui.commands_label"), fieldX, 158, GuiTheme.muted());
       int legendX = fieldX + this.font.width(Component.translatable("screen.command-gui.commands_label")) + 6;
-      guiGraphics.text(this.font, Component.translatable("screen.command-gui.machine.cmd_legend_green"), legendX, 158, -11141291);
+      guiGraphics.text(this.font, Component.translatable("screen.command-gui.machine.cmd_legend_green"), legendX, 158, GuiTheme.accent());
       guiGraphics.text(
          this.font,
          Component.translatable("screen.command-gui.machine.cmd_legend_red"),
          legendX + this.font.width(Component.translatable("screen.command-gui.machine.cmd_legend_green")) + 4,
          158,
-         -43691
+         GuiTheme.danger()
       );
       int maxRows = this.getMaxListRows();
       int textWidth = 155;
@@ -1137,18 +1137,18 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
          String command = this.commandList.get(index);
          boolean valid = this.commandValid.get(index);
          String display = this.font.plainSubstrByWidth(command, textWidth);
-         int y = 170 + i * 12;
-         guiGraphics.text(this.font, Component.literal("#" + (index + 1)), fieldX + 4, y, -5592406);
-         guiGraphics.text(this.font, Component.literal(display), fieldX + 4 + 18, y, valid ? -11141291 : -43691);
+         int y = LIST_TOP + i * LIST_ROW_HEIGHT;
+         guiGraphics.text(this.font, Component.literal("#" + (index + 1)), fieldX + 4, y + 4, GuiTheme.muted());
+         guiGraphics.text(this.font, Component.literal(display), fieldX + 4 + 18, y + 4, valid ? GuiTheme.accent() : GuiTheme.danger());
          int textLeft = fieldX + 4 + 18;
-         if (mouseY >= y && mouseY < y + 12 && mouseX >= textLeft && mouseX < textLeft + textWidth) {
+         if (mouseY >= y && mouseY < y + LIST_ROW_HEIGHT - 4 && mouseX >= textLeft && mouseX < textLeft + textWidth) {
             this.renderFullCommandTooltip(guiGraphics, command, (double)mouseX, (double)mouseY);
          }
       }
 
       int maxScroll = Math.max(0, this.commandList.size() - maxRows);
       int scrollbarX = fieldX + 360 - 12;
-      this.commandScrollbar = new ScrollbarHandle(scrollbarX, 170, 12, this.getListBottom() - 170);
+      this.commandScrollbar = new ScrollbarHandle(scrollbarX, LIST_TOP, 12, this.getListBottom() - LIST_TOP);
       this.commandScrollbar
          .render(
             guiGraphics,

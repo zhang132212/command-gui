@@ -55,17 +55,19 @@ public class PresetCommandTab extends AbstractCommandTab {
       if (this.area != null) {
          int x = this.area.left();
          int y = this.area.top();
-         Button allBtn = Button.builder(Component.translatable("screen.command-gui.category.all"), btn -> this.onCategoryButtonClick(-1))
-            .bounds(x, y, 50, 16)
-            .build();
-         allBtn.active = this.selectedCategoryIndex != -1;
+         DarkSelectButton allBtn = new DarkSelectButton(x, y, this.categoryTabWidth(), this.tunedCategoryTabHeight(),
+            Component.translatable("screen.command-gui.category.all"), btn -> this.onCategoryButtonClick(-1));
+         allBtn.setDarkSelected(() -> this.selectedCategoryIndex == -1, -1);
+         allBtn.setTooltip(Tooltip.create(allBtn.getMessage()));
          this.allCategoryButtons.add(allBtn);
 
          for (int i = 0; i < this.allGroups.size(); i++) {
             VanillaCommands.CommandGroup group = this.allGroups.get(i);
             int index = i;
-            Button catBtn = Button.builder(Component.translatable(group.nameKey), btn -> this.onCategoryButtonClick(index)).bounds(x, y, 50, 16).build();
-            catBtn.active = this.selectedCategoryIndex != index;
+            DarkSelectButton catBtn = new DarkSelectButton(x, y, this.categoryTabWidth(), this.tunedCategoryTabHeight(),
+               Component.translatable(group.nameKey), btn -> this.onCategoryButtonClick(index));
+            catBtn.setDarkSelected(() -> this.selectedCategoryIndex == index, -1);
+            catBtn.setTooltip(Tooltip.create(catBtn.getMessage()));
             this.allCategoryButtons.add(catBtn);
          }
       }
@@ -74,7 +76,7 @@ public class PresetCommandTab extends AbstractCommandTab {
    @Override
    protected Button buildCommandButton(int index, int x, int y, int width, int height) {
       VanillaCommands.VanillaCommand cmd = this.filteredCommands.get(index);
-      Button btn = Button.builder(cmd.getName(), b -> this.handleCommand(cmd)).bounds(x, y, width, height).build();
+      Button btn = GuiButton.themed(cmd.getName(), b -> this.handleCommand(cmd)).bounds(x, y, width, height).build();
       Component desc = cmd.getDescription();
       if (desc != null) {
          btn.setTooltip(Tooltip.create(desc.copy().append("\n§7" + cmd.command)));
@@ -91,23 +93,12 @@ public class PresetCommandTab extends AbstractCommandTab {
       }
    }
 
-   private void updateCategoryButtonStates() {
-      if (!this.allCategoryButtons.isEmpty()) {
-         this.allCategoryButtons.get(0).active = this.selectedCategoryIndex != -1;
-
-         for (int i = 1; i < this.allCategoryButtons.size(); i++) {
-            this.allCategoryButtons.get(i).active = this.selectedCategoryIndex != i - 1;
-         }
-      }
-   }
-
    private void selectCategory(int index) {
       this.notifyCategoryChange(() -> {
          this.selectedCategoryIndex = index;
          this.scrollOffset = 0;
          this.buildFilteredCommands();
          this.rebuildButtons();
-         this.updateCategoryButtonStates();
       });
    }
 
@@ -139,25 +130,11 @@ public class PresetCommandTab extends AbstractCommandTab {
    }
 
    public int getCommandIndexAtPosition(double mouseX, double mouseY) {
-      if (this.area == null) {
-         return -1;
-      } else {
-         int cmdAreaLeft = this.getCommandAreaLeft();
-         int cmdAreaWidth = this.getCommandAreaWidth();
-         if (mouseX < (double)cmdAreaLeft || mouseX > (double)(cmdAreaLeft + cmdAreaWidth)) {
-            return -1;
-         } else if (!(mouseY < (double)this.area.top()) && !(mouseY > (double)this.area.bottom())) {
-            int colWidth = cmdAreaWidth / 3;
-            int col = (int)((mouseX - (double)cmdAreaLeft) / (double)colWidth);
-            int row = (int)((mouseY - (double)this.area.top()) / 24.0);
-            int index = (this.scrollOffset + row) * 3 + col;
-            if (index >= 0 && index < this.filteredCommands.size()) {
-               return index;
-            }
-            return -1;
-         } else {
-            return -1;
+      for (int i = 0; i < this.commandButtons.size(); i++) {
+         if (this.commandButtons.get(i).isMouseOver(mouseX, mouseY)) {
+            return this.scrollOffset * this.tunedColumns() + i;
          }
       }
+      return -1;
    }
 }

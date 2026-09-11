@@ -34,7 +34,7 @@ public class FakePlayerTab implements Tab {
    private static final int ITEM_GAP = 0;
    private static final int FACE_SIZE = 16;
    private static final int ACTION_BUTTON_WIDTH = 80;
-   private static final int ACTION_BUTTON_HEIGHT = 20;
+   private static final int ACTION_BUTTON_HEIGHT = 24;
    private static final int SEPARATOR_WIDTH = 1;
    private static final int PANEL_SCROLL_STEP = 20;
    private static final int FACE_PAD_LEFT = 4;
@@ -42,8 +42,6 @@ public class FakePlayerTab implements Tab {
    private static final int CHECKBOX_SIZE = 12;
    private static final int CHECKBOX_X_OFFSET = 2;
    private static final int LIST_BOTTOM_RESERVE = 36;
-   private static final Identifier BUTTON_SPRITE = Identifier.withDefaultNamespace("widget/button");
-   private static final Identifier BUTTON_HIGHLIGHTED_SPRITE = Identifier.withDefaultNamespace("widget/button_highlighted");
    private static final Identifier TELEPORT_TO_PLAYER_SPRITE = Identifier.withDefaultNamespace("spectator/teleport_to_player");
    private static final Identifier REMOVE_PLAYER_SPRITE = Identifier.withDefaultNamespace("player_list/remove_player");
    private static final Identifier CLOCK_SPRITE = Identifier.parse("command-gui:icon/clock");
@@ -282,6 +280,10 @@ public class FakePlayerTab implements Tab {
       return GuiTuning.getInt("FakePlayerTab.ACTION_BUTTON_HEIGHT", ACTION_BUTTON_HEIGHT);
    }
 
+   private int actionControlHeight() {
+      return Math.max(16, this.actionButtonHeight() - 4);
+   }
+
    private int panelScrollStep() {
       return GuiTuning.getInt("FakePlayerTab.PANEL_SCROLL_STEP", PANEL_SCROLL_STEP);
    }
@@ -324,7 +326,7 @@ public class FakePlayerTab implements Tab {
                break;
             }
 
-            Button btn = Button.builder(Component.empty(), b -> this.selectPlayer(playerName)).bounds(buttonX, y, buttonW, this.playerItemHeight()).build();
+            Button btn = GuiButton.themed(Component.empty(), b -> this.selectPlayer(playerName)).bounds(buttonX, y, buttonW, this.playerItemHeight()).build();
             Font font = Minecraft.getInstance().font;
             int faceX = buttonX + this.facePadLeft();
             int nameX = faceX + this.faceSize() + this.namePadLeft();
@@ -343,7 +345,7 @@ public class FakePlayerTab implements Tab {
             }
 
             this.playerButtons.add(btn);
-            Button checkbox = Button.builder(Component.empty(), b -> this.toggleMultiSelection(playerName))
+            Button checkbox = GuiButton.themed(Component.empty(), b -> this.toggleMultiSelection(playerName))
                .bounds(checkboxX, checkboxY + (i - this.scrollOffset) * this.playerItemHeight(), this.checkboxSize(), this.checkboxSize())
                .build();
             this.checkboxButtons.add(checkbox);
@@ -435,8 +437,8 @@ public class FakePlayerTab implements Tab {
          Minecraft mc = Minecraft.getInstance();
          int rightX = this.separatorX + this.separatorGap();
          int actionCols = 2;
-         int availWidth = Math.max(this.panelWidthReference(), this.area.right() - rightX - this.panelRightPad());
-         int actionBtnW = Math.min(this.panelWidthReference(), (availWidth - (actionCols - 1) * 0) / actionCols);
+         int availWidth = Math.max(1, this.area.right() - rightX - this.panelRightPad());
+         int actionBtnW = Math.max(1, Math.min(this.panelWidthReference(), (availWidth - (actionCols - 1) * 6) / actionCols));
          if (this.selectedPlayer == null) {
             this.panelContentBottom = 0;
             if (this.intervalField != null) {
@@ -467,7 +469,7 @@ public class FakePlayerTab implements Tab {
 
                int rows = (actionCount + 1) / actionCols;
                int intervalRowY = customRows * this.actionButtonHeight() + rows * this.actionButtonHeight() + 6;
-               int timedKillY = intervalRowY + this.actionButtonHeight() + 0 + 6;
+               int timedKillY = intervalRowY + this.actionButtonHeight() * 2 + 6;
                totalHeight = timedKillY + this.actionButtonHeight();
             }
 
@@ -477,7 +479,7 @@ public class FakePlayerTab implements Tab {
             int panelBottom = this.area.bottom();
             if (isPending) {
                if (contentY + this.actionButtonHeight() <= panelBottom && contentY >= this.area.top()) {
-                  Button cancelBtn = Button.builder(
+                  Button cancelBtn = GuiButton.themed(
                         Component.literal("x ")
                            .withStyle(ChatFormatting.RED)
                            .append(Component.translatable("screen.command-gui.fakeplayer.timed.cancel").withStyle(ChatFormatting.WHITE)),
@@ -489,7 +491,7 @@ public class FakePlayerTab implements Tab {
                            this.fireAfterRebuild();
                         }
                      )
-                     .bounds(rightX, contentY, actionBtnW * 2 + 0, this.actionButtonHeight())
+                     .bounds(rightX, contentY, actionBtnW * 2 + 6, this.actionControlHeight())
                      .build();
                   this.actionButtons.add(cancelBtn);
                }
@@ -505,8 +507,8 @@ public class FakePlayerTab implements Tab {
                if (customRows > 0) {
                   int customY = contentY;
                   if (customY + this.actionButtonHeight() <= panelBottom && customY >= this.area.top()) {
-                     Button customBtn = Button.builder(Component.literal("+"), b -> this.openCustomCommandEditor(-1))
-                        .bounds(rightX, customY, actionBtnW * 2 + 0, this.actionButtonHeight())
+                     Button customBtn = GuiButton.themed(Component.literal("+"), b -> this.openCustomCommandEditor(-1))
+                        .bounds(rightX, customY, actionBtnW * 2 + 6, this.actionControlHeight())
                         .build();
                      customBtn.setTooltip(Tooltip.create(Component.translatable("screen.command-gui.fakeplayer.custom_commands")));
                      this.actionButtons.add(customBtn);
@@ -529,8 +531,8 @@ public class FakePlayerTab implements Tab {
                         DarkSelectButton cmdBtn = new DarkSelectButton(
                            rightX,
                            cmdY,
-                           actionBtnW * 2 + 0,
-                           this.actionButtonHeight(),
+                           actionBtnW * 2 + 6,
+                           this.actionControlHeight(),
                            Component.literal(display),
                            b -> this.executeCustomCommand(player, entry)
                         );
@@ -553,7 +555,7 @@ public class FakePlayerTab implements Tab {
                   if ((ix != 1 || !hasKillTask) && this.isActionEnabled(ACTIONS[ix])) {
                      int row = idx / actionCols;
                      int col = idx % actionCols;
-                     int x = rightX + col * (actionBtnW + 0);
+                     int x = rightX + col * (actionBtnW + 6);
                      int y = actionStartY + row * this.actionButtonHeight();
                      String action = ACTIONS[ix];
                      String persistentKey = PERSISTENT_ACTION_KEYS.get(action);
@@ -561,13 +563,13 @@ public class FakePlayerTab implements Tab {
                         Button btn;
                         if (persistentKey != null) {
                            DarkSelectButton toggle = new DarkSelectButton(
-                              x, y, actionBtnW, this.actionButtonHeight(), Component.translatable(ACTION_KEYS[ix]), b -> this.executePersistentAction(player, action, persistentKey)
+                              x, y, actionBtnW, this.actionControlHeight(), Component.translatable(ACTION_KEYS[ix]), b -> this.executePersistentAction(player, action, persistentKey)
                            );
                            toggle.setDarkSelected(() -> this.isActionActive(player, persistentKey), -1);
                            btn = toggle;
                         } else {
-                           btn = Button.builder(Component.translatable(ACTION_KEYS[ix]), b -> this.executeAction(player, action))
-                              .bounds(x, y, actionBtnW, this.actionButtonHeight())
+                           btn = GuiButton.themed(Component.translatable(ACTION_KEYS[ix]), b -> this.executeAction(player, action))
+                              .bounds(x, y, actionBtnW, this.actionControlHeight())
                               .build();
                         }
 
@@ -581,17 +583,16 @@ public class FakePlayerTab implements Tab {
                int rowsUsed = (idx + 1) / actionCols;
                int intervalRowY = actionStartY + rowsUsed * this.actionButtonHeight() + 6;
                int gap = 4;
-               int intervalLabelW = 52;
+               int intervalLabelW = Math.min(52, Math.max(20, availWidth - 60));
                int intervalFieldW = 56;
-               int intervalFixedW = intervalLabelW + gap + intervalFieldW;
-               int intervalBtnW = Math.max(70, (availWidth - intervalFixedW - 3 * gap) / 2);
-               if (intervalRowY + this.actionButtonHeight() <= panelBottom && intervalRowY >= this.area.top()) {
+               int intervalBtnW = Math.max(1, (availWidth - gap) / 2);
+               if (intervalRowY + this.actionButtonHeight() * 2 <= panelBottom && intervalRowY >= this.area.top()) {
                   this.panelIntervalLabelX = rightX;
                   this.panelIntervalLabelY = intervalRowY;
                   boolean intervalActive = this.isActionActive(player, "attackInterval") || this.isActionActive(player, "useInterval");
                   int fieldX = rightX + intervalLabelW + gap;
                   if (this.intervalField == null) {
-                     this.intervalField = new DigitsOnlyEditBox(mc.font, fieldX, intervalRowY, intervalFieldW, this.actionButtonHeight(), Component.literal(""));
+                     this.intervalField = new DigitsOnlyEditBox(mc.font, fieldX, intervalRowY, intervalFieldW, this.actionControlHeight(), Component.literal(""));
                      this.intervalField.setMaxLength(5);
                      this.intervalField.setHint(Component.literal("1-72000"));
                      this.intervalField.setResponder(s -> {
@@ -621,7 +622,7 @@ public class FakePlayerTab implements Tab {
                   this.intervalField.setX(fieldX);
                   this.intervalField.setY(intervalRowY);
                   this.intervalField.setWidth(intervalFieldW);
-                  this.intervalField.setHeight(this.actionButtonHeight());
+                  this.intervalField.setHeight(this.actionControlHeight());
                   this.intervalField.visible = true;
                   if (intervalActive) {
                      this.intervalFieldLocked = true;
@@ -645,12 +646,12 @@ public class FakePlayerTab implements Tab {
                      }
                   }
 
-                  int btnX = fieldX + intervalFieldW + gap;
+                  int btnX = rightX;
                   DarkSelectButton attackIntervalBtn = new DarkSelectButton(
                      btnX,
-                     intervalRowY,
+                     intervalRowY + this.actionButtonHeight(),
                      intervalBtnW,
-                     this.actionButtonHeight(),
+                     this.actionControlHeight(),
                      this.intervalButtonLabel("screen.command-gui.fakeplayer.action.attack_interval", player, "attackInterval", "attackIntervalTicks"),
                      b -> this.executeIntervalAction(player, "attack interval " + intervalTicks, "attackInterval")
                   );
@@ -658,9 +659,9 @@ public class FakePlayerTab implements Tab {
                   this.actionButtons.add(attackIntervalBtn);
                   DarkSelectButton useIntervalBtn = new DarkSelectButton(
                      btnX + intervalBtnW + gap,
-                     intervalRowY,
+                     intervalRowY + this.actionButtonHeight(),
                      intervalBtnW,
-                     this.actionButtonHeight(),
+                     this.actionControlHeight(),
                      this.intervalButtonLabel("screen.command-gui.fakeplayer.action.use_interval", player, "useInterval", "useIntervalTicks"),
                      b -> this.executeIntervalAction(player, "use interval " + intervalTicks, "useInterval")
                   );
@@ -675,10 +676,10 @@ public class FakePlayerTab implements Tab {
                   this.intervalFieldLocked = false;
                }
 
-               int timedKillY = intervalRowY + this.actionButtonHeight() + 0 + 6;
+               int timedKillY = intervalRowY + this.actionButtonHeight() * 2 + 6;
                if (timedKillY + this.actionButtonHeight() <= panelBottom && timedKillY >= this.area.top()) {
                   if (hasKillTask) {
-                     Button cancelKillBtn = Button.builder(
+                     Button cancelKillBtn = GuiButton.themed(
                            Component.literal("x ")
                               .withStyle(ChatFormatting.RED)
                               .append(Component.translatable("screen.command-gui.fakeplayer.timed.cancel").withStyle(ChatFormatting.WHITE)),
@@ -689,17 +690,17 @@ public class FakePlayerTab implements Tab {
                               this.fireAfterRebuild();
                            }
                         )
-                        .bounds(rightX, timedKillY, actionBtnW * 2 + 0, this.actionButtonHeight())
+                        .bounds(rightX, timedKillY, actionBtnW * 2 + 6, this.actionControlHeight())
                         .build();
                      this.actionButtons.add(cancelKillBtn);
                   } else {
-                     Button timedKillBtn = Button.builder(
+                     Button timedKillBtn = GuiButton.themed(
                            Component.literal("x ")
                               .withStyle(ChatFormatting.YELLOW)
                               .append(Component.translatable("screen.command-gui.fakeplayer.timed.kill.short").withStyle(ChatFormatting.WHITE)),
                            b -> this.openTimedKillScreen(this.selectedPlayer)
                         )
-                        .bounds(rightX, timedKillY, actionBtnW * 2 + 0, this.actionButtonHeight())
+                        .bounds(rightX, timedKillY, actionBtnW * 2 + 6, this.actionControlHeight())
                         .build();
                      this.actionButtons.add(timedKillBtn);
                   }
@@ -982,17 +983,19 @@ public class FakePlayerTab implements Tab {
                int buttonX = this.playerListX + this.checkboxXOffset() + this.checkboxSize() + this.facePadLeft();
                int buttonW = this.playerItemWidth - (this.checkboxXOffset() + this.checkboxSize() + this.facePadLeft());
                boolean isHovered = !isSelected && mouseX >= buttonX && mouseX < buttonX + buttonW && mouseY >= y && mouseY < y + this.playerItemHeight();
-               Identifier sprite = !isSelected && !isHovered ? BUTTON_SPRITE : BUTTON_HIGHLIGHTED_SPRITE;
-               guiGraphics.blitSprite(RenderPipelines.GUI_TEXTURED, sprite, buttonX, y, buttonW, this.playerItemHeight());
+               guiGraphics.fill(buttonX, y, buttonX + buttonW, y + this.playerItemHeight() - 3,
+                  isSelected ? GuiTheme.selected() : isHovered ? GuiTheme.hover() : GuiTheme.surface());
+               GuiTheme.outline(guiGraphics, buttonX, y, buttonW, this.playerItemHeight() - 3,
+                  isSelected || isHovered ? GuiTheme.accent() : GuiTheme.border());
                if (isSelected) {
-                  guiGraphics.fill(buttonX, y, buttonX + buttonW, y + this.playerItemHeight(), 855681536);
+                  guiGraphics.fill(buttonX, y + 2, buttonX + 2, y + this.playerItemHeight() - 5, GuiTheme.accent());
                }
 
                int boxX = this.playerListX + this.checkboxXOffset();
                int boxY = y + this.checkboxTopPad();
                boolean checked = this.multiSelection.contains(name);
-               guiGraphics.fill(boxX, boxY, boxX + this.checkboxSize(), boxY + this.checkboxSize(), -16777216);
-               guiGraphics.fill(boxX + 1, boxY + 1, boxX + this.checkboxSize() - 1, boxY + this.checkboxSize() - 1, -13421773);
+               guiGraphics.fill(boxX, boxY, boxX + this.checkboxSize(), boxY + this.checkboxSize(), GuiTheme.panel());
+               GuiTheme.outline(guiGraphics, boxX, boxY, this.checkboxSize(), this.checkboxSize(), checked ? GuiTheme.accent() : GuiTheme.border());
                if (checked) {
                   guiGraphics.blitSprite(RenderPipelines.GUI_TEXTURED, Identifier.parse("minecraft:icon/checkmark"), boxX + 2, boxY + 2, 8, 8, -11141291);
                }

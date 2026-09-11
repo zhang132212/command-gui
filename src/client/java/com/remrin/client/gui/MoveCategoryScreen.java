@@ -45,7 +45,7 @@ public class MoveCategoryScreen extends BaseParentedScreen<Screen> {
          int btnY = startY + row * 24;
          String targetCategoryId = cat.id;
          boolean isCurrent = cat.id.equals(currentCategoryId);
-         Button catBtn = Button.builder(btnText, btn -> {
+         Button catBtn = GuiButton.themed(btnText, btn -> {
             CommandConfig.moveCommand(this.commandName, targetCategoryId);
             if (this.onMoved != null) {
                this.onMoved.accept(targetCategoryId);
@@ -63,7 +63,7 @@ public class MoveCategoryScreen extends BaseParentedScreen<Screen> {
 
       int cancelY = startY + (row + (col > 0 ? 1 : 0)) * 24 + 10;
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.cancel"), btn -> this.minecraft.gui.setScreen(this.parent))
+         GuiButton.themed(Component.translatable("screen.command-gui.cancel"), btn -> this.minecraft.gui.setScreen(this.parent))
             .bounds(this.width / 2 - 50, cancelY, 100, 20)
             .build()
       );

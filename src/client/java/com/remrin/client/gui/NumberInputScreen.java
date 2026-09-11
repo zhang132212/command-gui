@@ -55,7 +55,7 @@ public class NumberInputScreen extends BaseParentedScreen<Screen> {
       super.init();
       int centerX = this.width / 2;
       int centerY = this.height / 2;
-      this.inputField = new EditBox(this.font, centerX - 50, centerY - 40, 100, 20, Component.literal(""));
+      this.inputField = new GuiEditBox(this.font, centerX - 50, centerY - 40, 100, 20, Component.literal(""));
       this.inputField.setMaxLength(10);
       this.inputField.setHint(Component.literal(this.minValue + " - " + this.maxValue));
       this.addRenderableWidget(this.inputField);
@@ -75,12 +75,12 @@ public class NumberInputScreen extends BaseParentedScreen<Screen> {
          int row = i / 5;
          int x = startX + col * 54;
          int y = startY + row * 24;
-         this.addRenderableWidget(Button.builder(Component.literal(String.valueOf(value)), btn -> this.executeWithValue(value)).bounds(x, y, 50, 20).build());
+         this.addRenderableWidget(GuiButton.themed(Component.literal(String.valueOf(value)), btn -> this.executeWithValue(value)).bounds(x, y, 50, 20).build());
       }
 
       int closeBtnY = Math.min(centerY + 10 + visibleRows * 24, this.height - 20 - 4);
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.back"), btn -> this.minecraft.gui.setScreen(this.parent))
+         GuiButton.themed(Component.translatable("screen.command-gui.back"), btn -> this.minecraft.gui.setScreen(this.parent))
             .bounds(centerX - 50, closeBtnY, 100, 20)
             .build()
       );

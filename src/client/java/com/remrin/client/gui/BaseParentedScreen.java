@@ -3,6 +3,7 @@ package com.remrin.client.gui;
 import com.mojang.blaze3d.platform.Window;
 import com.remrin.client.machine.MachineDebug;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.network.chat.Component;
 import org.lwjgl.glfw.GLFW;
 
@@ -16,6 +17,12 @@ public abstract class BaseParentedScreen<P extends Screen> extends Screen {
 
    public boolean isPauseScreen() {
       return false;
+   }
+
+   @Override
+   public void extractBackground(GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {
+      super.extractBackground(g, mouseX, mouseY, partialTick);
+      GuiTheme.editorBackground(g, this.width, this.height);
    }
 
    public void onClose() {

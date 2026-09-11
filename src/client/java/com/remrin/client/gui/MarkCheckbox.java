@@ -47,18 +47,19 @@ public class MarkCheckbox extends Button {
       int boxSize = 14;
       int boxX = this.getX();
       int boxY = this.getY() + (this.getHeight() - boxSize) / 2;
-      guiGraphics.fill(boxX, boxY, boxX + boxSize, boxY + boxSize, -16777216);
-      guiGraphics.fill(boxX + 1, boxY + 1, boxX + boxSize - 1, boxY + boxSize - 1, this.available ? -13421773 : -14540254);
+      guiGraphics.fill(boxX, boxY, boxX + boxSize, boxY + boxSize, GuiTheme.panel());
+      GuiTheme.outline(guiGraphics, boxX, boxY, boxSize, boxSize,
+         this.available && (this.isHovered() || this.isFocused() || this.selected) ? GuiTheme.accent() : GuiTheme.border());
       if (!this.available) {
          guiGraphics.blitSprite(
             RenderPipelines.GUI_TEXTURED, Identifier.parse("minecraft:spectator/close"), boxX + 2, boxY + 2, boxSize - 4, boxSize - 4, -43691
          );
       } else if (this.selected) {
          guiGraphics.blitSprite(
-            RenderPipelines.GUI_TEXTURED, Identifier.parse("minecraft:icon/checkmark"), boxX + 2, boxY + 2, boxSize - 4, boxSize - 4, -11141291
+            RenderPipelines.GUI_TEXTURED, Identifier.parse("minecraft:icon/checkmark"), boxX + 2, boxY + 2, boxSize - 4, boxSize - 4, GuiTheme.accent()
          );
       }
 
-      guiGraphics.text(font, this.getMessage(), boxX + boxSize + 4, this.getY() + (this.getHeight() - 9) / 2, this.available ? -2236963 : -7829368);
+      guiGraphics.text(font, this.getMessage(), boxX + boxSize + 4, this.getY() + (this.getHeight() - 9) / 2, this.available ? GuiTheme.text() : GuiTheme.disabled());
    }
 }

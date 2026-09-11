@@ -22,7 +22,7 @@ public class TextInputScreen extends BaseParentedScreen<Screen> {
       super.init();
       int centerX = this.width / 2;
       int centerY = this.height / 2;
-      this.inputField = new EditBox(this.font, centerX - 100, centerY - 10, 200, 20, Component.literal(this.placeholder));
+      this.inputField = new GuiEditBox(this.font, centerX - 100, centerY - 10, 200, 20, Component.literal(this.placeholder));
       this.inputField.setMaxLength(50);
       this.inputField.setHint(Component.literal(this.placeholder));
       this.addRenderableWidget(this.inputField);

@@ -12,7 +12,7 @@ import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
 
 public class ModesEditorScreen extends BaseParentedScreen<MachineEditorScreen> {
-   private static final int ROW_HEIGHT = 20;
+   private static final int ROW_HEIGHT = 26;
    private static final int LIST_TOP = 26;
    private static final int BOTTOM_BAR_Y_OFFSET = 26;
    private static final int SINGLE_BTN_W = 48;
@@ -55,7 +55,7 @@ public class ModesEditorScreen extends BaseParentedScreen<MachineEditorScreen> {
       int listWidth = Math.min(400, this.width - 40);
       this.listLeft = (this.width - listWidth) / 2;
       this.listRight = this.listLeft + listWidth;
-      this.listBottom = this.height - 26 - 4;
+      this.listBottom = this.height - 26 - 18;
       this.rebuildModeButtons();
       int addWidth = Math.min(80, listWidth / 4);
       int saveWidth = Math.min(60, listWidth / 4);
@@ -63,20 +63,20 @@ public class ModesEditorScreen extends BaseParentedScreen<MachineEditorScreen> {
       int barStartX = this.listRight - barTotal;
       int barY = this.height - 26;
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.machine.multi_mode_config"), btn -> this.openMultiModeConfig())
-            .bounds(this.listLeft, barY, addWidth + 4 + saveWidth, 18)
+         GuiButton.themed(Component.translatable("screen.command-gui.machine.multi_mode_config"), btn -> this.openMultiModeConfig())
+            .bounds(this.listLeft, barY, Math.max(32, barStartX - this.listLeft - 8), 18)
             .build()
       );
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.machine.add_mode"), btn -> this.addMode()).bounds(barStartX, barY, addWidth, 18).build()
+         GuiButton.themed(Component.translatable("screen.command-gui.machine.add_mode"), btn -> this.addMode()).bounds(barStartX, barY, addWidth, 18).build()
       );
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.save"), btn -> this.saveAndClose())
+         GuiButton.themed(Component.translatable("screen.command-gui.save"), btn -> this.saveAndClose())
             .bounds(barStartX + addWidth + 4, barY, saveWidth, 18)
             .build()
       );
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.back"), btn -> this.saveAndClose())
+         GuiButton.themed(Component.translatable("screen.command-gui.back"), btn -> this.saveAndClose())
             .bounds(barStartX + addWidth + 4 + saveWidth + 4, barY, saveWidth, 18)
             .build()
       );
@@ -92,7 +92,7 @@ public class ModesEditorScreen extends BaseParentedScreen<MachineEditorScreen> {
       }
 
       this.rowButtons.clear();
-      int visibleRows = Math.max(1, (this.listBottom - 26) / 20);
+      int visibleRows = Math.max(1, (this.listBottom - LIST_TOP) / ROW_HEIGHT);
       int start = Math.min(this.scrollOffset, Math.max(0, this.working.size() - visibleRows));
       this.scrollOffset = start;
 
@@ -102,21 +102,21 @@ public class ModesEditorScreen extends BaseParentedScreen<MachineEditorScreen> {
             break;
          }
 
-         int y = 26 + i * 20;
+         int y = LIST_TOP + i * ROW_HEIGHT;
          int labelWidth = this.listRight - this.listLeft - 110 - 16;
          int x = this.listLeft;
-         this.rowButtons.add(Button.builder(this.buildModeLabel(index), btn -> this.editMode(index)).bounds(x, y, labelWidth, 18).build());
+         this.rowButtons.add(GuiButton.themed(this.buildModeLabel(index), btn -> this.editMode(index)).bounds(x, y, labelWidth, 20).build());
          x += labelWidth + 2;
          DarkSelectButton singleBtn = new DarkSelectButton(
-            x, y, 48, 18, Component.translatable("screen.command-gui.machine.mode_single_label"), b -> this.toggleSingleSelect(index)
+            x, y, 48, 20, Component.translatable("screen.command-gui.machine.mode_single_label"), b -> this.toggleSingleSelect(index)
          );
          singleBtn.setDarkSelected(() -> this.working.get(index) != null && this.working.get(index).singleSelect, -1);
          this.rowButtons.add(singleBtn);
          x += 49;
          this.rowButtons
-            .add(Button.builder(Component.translatable("screen.command-gui.action.edit"), btn -> this.editMode(index)).bounds(x, y, 30, 18).build());
+            .add(GuiButton.themed(Component.translatable("screen.command-gui.action.edit"), btn -> this.editMode(index)).bounds(x, y, 30, 20).build());
          x += 31;
-         this.rowButtons.add(Button.builder(Component.translatable("screen.command-gui.delete"), btn -> this.deleteMode(index)).bounds(x, y, 30, 18).build());
+         this.rowButtons.add(GuiButton.themed(Component.translatable("screen.command-gui.delete"), btn -> this.deleteMode(index)).bounds(x, y, 30, 20).build());
 
          for (Button button : this.rowButtons.subList(this.rowButtons.size() - 4, this.rowButtons.size())) {
             this.addRenderableWidget(button);
@@ -134,24 +134,11 @@ public class ModesEditorScreen extends BaseParentedScreen<MachineEditorScreen> {
 
    private Component buildModeLabel(int index) {
       MachineModels.ModeData mode = this.working.get(index);
-      int labelWidth = this.listRight - this.listLeft - 110 - 16;
-      int maxW = labelWidth * 2 / 3;
       String suffix = Component.translatable(
             "screen.command-gui.machine.mode_steps_suffix", new Object[]{countSteps(mode.onTimeline), countSteps(mode.offTimeline)}
          )
          .getString();
-      int nameMaxW = Math.max(20, maxW - this.font.width(suffix));
-      boolean tooLong = this.font.width(mode.name) > nameMaxW;
-      if (tooLong) {
-         nameMaxW = Math.max(0, nameMaxW - this.font.width("..."));
-      }
-
-      String name = this.font.plainSubstrByWidth(mode.name, nameMaxW);
-      if (tooLong) {
-         name = name + "...";
-      }
-
-      return Component.literal(name + suffix);
+      return Component.literal(mode.name + suffix);
    }
 
    private static int countSteps(MachineModels.Timeline timeline) {
@@ -299,7 +286,7 @@ public class ModesEditorScreen extends BaseParentedScreen<MachineEditorScreen> {
    }
 
    public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
-      int visibleRows = Math.max(1, (this.listBottom - 26) / 20);
+      int visibleRows = Math.max(1, (this.listBottom - LIST_TOP) / ROW_HEIGHT);
       int maxScroll = Math.max(0, this.working.size() - visibleRows);
       if (scrollY > 0.0 && this.scrollOffset > 0) {
          this.scrollOffset--;
@@ -313,31 +300,30 @@ public class ModesEditorScreen extends BaseParentedScreen<MachineEditorScreen> {
    }
 
    public void extractRenderState(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY, float partialTick) {
-      guiGraphics.fill(this.listLeft - 1, 25, this.listRight + 1, this.listBottom + 1, -13421773);
       super.extractRenderState(guiGraphics, mouseX, mouseY, partialTick);
       guiGraphics.centeredText(this.font, this.title, this.width / 2, 6, -1);
       if (this.working.isEmpty()) {
          guiGraphics.centeredText(
-            this.font, Component.translatable("screen.command-gui.machine.modes_empty"), this.width / 2, (26 + this.listBottom) / 2, -7829368
+            this.font, Component.translatable("screen.command-gui.machine.modes_empty"), this.width / 2, (LIST_TOP + this.listBottom) / 2, -7829368
          );
       }
 
       guiGraphics.centeredText(
          this.font, Component.translatable("screen.command-gui.machine.single_select_hint"), this.width / 2, this.height - 26 - 10, -7829368
       );
-      int visibleRows = Math.max(1, (this.listBottom - 26) / 20);
+      int visibleRows = Math.max(1, (this.listBottom - LIST_TOP) / ROW_HEIGHT);
       int totalRows = Math.max(1, this.working.size());
       int maxScroll = Math.max(0, totalRows - visibleRows);
       int scrollbarX = this.listRight - 12;
-      int scrollbarH = this.listBottom - 26;
-      this.scrollbar = new ScrollbarHandle(scrollbarX, 26, 12, scrollbarH);
+      int scrollbarH = this.listBottom - LIST_TOP;
+      this.scrollbar = new ScrollbarHandle(scrollbarX, LIST_TOP, 12, scrollbarH);
       boolean hovered = this.scrollbar.contains((double)mouseX, (double)mouseY);
       this.scrollbar.render(guiGraphics, this.scrollOffset, maxScroll, visibleRows, totalRows, hovered);
    }
 
    public boolean mouseClicked(MouseButtonEvent mouseEvent, boolean focused) {
       if (mouseEvent.button() == 0 && this.isOverScrollbar(mouseEvent.x(), mouseEvent.y())) {
-         int visibleRows = Math.max(1, (this.listBottom - 26) / 20);
+         int visibleRows = Math.max(1, (this.listBottom - LIST_TOP) / ROW_HEIGHT);
          int maxScroll = Math.max(0, this.working.size() - visibleRows);
          int thumbTop = this.scrollbar.thumbTop(this.scrollOffset, maxScroll, visibleRows, Math.max(1, this.working.size()));
          this.scrollbarGrabOffset = mouseEvent.y() - (double)thumbTop;
@@ -350,7 +336,7 @@ public class ModesEditorScreen extends BaseParentedScreen<MachineEditorScreen> {
 
    public boolean mouseDragged(MouseButtonEvent mouseEvent, double dragX, double dragY) {
       if (this.draggingScrollbar && this.scrollbar != null) {
-         int visibleRows = Math.max(1, (this.listBottom - 26) / 20);
+         int visibleRows = Math.max(1, (this.listBottom - LIST_TOP) / ROW_HEIGHT);
          int maxScroll = Math.max(0, this.working.size() - visibleRows);
          int offset = this.scrollbar.offsetFromY(mouseEvent.y(), this.scrollbarGrabOffset, maxScroll, visibleRows, Math.max(1, this.working.size()));
          this.scrollOffset = Math.max(0, Math.min(offset, maxScroll));

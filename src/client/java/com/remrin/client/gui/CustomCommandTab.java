@@ -82,7 +82,7 @@ public class CustomCommandTab extends AbstractCommandTab {
    }
 
    private int categoryBottomReserve() {
-      return GuiTuning.getInt("CustomCommandTab.CATEGORY_BOTTOM_RESERVE", 18);
+      return Math.max(this.tunedCategoryRowHeight(), GuiTuning.getInt("CustomCommandTab.CATEGORY_BOTTOM_RESERVE", 24));
    }
 
    private int maxClusterWidth() {
@@ -102,7 +102,7 @@ public class CustomCommandTab extends AbstractCommandTab {
    }
 
    private int columns() {
-      return 3;
+      return this.tunedColumns();
    }
 
    @Override
@@ -116,8 +116,7 @@ public class CustomCommandTab extends AbstractCommandTab {
    }
 
    private int categoryColumnX() {
-      int sidebarRight = this.area.left() + this.sidebarOffset() + this.categoryTabWidth();
-      return Math.max(0, (sidebarRight - this.categoryColumnWidth()) / 2);
+      return this.area.left() + this.sidebarOffset();
    }
 
    private int categoryColumnWidth() {
@@ -233,9 +232,9 @@ public class CustomCommandTab extends AbstractCommandTab {
             String catId = category.id;
             String displayName = category.getDisplayName();
             boolean isDeletable = !catId.equals("default");
-            boolean nameTruncated = displayName != null && font.width(displayName) > columnWidth * 2 / 3;
+            boolean nameTruncated = displayName != null && font.width(displayName) > columnWidth - 12;
             Component btnText = displayName != null
-               ? Component.literal(truncate(displayName, columnWidth * 2 / 3, font))
+               ? Component.literal(displayName)
                : Component.translatable(category.nameKey);
             DarkSelectButton catBtn = new DarkSelectButton(x, y, columnWidth, this.tunedCategoryTabHeight(), btnText, btn -> this.onCategoryButtonClick(catId));
             catBtn.setDarkSelected(() -> Objects.equals(this.selectedCategoryId, catId), -1);
@@ -253,16 +252,9 @@ public class CustomCommandTab extends AbstractCommandTab {
             this.allCategoryButtons.add(catBtn);
          }
 
-         this.addCategoryButton = Button.builder(Component.literal("+"), btn -> this.openAddCategoryScreen()).bounds(x, 0, columnWidth, this.tunedCategoryTabHeight()).build();
+         this.addCategoryButton = GuiButton.themed(Component.literal("+"), btn -> this.openAddCategoryScreen()).bounds(x, 0, columnWidth, this.tunedCategoryTabHeight()).build();
          this.addCategoryButton.setTooltip(Tooltip.create(Component.translatable("screen.command-gui.add_category")));
       }
-   }
-
-   private static String truncate(String text, int maxWidth, Font font) {
-      if (font.width(text) <= maxWidth) {
-         return text;
-      }
-      return font.plainSubstrByWidth(text, maxWidth) + "...";
    }
 
    @Override
@@ -324,7 +316,7 @@ public class CustomCommandTab extends AbstractCommandTab {
          int totalRows = (this.filteredCommands.size() + cols - 1) / cols;
          int start = Math.min(this.scrollOffset, Math.max(0, totalRows - visibleRows));
          this.scrollOffset = start;
-         int columnGap = Math.max(this.minColumnGap(), 8 * this.buttonScalePercent() / 100);
+         int columnGap = Math.max(this.minColumnGap(), 6 * this.buttonScalePercent() / 100);
          int groupWidth = (right - left - columnGap * (cols - 1)) / cols;
 
          for (int i = 0; i < visibleRows; i++) {
@@ -351,13 +343,9 @@ public class CustomCommandTab extends AbstractCommandTab {
       String cmdName = cmd.name();
       CommandConfig.CommandEntry cmdEntry = cmd.entry();
       int scale = this.buttonScalePercent();
-      int h = Math.max(10, rowHeight - 2);
+      int h = Math.max(10, rowHeight - this.tunedItemVerticalPad());
       int commandWidth;
-      if (this.columns() > 1) {
-         commandWidth = Math.max(20, (right - left) * scale / 100 - 4);
-      } else {
-         commandWidth = this.getSwitchWidth();
-      }
+      commandWidth = Math.max(20, Math.min(right - left, (right - left) * scale / 100));
 
       List<String> commands = cmdEntry.getCommands();
       String commandText = String.join("\n", commands);
@@ -369,7 +357,7 @@ public class CustomCommandTab extends AbstractCommandTab {
       }
 
       Font font = Minecraft.getInstance().font;
-      int textMaxW = commandWidth * 2 / 3;
+      int textMaxW = commandWidth - 12;
       String label = commands.size() > 1 ? cmdName + " (" + commands.size() + ")" : cmdName;
       boolean pending = CommandConfig.isPending(cmdName) && !CommandConfig.isPendingRemoval(cmdName);
       if (pending) {
@@ -377,10 +365,7 @@ public class CustomCommandTab extends AbstractCommandTab {
       }
 
       boolean truncated = font.width(label) > textMaxW;
-      String name = font.plainSubstrByWidth(label, textMaxW);
-      if (truncated) {
-         name = name + "...";
-      }
+      String name = label;
 
       if (truncated) {
          tooltipText = tooltipText + "\n名称:" + label;
@@ -551,10 +536,8 @@ public class CustomCommandTab extends AbstractCommandTab {
       }
 
       protected void extractContents(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY, float partialTick) {
-         this.extractDefaultSprite(guiGraphics);
-         Font font = Minecraft.getInstance().font;
-         int color = this.active ? -1 : -6250336;
-         guiGraphics.centeredText(font, this.getMessage(), this.getX() + this.getWidth() / 2, this.getY() + (this.getHeight() - 8) / 2, color);
+         GuiTheme.button(guiGraphics, this, false, this.active);
+         GuiTheme.label(guiGraphics, this, this.getMessage(), this.active ? GuiTheme.text() : GuiTheme.disabled(), false);
       }
    }
 

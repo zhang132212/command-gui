@@ -130,28 +130,28 @@ public class DetectionScreen extends BaseParentedScreen<Screen> {
       int zLabelX = yFieldX + fieldWidth + gap;
       int zFieldX = zLabelX + labelW + gap;
       int findX = zFieldX + fieldWidth + gap;
-      this.xField = new EditBox(this.font, xFieldX, coordY, fieldWidth, 18, Component.translatable("screen.command-gui.machine.detection_x"));
+      this.xField = new GuiEditBox(this.font, xFieldX, coordY, fieldWidth, 18, Component.translatable("screen.command-gui.machine.detection_x"));
       this.xField.setMaxLength(10);
       this.xField.setValue(this.xText);
       this.xField.setResponder(text -> this.xText = text);
       this.addRenderableWidget(this.xField);
-      this.yField = new EditBox(this.font, yFieldX, coordY, fieldWidth, 18, Component.translatable("screen.command-gui.machine.detection_y"));
+      this.yField = new GuiEditBox(this.font, yFieldX, coordY, fieldWidth, 18, Component.translatable("screen.command-gui.machine.detection_y"));
       this.yField.setMaxLength(10);
       this.yField.setValue(this.yText);
       this.yField.setResponder(text -> this.yText = text);
       this.addRenderableWidget(this.yField);
-      this.zField = new EditBox(this.font, zFieldX, coordY, fieldWidth, 18, Component.translatable("screen.command-gui.machine.detection_z"));
+      this.zField = new GuiEditBox(this.font, zFieldX, coordY, fieldWidth, 18, Component.translatable("screen.command-gui.machine.detection_z"));
       this.zField.setMaxLength(10);
       this.zField.setValue(this.zText);
       this.zField.setResponder(text -> this.zText = text);
       this.addRenderableWidget(this.zField);
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.machine.detection_find"), btn -> this.findBlock())
+         GuiButton.themed(Component.translatable("screen.command-gui.machine.detection_find"), btn -> this.findBlock())
             .bounds(findX, coordY, 360 - (findX - fieldX), 18)
             .build()
       );
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.machine.detection_pick"), btn -> this.pickBlockUnderFeet())
+         GuiButton.themed(Component.translatable("screen.command-gui.machine.detection_pick"), btn -> this.pickBlockUnderFeet())
             .bounds(fieldX, 78, 90, 18)
             .build()
       );
@@ -164,10 +164,10 @@ public class DetectionScreen extends BaseParentedScreen<Screen> {
       int barWidth = Math.min(70, 100);
       int barStartX = fieldX + (360 - barWidth * 2 - 8) / 2;
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.save"), btn -> this.saveAndClose()).bounds(barStartX, barY, barWidth, 18).build()
+         GuiButton.themed(Component.translatable("screen.command-gui.save"), btn -> this.saveAndClose()).bounds(barStartX, barY, barWidth, 18).build()
       );
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.back"), btn -> this.backAndClose())
+         GuiButton.themed(Component.translatable("screen.command-gui.back"), btn -> this.backAndClose())
             .bounds(barStartX + barWidth + 8, barY, barWidth, 18)
             .build()
       );
@@ -344,13 +344,13 @@ public class DetectionScreen extends BaseParentedScreen<Screen> {
          String currentValue = this.currentValues.get(row.property());
          String currentMark = value.equals(currentValue) ? "● " : "  ";
          String labelText = row.property() + ":" + value;
-         Button valueLabel = Button.builder(Component.literal(currentMark + labelText), btn -> {
+         Button valueLabel = GuiButton.themed(Component.literal(currentMark + labelText), btn -> {
          }).bounds(fieldX, y, 150, 14).build();
          valueLabel.active = false;
          valueLabel.setTooltip(Tooltip.create(Component.literal(row.property())));
          this.valueButtons.add(valueLabel);
          this.addRenderableWidget(valueLabel);
-         Button category = Button.builder(this.buildCategoryLabel(row), btn -> this.cycleValueCategory(row)).bounds(fieldX + 158, y, 90, 14).build();
+         Button category = GuiButton.themed(this.buildCategoryLabel(row), btn -> this.cycleValueCategory(row)).bounds(fieldX + 158, y, 90, 14).build();
          category.setTooltip(Tooltip.create(Component.translatable("screen.command-gui.machine.detection_cycle_hint")));
          this.valueButtons.add(category);
          this.addRenderableWidget(category);

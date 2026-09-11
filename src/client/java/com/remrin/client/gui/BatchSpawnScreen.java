@@ -64,13 +64,13 @@ public class BatchSpawnScreen extends BaseParentedScreen<Screen> {
       this.count = Math.max(1, Math.min(this.count, maxCount));
       this.layoutTopY = this.computeLayoutTopY();
       int y = this.layoutTopY + 24;
-      this.addRenderableWidget(Button.builder(this.getTypeLabel(), btn -> {
+      this.addRenderableWidget(GuiButton.themed(this.getTypeLabel(), btn -> {
          this.useEnglishNames = !this.useEnglishNames;
          this.rebuildWidgets();
       }).bounds(centerX - 75, y, 150, 20).build());
       y += 28;
       if (!this.useEnglishNames) {
-         this.prefixField = new EditBox(this.font, centerX - 75, y, 150, 20, Component.translatable("screen.command-gui.fakeplayer.batch.prefix"));
+         this.prefixField = new GuiEditBox(this.font, centerX - 75, y, 150, 20, Component.translatable("screen.command-gui.fakeplayer.batch.prefix"));
          this.prefixField.setMaxLength(20);
          this.prefixField.setValue(this.prefix);
          this.prefixField.setResponder(s -> this.prefix = s);
@@ -104,12 +104,12 @@ public class BatchSpawnScreen extends BaseParentedScreen<Screen> {
       this.addRenderableWidget(this.countField);
       y += 40;
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.fakeplayer.batch.spawn"), btn -> this.spawnBatch())
+         GuiButton.themed(Component.translatable("screen.command-gui.fakeplayer.batch.spawn"), btn -> this.spawnBatch())
             .bounds(centerX - 102, y, 100, 20)
             .build()
       );
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.back"), btn -> this.minecraft.gui.setScreen(this.parent))
+         GuiButton.themed(Component.translatable("screen.command-gui.back"), btn -> this.minecraft.gui.setScreen(this.parent))
             .bounds(centerX + 2, y, 100, 20)
             .build()
       );

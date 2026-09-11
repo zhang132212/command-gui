@@ -27,15 +27,15 @@ public class UnsavedExitScreen extends BaseParentedScreen<Screen> {
       int totalW = btnW * 3 + gap * 2;
       int startX = centerX - totalW / 2;
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.save_exit"), btn -> this.saveAndExit()).bounds(startX, centerY + 30, btnW, 20).build()
+         GuiButton.themed(Component.translatable("screen.command-gui.save_exit"), btn -> this.saveAndExit()).bounds(startX, centerY + 30, btnW, 20).build()
       );
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.discard"), btn -> this.discardAndExit())
+         GuiButton.themed(Component.translatable("screen.command-gui.discard"), btn -> this.discardAndExit())
             .bounds(startX + btnW + gap, centerY + 30, btnW, 20)
             .build()
       );
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.cancel"), btn -> this.cancelExit())
+         GuiButton.themed(Component.translatable("screen.command-gui.cancel"), btn -> this.cancelExit())
             .bounds(startX + (btnW + gap) * 2, centerY + 30, btnW, 20)
             .build()
       );

@@ -37,19 +37,19 @@ public class ModeEditorScreen extends BaseParentedScreen<ModesEditorScreen> {
    protected void init() {
       super.init();
       int fieldX = (this.width - 300) / 2;
-      this.nameField = new EditBox(this.font, fieldX, 48, 224, 20, Component.translatable("screen.command-gui.machine.mode_name"));
+      this.nameField = new GuiEditBox(this.font, fieldX, 48, 224, 20, Component.translatable("screen.command-gui.machine.mode_name"));
       this.nameField.setMaxLength(30);
       this.nameField.setValue(this.nameText);
       this.nameField.setResponder(text -> this.nameText = text);
       this.addRenderableWidget(this.nameField);
       int processWidth = 94;
-      this.onTimelineButton = Button.builder(this.buildProcessLabel(true), btn -> this.openProcessEditor(true)).bounds(fieldX, 90, processWidth, 18).build();
+      this.onTimelineButton = GuiButton.themed(this.buildProcessLabel(true), btn -> this.openProcessEditor(true)).bounds(fieldX, 90, processWidth, 18).build();
       this.addRenderableWidget(this.onTimelineButton);
-      this.offTimelineButton = Button.builder(this.buildProcessLabel(false), btn -> this.openProcessEditor(false))
+      this.offTimelineButton = GuiButton.themed(this.buildProcessLabel(false), btn -> this.openProcessEditor(false))
          .bounds(fieldX + processWidth + 8, 90, processWidth, 18)
          .build();
       this.addRenderableWidget(this.offTimelineButton);
-      this.detectionButton = Button.builder(this.buildDetectionLabel(), btn -> this.openDetectionEditor())
+      this.detectionButton = GuiButton.themed(this.buildDetectionLabel(), btn -> this.openDetectionEditor())
          .bounds(fieldX + (processWidth + 8) * 2, 90, processWidth, 18)
          .build();
       this.addRenderableWidget(this.detectionButton);
@@ -63,10 +63,10 @@ public class ModeEditorScreen extends BaseParentedScreen<ModesEditorScreen> {
       int barWidth = Math.min(70, 100);
       int barStartX = fieldX + (300 - barWidth * 2 - 8) / 2;
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.save"), btn -> this.saveAndClose()).bounds(barStartX, barY, barWidth, 18).build()
+         GuiButton.themed(Component.translatable("screen.command-gui.save"), btn -> this.saveAndClose()).bounds(barStartX, barY, barWidth, 18).build()
       );
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.back"), btn -> this.backAndClose())
+         GuiButton.themed(Component.translatable("screen.command-gui.back"), btn -> this.backAndClose())
             .bounds(barStartX + barWidth + 8, barY, barWidth, 18)
             .build()
       );

@@ -13,11 +13,11 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 
 public abstract class AbstractCommandTab implements Tab {
-   protected static final int ITEM_HEIGHT = 24;
+   protected static final int ITEM_HEIGHT = 30;
    protected static final int COLUMNS = 3;
-   protected static final int CATEGORY_TAB_WIDTH = 50;
-   protected static final int CATEGORY_TAB_HEIGHT = 16;
-   protected static final int CATEGORY_TAB_GAP = 2;
+   protected static final int CATEGORY_TAB_WIDTH = 68;
+   protected static final int CATEGORY_TAB_HEIGHT = 24;
+   protected static final int CATEGORY_TAB_GAP = 6;
    protected static final int CATEGORY_SCROLLBAR_WIDTH = 12;
    protected final Screen parent;
    protected final List<Button> commandButtons = new ArrayList<>();
@@ -36,7 +36,8 @@ public abstract class AbstractCommandTab implements Tab {
    }
 
    protected int tunedColumns() {
-      return GuiTuning.getInt("AbstractCommandTab.COLUMNS", COLUMNS);
+      int requested = Math.max(1, GuiTuning.getInt("AbstractCommandTab.COLUMNS", COLUMNS));
+      return this.area == null ? requested : Math.max(1, Math.min(requested, this.getCommandAreaWidth() / 90));
    }
 
    protected int tunedCategoryTabWidth() {
@@ -56,7 +57,7 @@ public abstract class AbstractCommandTab implements Tab {
    }
 
    protected int tunedCategoryCommandGap() {
-      return GuiTuning.getInt("AbstractCommandTab.CATEGORY_COMMAND_GAP", 8);
+      return Math.max(16, GuiTuning.getInt("AbstractCommandTab.CATEGORY_COMMAND_GAP", 16));
    }
 
    protected int tunedCategoryRowHeight() {
@@ -64,7 +65,7 @@ public abstract class AbstractCommandTab implements Tab {
    }
 
    protected int tunedItemVerticalPad() {
-      return GuiTuning.getInt("AbstractCommandTab.ITEM_VERTICAL_PAD", 2);
+      return GuiTuning.getInt("AbstractCommandTab.ITEM_VERTICAL_PAD", 6);
    }
 
    protected int tunedItemHorizontalPad() {
@@ -344,7 +345,7 @@ public abstract class AbstractCommandTab implements Tab {
    public void renderSeparator(GuiGraphicsExtractor guiGraphics) {
       if (this.area != null) {
          int separatorX = this.area.left() + this.sidebarOffset() + this.categoryTabWidth() + this.tunedCategoryScrollbarWidth() + 4;
-         guiGraphics.fill(separatorX, this.area.top(), separatorX + 1, this.area.bottom(), -11184811);
+         guiGraphics.fill(separatorX, this.area.top(), separatorX + 1, this.area.bottom(), GuiTheme.border());
       }
    }
 

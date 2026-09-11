@@ -3,10 +3,10 @@ package com.remrin.client.gui;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 
 public final class ScrollbarHandle {
-   private static final int TRACK_COLOR = 1939906720;
-   private static final int THUMB_COLOR = -1;
-   private static final int THUMB_HOVER_COLOR = -1;
-   private static final int THUMB_OUTLINE = -12566464;
+   private static final int TRACK_COLOR = 0xFF283340;
+   private static final int THUMB_COLOR = 0xFF637B90;
+   private static final int THUMB_HOVER_COLOR = 0xFF70DFBF;
+   private static final int THUMB_OUTLINE = 0xFF223040;
    private static final int MIN_THUMB_HEIGHT = 10;
    private final int x;
    private final int y;
@@ -25,21 +25,19 @@ public final class ScrollbarHandle {
    }
 
    public void render(GuiGraphicsExtractor guiGraphics, int scrollOffset, int maxOffset, int viewport, int content, boolean hovered) {
-      guiGraphics.fill(this.x, this.y, this.x + this.width, this.y + this.height, GuiTuning.getColor("ScrollbarHandle.TRACK_COLOR", TRACK_COLOR));
       if (content > viewport && maxOffset > 0) {
+         GuiTheme.rounded(guiGraphics, this.x + this.width / 2 - 1, this.y, 2, this.height, 1, GuiTuning.getColor("ScrollbarHandle.TRACK_COLOR", TRACK_COLOR));
          int thumbTop = this.thumbTop(scrollOffset, maxOffset, viewport, content);
          int thumbHeight = this.thumbHeight(viewport, content);
          int thumbBottom = Math.min(this.y + this.height, thumbTop + thumbHeight);
          this.drawThumb(guiGraphics, thumbTop, thumbBottom, hovered);
-      } else {
-         this.drawThumb(guiGraphics, this.y, this.y + this.height, false);
       }
    }
 
    private void drawThumb(GuiGraphicsExtractor guiGraphics, int top, int bottom, boolean hovered) {
       int bodyColor = hovered ? GuiTuning.getColor("ScrollbarHandle.THUMB_HOVER_COLOR", THUMB_HOVER_COLOR) : GuiTuning.getColor("ScrollbarHandle.THUMB_COLOR", THUMB_COLOR);
-      guiGraphics.fill(this.x, top, this.x + this.width, bottom, GuiTuning.getColor("ScrollbarHandle.THUMB_OUTLINE", THUMB_OUTLINE));
-      guiGraphics.fill(this.x + 1, top + 1, this.x + this.width - 1, bottom - 1, bodyColor);
+      int inset = Math.max(0, (this.width - 4) / 2);
+      GuiTheme.rounded(guiGraphics, this.x + inset, top, this.width - inset * 2, bottom - top, 2, bodyColor);
    }
 
    public int thumbTop(int scrollOffset, int maxOffset, int viewport, int content) {
@@ -54,7 +52,7 @@ public final class ScrollbarHandle {
       if (content <= viewport) {
          return this.height;
       }
-      return Math.max(GuiTuning.getInt("ScrollbarHandle.MIN_THUMB_HEIGHT", MIN_THUMB_HEIGHT), this.height * viewport / content);
+      return Math.min(this.height, Math.max(GuiTuning.getInt("ScrollbarHandle.MIN_THUMB_HEIGHT", MIN_THUMB_HEIGHT), this.height * viewport / content));
    }
 
    public boolean contains(double mouseX, double mouseY) {

@@ -15,7 +15,7 @@ import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
 
 public class TimelineEditorScreen extends BaseParentedScreen<Screen> {
-   private static final int ROW_HEIGHT = 20;
+   private static final int ROW_HEIGHT = 26;
    private static final int LIST_TOP = 26;
    private static final int BOTTOM_BAR_Y_OFFSET = 26;
    private static final int STATUS_LINE_HEIGHT = 12;
@@ -58,18 +58,19 @@ public class TimelineEditorScreen extends BaseParentedScreen<Screen> {
       int listWidth = Math.min(400, this.width - 40);
       this.listLeft = (this.width - listWidth) / 2;
       this.listRight = this.listLeft + listWidth;
-      this.listBottom = this.height - 26 - 4 - 12;
+      this.listBottom = this.height - (this.allowLoop ? 70 : 42);
       this.rebuildStepButtons();
       if (!this.allowLoop) {
          this.working.loopCount = 0;
       } else {
          int loopLabelWidth = this.font.width(Component.translatable("screen.command-gui.machine.loop_count")) + 6;
-         this.loopCountField = new EditBox(
-            this.font, this.listLeft + loopLabelWidth, this.height - 26, 46, 18, Component.translatable("screen.command-gui.machine.loop_count")
+         this.loopCountField = new GuiEditBox(
+            this.font, this.listLeft + loopLabelWidth, this.height - 52, 46, 20, Component.translatable("screen.command-gui.machine.loop_count")
          );
          this.loopCountField.setMaxLength(6);
          this.loopCountField.setValue(this.loopCountText);
          this.loopCountField.setHint(Component.literal("0/-1/N"));
+         this.loopCountField.setTooltip(Tooltip.create(Component.translatable("screen.command-gui.machine.loop_count_hint")));
          this.loopCountField.setResponder(text -> this.loopCountText = text);
          this.addRenderableWidget(this.loopCountField);
       }
@@ -79,17 +80,17 @@ public class TimelineEditorScreen extends BaseParentedScreen<Screen> {
       int barTotal = addWidth + 4 + saveWidth + 4 + saveWidth;
       int barStartX = this.listRight - barTotal;
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.machine.add_step"), btn -> this.addStep())
+         GuiButton.themed(Component.translatable("screen.command-gui.machine.add_step"), btn -> this.addStep())
             .bounds(barStartX, this.height - 26, addWidth, 18)
             .build()
       );
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.save"), btn -> this.saveAndClose())
+         GuiButton.themed(Component.translatable("screen.command-gui.save"), btn -> this.saveAndClose())
             .bounds(barStartX + addWidth + 4, this.height - 26, saveWidth, 18)
             .build()
       );
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.back"), btn -> this.saveAndClose())
+         GuiButton.themed(Component.translatable("screen.command-gui.back"), btn -> this.saveAndClose())
             .bounds(barStartX + addWidth + 4 + saveWidth + 4, this.height - 26, saveWidth, 18)
             .build()
       );
@@ -101,7 +102,7 @@ public class TimelineEditorScreen extends BaseParentedScreen<Screen> {
       }
 
       this.rowButtons.clear();
-      int visibleRows = Math.max(1, (this.listBottom - 26) / 20);
+      int visibleRows = Math.max(1, (this.listBottom - LIST_TOP) / ROW_HEIGHT);
       int start = Math.min(this.scrollOffset, Math.max(0, this.working.steps.size() - visibleRows));
       this.scrollOffset = start;
 
@@ -111,7 +112,7 @@ public class TimelineEditorScreen extends BaseParentedScreen<Screen> {
             break;
          }
 
-         int y = 26 + i * 20;
+         int y = LIST_TOP + i * ROW_HEIGHT;
          int x = this.listLeft;
          MachineModels.Step entry = this.working.steps.get(index);
          List<Button> row = new ArrayList<>();
@@ -120,53 +121,53 @@ public class TimelineEditorScreen extends BaseParentedScreen<Screen> {
             int stepButtonsStart = this.listLeft + stepLabelWidth + 2;
             int delayButtonsStart = stepButtonsStart + 30 + 1;
             int labelWidth = delayButtonsStart - this.listLeft - 2;
-            Button label = Button.builder(this.buildDelayLabel(index), btn -> this.editDelay(index)).bounds(x, y, labelWidth, 18).build();
+            Button label = GuiButton.themed(this.buildDelayLabel(index), btn -> this.editDelay(index)).bounds(x, y, labelWidth, 20).build();
             label.setTooltip(Tooltip.create(Component.translatable("screen.command-gui.machine.step_delay_edit_hint")));
             row.add(label);
-            Button up = Button.builder(Component.translatable("screen.command-gui.step_up_short"), btn -> this.moveEntry(index, -1))
-               .bounds(delayButtonsStart, y, 48, 18)
+            Button up = GuiButton.themed(Component.translatable("screen.command-gui.step_up_short"), btn -> this.moveEntry(index, -1))
+               .bounds(delayButtonsStart, y, 48, 20)
                .build();
             up.active = index > 0;
             up.setTooltip(Tooltip.create(Component.translatable("screen.command-gui.step_up")));
             row.add(up);
             x = delayButtonsStart + 49;
-            Button down = Button.builder(Component.translatable("screen.command-gui.step_down_short"), btn -> this.moveEntry(index, 1))
-               .bounds(x, y, 48, 18)
+            Button down = GuiButton.themed(Component.translatable("screen.command-gui.step_down_short"), btn -> this.moveEntry(index, 1))
+               .bounds(x, y, 48, 20)
                .build();
             down.active = index < this.working.steps.size() - 1;
             down.setTooltip(Tooltip.create(Component.translatable("screen.command-gui.step_down")));
             row.add(down);
             x += 49;
-            Button del = Button.builder(Component.translatable("screen.command-gui.delete"), btn -> this.deleteEntry(index)).bounds(x, y, 30, 18).build();
+            Button del = GuiButton.themed(Component.translatable("screen.command-gui.delete"), btn -> this.deleteEntry(index)).bounds(x, y, 30, 20).build();
             del.setTooltip(Tooltip.create(Component.translatable("screen.command-gui.machine.delete_delay_bar")));
             row.add(del);
          } else {
             int labelWidth = this.listRight - this.listLeft - 159 - 18;
-            Button label = Button.builder(this.buildCommandLabel(index), btn -> this.editStep(index)).bounds(x, y, labelWidth, 18).build();
+            Button label = GuiButton.themed(this.buildCommandLabel(index), btn -> this.editStep(index)).bounds(x, y, labelWidth, 20).build();
             if (entry.description != null && !entry.description.isBlank()) {
                label.setTooltip(Tooltip.create(Component.literal(entry.description)));
             }
 
             row.add(label);
             x += labelWidth + 2;
-            Button edit = Button.builder(Component.translatable("screen.command-gui.action.edit"), btn -> this.editStep(index)).bounds(x, y, 30, 18).build();
+            Button edit = GuiButton.themed(Component.translatable("screen.command-gui.action.edit"), btn -> this.editStep(index)).bounds(x, y, 30, 20).build();
             row.add(edit);
             x += 31;
-            Button up = Button.builder(Component.translatable("screen.command-gui.step_up_short"), btn -> this.moveEntry(index, -1))
-               .bounds(x, y, 48, 18)
+            Button up = GuiButton.themed(Component.translatable("screen.command-gui.step_up_short"), btn -> this.moveEntry(index, -1))
+               .bounds(x, y, 48, 20)
                .build();
             up.active = index > 0;
             up.setTooltip(Tooltip.create(Component.translatable("screen.command-gui.step_up")));
             row.add(up);
             x += 49;
-            Button down = Button.builder(Component.translatable("screen.command-gui.step_down_short"), btn -> this.moveEntry(index, 1))
-               .bounds(x, y, 48, 18)
+            Button down = GuiButton.themed(Component.translatable("screen.command-gui.step_down_short"), btn -> this.moveEntry(index, 1))
+               .bounds(x, y, 48, 20)
                .build();
             down.active = index < this.working.steps.size() - 1;
             down.setTooltip(Tooltip.create(Component.translatable("screen.command-gui.step_down")));
             row.add(down);
             x += 49;
-            Button del = Button.builder(Component.translatable("screen.command-gui.delete"), btn -> this.deleteEntry(index)).bounds(x, y, 30, 18).build();
+            Button del = GuiButton.themed(Component.translatable("screen.command-gui.delete"), btn -> this.deleteEntry(index)).bounds(x, y, 30, 20).build();
             del.setTooltip(Tooltip.create(Component.translatable("screen.command-gui.machine.delete_step_bar")));
             row.add(del);
          }
@@ -181,20 +182,12 @@ public class TimelineEditorScreen extends BaseParentedScreen<Screen> {
 
    private Component buildDelayLabel(int index) {
       MachineModels.Step entry = this.working.steps.get(index);
-      int stepLabelWidth = this.listRight - this.listLeft - 159 - 18;
-      int stepButtonsStart = this.listLeft + stepLabelWidth + 2;
-      int delayButtonsStart = stepButtonsStart + 30 + 1;
-      int delayLabelWidth = delayButtonsStart - this.listLeft - 2;
-      int maxW = delayLabelWidth * 2 / 3;
-      String text = Component.translatable("screen.command-gui.machine.step_delay_row", new Object[]{entry.delay}).getString();
-      return Component.literal(this.font.plainSubstrByWidth(text, Math.max(30, maxW)));
+      return Component.translatable("screen.command-gui.machine.step_delay_row", entry.delay);
    }
 
    private Component buildCommandLabel(int index) {
       MachineModels.Step entry = this.working.steps.get(index);
       int stepOrdinal = this.stepOrdinal(index);
-      int stepLabelWidth = this.listRight - this.listLeft - 159 - 18;
-      int maxW = stepLabelWidth * 2 / 3;
       String prefix;
       String suffix;
       String content;
@@ -208,18 +201,7 @@ public class TimelineEditorScreen extends BaseParentedScreen<Screen> {
          content = entry.commands != null && !entry.commands.isEmpty() ? entry.commands.get(0) : "";
       }
 
-      int contentMaxW = Math.max(20, maxW - this.font.width(prefix) - this.font.width(suffix));
-      boolean tooLong = this.font.width(content) > contentMaxW;
-      if (tooLong) {
-         contentMaxW = Math.max(0, contentMaxW - this.font.width("..."));
-      }
-
-      String truncated = this.font.plainSubstrByWidth(content, contentMaxW);
-      if (tooLong) {
-         truncated = truncated + "...";
-      }
-
-      return Component.literal(prefix + truncated + suffix);
+      return Component.literal(prefix + content + suffix);
    }
 
    private int stepOrdinal(int index) {
@@ -260,7 +242,7 @@ public class TimelineEditorScreen extends BaseParentedScreen<Screen> {
    }
 
    private void scrollToEnd() {
-      int visibleRows = Math.max(1, (this.listBottom - 26) / 20);
+      int visibleRows = Math.max(1, (this.listBottom - LIST_TOP) / ROW_HEIGHT);
       this.scrollOffset = Math.max(0, this.working.steps.size() - visibleRows);
    }
 
@@ -448,7 +430,7 @@ public class TimelineEditorScreen extends BaseParentedScreen<Screen> {
    }
 
    public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
-      int visibleRows = Math.max(1, (this.listBottom - 26) / 20);
+      int visibleRows = Math.max(1, (this.listBottom - LIST_TOP) / ROW_HEIGHT);
       int maxScroll = Math.max(0, this.working.steps.size() - visibleRows);
       if (scrollY > 0.0 && this.scrollOffset > 0) {
          this.scrollOffset--;
@@ -462,12 +444,11 @@ public class TimelineEditorScreen extends BaseParentedScreen<Screen> {
    }
 
    public void extractRenderState(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY, float partialTick) {
-      guiGraphics.fill(this.listLeft - 1, 25, this.listRight + 1, this.listBottom + 1, -13421773);
       super.extractRenderState(guiGraphics, mouseX, mouseY, partialTick);
       guiGraphics.centeredText(this.font, this.title, this.width / 2, 6, -1);
       if (this.working.steps.isEmpty()) {
          guiGraphics.centeredText(
-            this.font, Component.translatable("screen.command-gui.machine.timeline_empty"), this.width / 2, (26 + this.listBottom) / 2, -7829368
+            this.font, Component.translatable("screen.command-gui.machine.timeline_empty"), this.width / 2, (LIST_TOP + this.listBottom) / 2, -7829368
          );
       }
 
@@ -487,29 +468,29 @@ public class TimelineEditorScreen extends BaseParentedScreen<Screen> {
 
       if (this.allowLoop) {
          int loopLabelWidth = this.font.width(Component.translatable("screen.command-gui.machine.loop_count")) + 6;
-         guiGraphics.text(this.font, Component.translatable("screen.command-gui.machine.loop_count"), this.listLeft, this.height - 26 + 2, -5592406);
+         guiGraphics.text(this.font, Component.translatable("screen.command-gui.machine.loop_count"), this.listLeft, this.height - 52 + 5, GuiTheme.muted(), false);
          guiGraphics.text(
             this.font,
-            Component.translatable("screen.command-gui.machine.loop_count_hint"),
+            this.font.plainSubstrByWidth(Component.translatable("screen.command-gui.machine.loop_count_hint").getString(), Math.max(0, this.listRight - this.listLeft - loopLabelWidth - 54)),
             this.listLeft + loopLabelWidth + 46 + 4,
-            this.height - 26 + 2,
-            -8947849
+            this.height - 52 + 5,
+            GuiTheme.muted(), false
          );
       }
 
-      int visibleRows = Math.max(1, (this.listBottom - 26) / 20);
+      int visibleRows = Math.max(1, (this.listBottom - LIST_TOP) / ROW_HEIGHT);
       int totalRows = Math.max(1, this.working.steps.size());
       int maxScroll = Math.max(0, totalRows - visibleRows);
       int scrollbarX = this.listRight - 12;
-      int scrollbarH = this.listBottom - 26;
-      this.scrollbar = new ScrollbarHandle(scrollbarX, 26, 12, scrollbarH);
+      int scrollbarH = this.listBottom - LIST_TOP;
+      this.scrollbar = new ScrollbarHandle(scrollbarX, LIST_TOP, 12, scrollbarH);
       boolean hovered = this.scrollbar.contains((double)mouseX, (double)mouseY);
       this.scrollbar.render(guiGraphics, this.scrollOffset, maxScroll, visibleRows, totalRows, hovered);
    }
 
    public boolean mouseClicked(MouseButtonEvent mouseEvent, boolean focused) {
       if (mouseEvent.button() == 0 && this.isOverScrollbar(mouseEvent.x(), mouseEvent.y())) {
-         int visibleRows = Math.max(1, (this.listBottom - 26) / 20);
+         int visibleRows = Math.max(1, (this.listBottom - LIST_TOP) / ROW_HEIGHT);
          int maxScroll = Math.max(0, this.working.steps.size() - visibleRows);
          int thumbTop = this.scrollbar.thumbTop(this.scrollOffset, maxScroll, visibleRows, Math.max(1, this.working.steps.size()));
          this.scrollbarGrabOffset = mouseEvent.y() - (double)thumbTop;
@@ -522,7 +503,7 @@ public class TimelineEditorScreen extends BaseParentedScreen<Screen> {
 
    public boolean mouseDragged(MouseButtonEvent mouseEvent, double dragX, double dragY) {
       if (this.draggingScrollbar && this.scrollbar != null) {
-         int visibleRows = Math.max(1, (this.listBottom - 26) / 20);
+         int visibleRows = Math.max(1, (this.listBottom - LIST_TOP) / ROW_HEIGHT);
          int maxScroll = Math.max(0, this.working.steps.size() - visibleRows);
          int offset = this.scrollbar.offsetFromY(mouseEvent.y(), this.scrollbarGrabOffset, maxScroll, visibleRows, Math.max(1, this.working.steps.size()));
          this.scrollOffset = Math.max(0, Math.min(offset, maxScroll));

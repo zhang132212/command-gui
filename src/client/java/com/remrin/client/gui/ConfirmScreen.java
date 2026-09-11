@@ -42,8 +42,8 @@ public class ConfirmScreen extends BaseParentedScreen<Screen> {
       int btnW = 100;
       int gap = 8;
       int startX = centerX - btnW - gap / 2;
-      this.addRenderableWidget(Button.builder(this.confirmLabel, btn -> this.confirm()).bounds(startX, centerY + 30, btnW, 20).build());
-      this.addRenderableWidget(Button.builder(this.cancelLabel, btn -> this.cancel()).bounds(startX + btnW + gap, centerY + 30, btnW, 20).build());
+      this.addRenderableWidget(GuiButton.themed(this.confirmLabel, btn -> this.confirm()).bounds(startX, centerY + 30, btnW, 20).build());
+      this.addRenderableWidget(GuiButton.themed(this.cancelLabel, btn -> this.cancel()).bounds(startX + btnW + gap, centerY + 30, btnW, 20).build());
    }
 
    private void confirm() {

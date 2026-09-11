@@ -15,6 +15,8 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.InputWithModifiers;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.util.FormattedCharSequence;
+import net.minecraft.client.gui.components.Tooltip;
 
 public class SettingsScreen extends BaseParentedScreen<Screen> {
    private static final int TITLE_X = 10;
@@ -25,8 +27,8 @@ public class SettingsScreen extends BaseParentedScreen<Screen> {
    private static final int RIGHT_MARGIN = 16;
    private static final int SCROLLBAR_WIDTH = 12;
    private static final int CONTENT_SCROLL_STEP = 24;
-   private static final int ROW_HEIGHT = 24;
-   private static final int SETTING_BUTTON_WIDTH = 80;
+   private static final int ROW_HEIGHT = 36;
+   private static final int SETTING_BUTTON_WIDTH = 64;
    private static final int SETTING_BUTTON_HEIGHT = 20;
    private static final int CONTENT_TOP_GAP = 8;
    private final List<Button> sectionButtons = new ArrayList<>();
@@ -104,6 +106,7 @@ public class SettingsScreen extends BaseParentedScreen<Screen> {
                break;
             case MACHINE_SWITCHES:
          }
+         this.applyContentScroll(0);
       }
    }
 
@@ -114,9 +117,19 @@ public class SettingsScreen extends BaseParentedScreen<Screen> {
    }
 
    private SettingsScreen.YesNoButton addSettingRow(Component label, int y, String configKey, boolean selected) {
-      SettingsScreen.YesNoButton toggle = new SettingsScreen.YesNoButton(this.contentArea.right() - GuiTuning.getInt("SettingsScreen.SETTING_BUTTON_WIDTH", SETTING_BUTTON_WIDTH), y, GuiTuning.getInt("SettingsScreen.SETTING_BUTTON_WIDTH", SETTING_BUTTON_WIDTH), GuiTuning.getInt("SettingsScreen.SETTING_BUTTON_HEIGHT", SETTING_BUTTON_HEIGHT), selected, configKey);
+      int buttonWidth = GuiTuning.getInt("SettingsScreen.SETTING_BUTTON_WIDTH", SETTING_BUTTON_WIDTH);
+      int buttonHeight = GuiTuning.getInt("SettingsScreen.SETTING_BUTTON_HEIGHT", SETTING_BUTTON_HEIGHT);
+      List<FormattedCharSequence> lines = this.font.split(label, Math.max(24, this.contentArea.width() - buttonWidth - 36));
+      int rowHeight = Math.max(GuiTuning.getInt("SettingsScreen.ROW_HEIGHT", ROW_HEIGHT), lines.size() * 12 + 16);
+      if (!this.settingRows.isEmpty()) {
+         SettingRow previous = this.settingRows.getLast();
+         y = previous.widget().getY() - (previous.height() - previous.widget().getHeight()) / 2 + previous.height() + 8;
+      }
+      SettingsScreen.YesNoButton toggle = new SettingsScreen.YesNoButton(this.contentArea.right() - buttonWidth - 10,
+         y + (rowHeight - buttonHeight) / 2, buttonWidth, buttonHeight, selected, configKey, label);
       this.addContentWidget(toggle);
-      this.settingRows.add(new SettingsScreen.SettingRow(label, toggle));
+      this.settingRows.add(new SettingsScreen.SettingRow(lines, toggle, rowHeight));
+      this.contentHeight = y + rowHeight + 4 - this.contentArea.top();
       return toggle;
    }
 
@@ -211,6 +224,10 @@ public class SettingsScreen extends BaseParentedScreen<Screen> {
             widget.setY(widget.getY() - delta);
          }
       }
+      for (AbstractWidget widget : this.contentWidgets) {
+         widget.visible = widget.getY() >= this.contentArea.top() && widget.getY() + widget.getHeight() <= this.contentArea.bottom();
+         widget.active = widget.visible;
+      }
    }
 
    public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
@@ -267,12 +284,23 @@ public class SettingsScreen extends BaseParentedScreen<Screen> {
       this.minecraft.gui.setScreen(this.parent);
    }
 
+   @Override
+   public void extractBackground(GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {
+      super.extractBackground(g, mouseX, mouseY, partialTick);
+      if (this.contentArea == null) return;
+      g.enableScissor(this.contentArea.left(), this.contentArea.top(), this.contentArea.right(), this.contentArea.bottom());
+      for (SettingRow row : this.settingRows) {
+         int top = row.widget().getY() - (row.height() - row.widget().getHeight()) / 2;
+         GuiTheme.panel(g, this.contentArea.left(), top, this.contentArea.width(), row.height());
+      }
+      g.disableScissor();
+   }
+
    public void extractRenderState(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY, float partialTick) {
       super.extractRenderState(guiGraphics, mouseX, mouseY, partialTick);
       String version = FabricLoader.getInstance().getModContainer("command-gui").map(c -> c.getMetadata().getVersion().getFriendlyString()).orElse("?");
-      String titleText = this.title.getString() + " - " + version;
-      guiGraphics.text(this.font, Component.literal(titleText), GuiTuning.getInt("SettingsScreen.TITLE_X", TITLE_X), GuiTuning.getInt("SettingsScreen.TITLE_Y", TITLE_Y), -1);
-      guiGraphics.text(this.font, Component.literal("by Remrin；zhang"), GuiTuning.getInt("SettingsScreen.TITLE_X", TITLE_X) + this.font.width(titleText) + 6, GuiTuning.getInt("SettingsScreen.TITLE_Y", TITLE_Y), -10179);
+      guiGraphics.text(this.font, this.title, GuiTuning.getInt("SettingsScreen.TITLE_X", TITLE_X), GuiTuning.getInt("SettingsScreen.TITLE_Y", TITLE_Y), GuiTheme.text(), false);
+      guiGraphics.text(this.font, version, this.width - 16 - this.font.width(version), GuiTuning.getInt("SettingsScreen.TITLE_Y", TITLE_Y), GuiTheme.muted(), false);
       if (this.contentArea != null) {
          if (this.getMaxContentScroll() > 0) {
             ScrollbarHandle scrollbar = new ScrollbarHandle(this.width - GuiTuning.getInt("SettingsScreen.SCROLLBAR_WIDTH", SCROLLBAR_WIDTH), this.contentArea.top(), GuiTuning.getInt("SettingsScreen.SCROLLBAR_WIDTH", SCROLLBAR_WIDTH), this.contentArea.height());
@@ -286,10 +314,16 @@ public class SettingsScreen extends BaseParentedScreen<Screen> {
             );
          }
 
+         guiGraphics.enableScissor(this.contentArea.left(), this.contentArea.top(), this.contentArea.right(), this.contentArea.bottom());
          for (SettingsScreen.SettingRow row : this.settingRows) {
             AbstractWidget widget = row.widget();
-            guiGraphics.text(this.font, row.label(), this.contentArea.left() + 2, widget.getY() + (widget.getHeight() - 9) / 2, -1);
+            int labelY = widget.getY() + (widget.getHeight() - row.lines().size() * 12) / 2 + 2;
+            for (FormattedCharSequence line : row.lines()) {
+               guiGraphics.text(this.font, line, this.contentArea.left() + 10, labelY, GuiTheme.text(), false);
+               labelY += 12;
+            }
          }
+         guiGraphics.disableScissor();
 
          if (this.contentWidgets.isEmpty()) {
             guiGraphics.centeredText(
@@ -319,32 +353,45 @@ public class SettingsScreen extends BaseParentedScreen<Screen> {
       }
    }
 
-   private static record SettingRow(Component label, AbstractWidget widget) {
+   private static record SettingRow(List<FormattedCharSequence> lines, AbstractWidget widget, int height) {
    }
 
    private final class YesNoButton extends Button {
       private boolean selected;
       private final String configKey;
+      private final Component label;
 
-      YesNoButton(int x, int y, int width, int height, boolean selected, String configKey) {
+      YesNoButton(int x, int y, int width, int height, boolean selected, String configKey, Component label) {
          super(x, y, width, height, Component.empty(), b -> {
          }, DEFAULT_NARRATION);
          this.selected = selected;
          this.configKey = configKey;
+         this.label = label;
+         this.updateMessage();
+         this.setTooltip(Tooltip.create(label));
+      }
+
+      private void updateMessage() {
+         this.setMessage(this.label.copy().append(": ").append(Component.translatable(this.selected ? "screen.command-gui.settings.yes" : "screen.command-gui.settings.no")));
       }
 
       public void onPress(InputWithModifiers input) {
          this.selected = !this.selected;
+         this.updateMessage();
          SettingsConfig.setBoolean(this.configKey, this.selected);
          SettingsConfig.save();
       }
 
       protected void extractContents(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY, float partialTick) {
-         this.extractDefaultSprite(guiGraphics);
-         int color = this.selected ? -11141291 : -3145728;
+         int color = this.selected ? GuiTheme.accent() : GuiTheme.muted();
          Component text = Component.translatable(this.selected ? "screen.command-gui.settings.yes" : "screen.command-gui.settings.no");
          Font font = Minecraft.getInstance().font;
-         guiGraphics.centeredText(font, text, this.getX() + this.getWidth() / 2, this.getY() + (this.getHeight() - 8) / 2, color);
+         int switchX = this.getX() + this.getWidth() - 28;
+         int switchY = this.getY() + (this.getHeight() - 14) / 2;
+         GuiTheme.rounded(guiGraphics, switchX, switchY, 28, 14, 7, this.selected ? GuiTheme.selected() : GuiTheme.surface());
+         GuiTheme.rounded(guiGraphics, switchX + (this.selected ? 16 : 2), switchY + 2, 10, 10, 5, color);
+         guiGraphics.text(font, text, this.getX() + 4, this.getY() + (this.getHeight() - 9) / 2, color, false);
+         if (this.isHovered() || this.isFocused()) GuiTheme.outline(guiGraphics, this.getX(), this.getY(), this.getWidth(), this.getHeight(), GuiTheme.accent());
       }
    }
 }

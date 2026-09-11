@@ -202,7 +202,7 @@ public abstract class BaseCommandEditorScreen extends BaseParentedScreen<Command
       int rightColX = this.effectiveRightColX();
       int bottomBarY = this.height - 26;
       int nameFieldW = Math.max(60, this.getNameFieldWidth(leftWidth) - 48 - 4);
-      this.nameField = new EditBox(this.font, fieldX, 44, nameFieldW, 16, Component.translatable("screen.command-gui.name"));
+      this.nameField = new GuiEditBox(this.font, fieldX, 44, nameFieldW, 16, Component.translatable("screen.command-gui.name"));
       this.nameField.setMaxLength(50);
       this.nameField.setValue(this.getInitialName());
       this.nameField.setResponder(text -> this.markDirty());
@@ -230,24 +230,24 @@ public abstract class BaseCommandEditorScreen extends BaseParentedScreen<Command
       this.addRenderableWidget(this.commandDelayField);
       int currentY = 74;
       currentY = this.initExtraRow(fieldX, currentY);
-      this.descriptionField = new EditBox(this.font, fieldX, currentY, leftWidth, 16, Component.translatable("screen.command-gui.description"));
+      this.descriptionField = new GuiEditBox(this.font, fieldX, currentY, leftWidth, 16, Component.translatable("screen.command-gui.description"));
       this.descriptionField.setMaxLength(100);
       this.descriptionField.setValue(this.getInitialDescription());
       this.descriptionField.setHint(Component.translatable("screen.command-gui.description_hint"));
       this.descriptionField.setResponder(text -> this.markDirty());
       this.addRenderableWidget(this.descriptionField);
       this.shortcut = CommandShortcut.normalize(this.getInitialShortcut());
-      this.shortcutButton = Button.builder(Component.literal(this.shortcutMessage()), btn -> this.toggleShortcutCapture())
+      this.shortcutButton = GuiButton.themed(Component.literal(this.shortcutMessage()), btn -> this.toggleShortcutCapture())
          .bounds(this.getShortcutButtonX(fieldX), 104, 150, 18)
          .build();
       this.addRenderableWidget(this.shortcutButton);
-      this.shortcutResetButton = Button.builder(Component.translatable("screen.command-gui.shortcut.reset"), btn -> this.resetShortcut())
+      this.shortcutResetButton = GuiButton.themed(Component.translatable("screen.command-gui.shortcut.reset"), btn -> this.resetShortcut())
          .bounds(this.getShortcutResetX(fieldX + 154), 104, 44, 18)
          .build();
       this.shortcutResetButton.setTooltip(Tooltip.create(Component.translatable("screen.command-gui.shortcut.reset_hint")));
       this.addRenderableWidget(this.shortcutResetButton);
       this.refreshShortcutConflict();
-      this.commandField = new EditBox(this.font, fieldX, this.getCommandFieldY(), leftWidth, 20, Component.translatable("screen.command-gui.command"));
+      this.commandField = new GuiEditBox(this.font, fieldX, this.getCommandFieldY(), leftWidth, 20, Component.translatable("screen.command-gui.command"));
       this.commandField.setMaxLength(256);
       this.commandField.setValue(this.getInitialCommand());
       Component cmdHint = this.getCommandHint();
@@ -291,12 +291,12 @@ public abstract class BaseCommandEditorScreen extends BaseParentedScreen<Command
       int saveCancelW = Math.min(80, maxBtnW);
       int barTotalW = addBtnW + saveCancelW * (totalButtons - 1) + 4 * (totalButtons - 1);
       int barStartX = fieldX + (contentWidth - barTotalW) / 2;
-      this.addToListButton = Button.builder(Component.translatable("screen.command-gui.add_command_line"), btn -> this.addCurrentCommandToList())
+      this.addToListButton = GuiButton.themed(Component.translatable("screen.command-gui.add_command_line"), btn -> this.addCurrentCommandToList())
          .bounds(barStartX, bottomBarY, addBtnW, 20)
          .build();
       this.addRenderableWidget(this.addToListButton);
       int barX = barStartX + addBtnW + 4;
-      Button saveButton = Button.builder(Component.translatable("screen.command-gui.save"), btn -> this.saveAndClose())
+      Button saveButton = GuiButton.themed(Component.translatable("screen.command-gui.save"), btn -> this.saveAndClose())
          .bounds(barX, bottomBarY, saveCancelW, 20)
          .build();
       this.addRenderableWidget(saveButton);
@@ -307,7 +307,7 @@ public abstract class BaseCommandEditorScreen extends BaseParentedScreen<Command
          barX += saveCancelW + 4;
       }
 
-      Button cancelButton = Button.builder(Component.translatable("screen.command-gui.cancel"), btn -> this.requestExit())
+      Button cancelButton = GuiButton.themed(Component.translatable("screen.command-gui.cancel"), btn -> this.requestExit())
          .bounds(barX, bottomBarY, saveCancelW, 20)
          .build();
       this.addRenderableWidget(cancelButton);
@@ -375,27 +375,27 @@ public abstract class BaseCommandEditorScreen extends BaseParentedScreen<Command
       for (int i = start; i < end; i++) {
          int idx = i;
          int y = listY + (i - start) * 12;
-         Button upBtn = Button.builder(Component.translatable("screen.command-gui.step_up_short"), btn -> this.moveCommandUp(idx))
+         Button upBtn = GuiButton.themed(Component.translatable("screen.command-gui.step_up_short"), btn -> this.moveCommandUp(idx))
             .bounds(upX, y, 48, 12)
             .build();
          upBtn.active = idx > 0;
          upBtn.setTooltip(Tooltip.create(Component.translatable("screen.command-gui.step_up")));
          this.commandMoveUpButtons.add(upBtn);
          this.addRenderableWidget(upBtn);
-         Button downBtn = Button.builder(Component.translatable("screen.command-gui.step_down_short"), btn -> this.moveCommandDown(idx))
+         Button downBtn = GuiButton.themed(Component.translatable("screen.command-gui.step_down_short"), btn -> this.moveCommandDown(idx))
             .bounds(downX, y, 48, 12)
             .build();
          downBtn.active = idx < this.commandList.size() - 1;
          downBtn.setTooltip(Tooltip.create(Component.translatable("screen.command-gui.step_down")));
          this.commandMoveDownButtons.add(downBtn);
          this.addRenderableWidget(downBtn);
-         Button copyBtn = Button.builder(Component.translatable("screen.command-gui.step_copy_short"), btn -> this.copyCommandToClipboard(idx))
+         Button copyBtn = GuiButton.themed(Component.translatable("screen.command-gui.step_copy_short"), btn -> this.copyCommandToClipboard(idx))
             .bounds(copyX, y, 30, 12)
             .build();
          copyBtn.setTooltip(Tooltip.create(Component.translatable("screen.command-gui.step_copy_tip")));
          this.commandCopyButtons.add(copyBtn);
          this.addRenderableWidget(copyBtn);
-         Button removeBtn = Button.builder(Component.translatable("screen.command-gui.delete"), btn -> {
+         Button removeBtn = GuiButton.themed(Component.translatable("screen.command-gui.delete"), btn -> {
             this.commandList.remove(idx);
             this.markDirty();
             this.rebuildCommandListButtons();

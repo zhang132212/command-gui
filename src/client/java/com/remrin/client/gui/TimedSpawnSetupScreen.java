@@ -48,14 +48,14 @@ public class TimedSpawnSetupScreen extends BaseParentedScreen<Screen> {
       int posToggleY = timeFieldY + 42;
       int coordFieldY = posToggleY + 28;
       int saveCancelY = coordFieldY + 36;
-      this.nameField = new EditBox(this.font, centerX - 75, nameFieldY, 150, 20, Component.translatable("screen.command-gui.fakeplayer.timed.name"));
+      this.nameField = new GuiEditBox(this.font, centerX - 75, nameFieldY, 150, 20, Component.translatable("screen.command-gui.fakeplayer.timed.name"));
       this.nameField.setMaxLength(20);
       this.nameField.setValue(this.playerName);
       this.nameField.setResponder(s -> this.playerName = s);
       this.addRenderableWidget(this.nameField);
       int totalTimeWidth = 163;
       int timeStartX = centerX - totalTimeWidth / 2;
-      this.hoursField = new EditBox(this.font, timeStartX, timeFieldY, 45, 20, Component.literal("H"));
+      this.hoursField = new GuiEditBox(this.font, timeStartX, timeFieldY, 45, 20, Component.literal("H"));
       this.hoursField.setMaxLength(5);
       this.hoursField.setValue(String.valueOf(this.hours));
       this.hoursField.setResponder(s -> {
@@ -66,7 +66,7 @@ public class TimedSpawnSetupScreen extends BaseParentedScreen<Screen> {
          }
       });
       this.addRenderableWidget(this.hoursField);
-      this.minutesField = new EditBox(this.font, timeStartX + 45 + 14, timeFieldY, 45, 20, Component.literal("M"));
+      this.minutesField = new GuiEditBox(this.font, timeStartX + 45 + 14, timeFieldY, 45, 20, Component.literal("M"));
       this.minutesField.setMaxLength(5);
       this.minutesField.setValue(String.valueOf(this.minutes));
       this.minutesField.setResponder(s -> {
@@ -77,7 +77,7 @@ public class TimedSpawnSetupScreen extends BaseParentedScreen<Screen> {
          }
       });
       this.addRenderableWidget(this.minutesField);
-      this.secondsField = new EditBox(this.font, timeStartX + 118, timeFieldY, 45, 20, Component.literal("S"));
+      this.secondsField = new GuiEditBox(this.font, timeStartX + 118, timeFieldY, 45, 20, Component.literal("S"));
       this.secondsField.setMaxLength(5);
       this.secondsField.setValue(String.valueOf(this.seconds));
       this.secondsField.setResponder(s -> {
@@ -88,7 +88,7 @@ public class TimedSpawnSetupScreen extends BaseParentedScreen<Screen> {
          }
       });
       this.addRenderableWidget(this.secondsField);
-      this.posToggle = Button.builder(this.getPosToggleLabel(), btn -> {
+      this.posToggle = GuiButton.themed(this.getPosToggleLabel(), btn -> {
          this.useCurrentPos = !this.useCurrentPos;
          this.posToggle.setMessage(this.getPosToggleLabel());
          this.updateCoordFieldVisibility();
@@ -96,7 +96,7 @@ public class TimedSpawnSetupScreen extends BaseParentedScreen<Screen> {
       this.addRenderableWidget(this.posToggle);
       int coordTotalWidth = 186;
       int coordStartX = centerX - coordTotalWidth / 2;
-      this.xField = new EditBox(this.font, coordStartX, coordFieldY, 58, 20, Component.literal("X"));
+      this.xField = new GuiEditBox(this.font, coordStartX, coordFieldY, 58, 20, Component.literal("X"));
       this.xField.setMaxLength(12);
       this.xField.setResponder(s -> {
          try {
@@ -106,7 +106,7 @@ public class TimedSpawnSetupScreen extends BaseParentedScreen<Screen> {
          }
       });
       this.addRenderableWidget(this.xField);
-      this.yField = new EditBox(this.font, coordStartX + 58 + 6, coordFieldY, 58, 20, Component.literal("Y"));
+      this.yField = new GuiEditBox(this.font, coordStartX + 58 + 6, coordFieldY, 58, 20, Component.literal("Y"));
       this.yField.setMaxLength(12);
       this.yField.setResponder(s -> {
          try {
@@ -116,7 +116,7 @@ public class TimedSpawnSetupScreen extends BaseParentedScreen<Screen> {
          }
       });
       this.addRenderableWidget(this.yField);
-      this.zField = new EditBox(this.font, coordStartX + 128, coordFieldY, 58, 20, Component.literal("Z"));
+      this.zField = new GuiEditBox(this.font, coordStartX + 128, coordFieldY, 58, 20, Component.literal("Z"));
       this.zField.setMaxLength(12);
       this.zField.setResponder(s -> {
          try {
@@ -137,7 +137,7 @@ public class TimedSpawnSetupScreen extends BaseParentedScreen<Screen> {
       this.yField.setValue(CommandHelper.formatY(this.spawnY));
       this.zField.setValue(CommandHelper.formatZ(this.spawnZ));
       this.updateCoordFieldVisibility();
-      this.addRenderableWidget(Button.builder(Component.translatable("screen.command-gui.save"), btn -> {
+      this.addRenderableWidget(GuiButton.themed(Component.translatable("screen.command-gui.save"), btn -> {
          if (!this.playerName.isEmpty() && (this.hours > 0 || this.minutes > 0 || this.seconds > 0)) {
             if (this.useCurrentPos) {
                TimedTaskManager.addSpawnTask(this.playerName, this.hours, this.minutes, this.seconds);
@@ -149,7 +149,7 @@ public class TimedSpawnSetupScreen extends BaseParentedScreen<Screen> {
          }
       }).bounds(centerX - 102, saveCancelY, 100, 20).build());
       this.addRenderableWidget(
-         Button.builder(Component.translatable("screen.command-gui.cancel"), btn -> this.minecraft.gui.setScreen(this.parent))
+         GuiButton.themed(Component.translatable("screen.command-gui.cancel"), btn -> this.minecraft.gui.setScreen(this.parent))
             .bounds(centerX + 2, saveCancelY, 100, 20)
             .build()
       );
