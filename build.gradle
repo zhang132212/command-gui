@@ -72,6 +72,8 @@ java {
 sourceSets {
 	main {
 		java {
+			// server/ 只是源码目录（不再是独立 Gradle 子项目）：服务端分支与客户端代码打进同一个
+			// jar，由运行环境决定走哪一侧：专用服务端只跑 main 入口，客户端还会跑 client 入口。
 			srcDir 'server/src/main/java'
 		}
 	}

@@ -25,6 +25,7 @@
 - 搜索框改为独立的 `GuiSearchBox`：使用圆角底板、代码绘制的放大镜、图标分隔线和青绿色焦点描边。内部继续使用 Minecraft 原生文本编辑器，保留中文输入、光标定位、选区、复制粘贴和长文本滚动。
 
 `server/`、客户端网络同步、数据模型、配置存取、指令执行与构建配置的源码均未修改。已有命令回调、机器操作与编辑流程沿用原实现。
+（注意：这条边界只适用于本节的 UI 整理；分支后续还追加了非 UI 改动，见文末“后续追加改动”。）
 
 ## 实际渲染截图
 
@@ -73,3 +74,28 @@
 
 仓库中的 DevStudio 网页预览仍采用原布局，界面效果请以本页的游戏客户端截图为准。
 
+## 后续追加改动（非 UI，同分支）
+
+UI 整理完成后，同一分支上又追加了两项与显示层无关的改动，用于修掉单人模式下的行为缺陷并简化发布形态。
+
+### 1. 内嵌服务端分支的初始化时序修复
+
+`CommandGUI.onInitialize()` 原先把 `MachineMod.init()` 注册到 `ServerLifecycleEvents.SERVER_STARTING` 回调里。Fabric 的 `SERVER_STARTING` 在 `MinecraftServer.runServer()` 中、`initServer()` 之前触发，而 `Commands`（命令注册点）属于世界数据包资源，在 `WorldLoader.load` → `ReloadableServerResources` → `new Commands(...)` 阶段就已建好，早于该事件。结果是内嵌分支里的 `CommandRegistrationCallback` 注册得太晚，单人模式（未安装独立服务端 mod）下 `/machineadmin` 与 `/cgtest` 静默丢失，必须执行一次 `/reload` 重建 `Commands` 才会出现。
+
+修复方式：让内嵌分支与独立服务端 mod 一样，在模组初始化阶段直接调用 `MachineMod.init()`（对应 commit 的 `src/main/java/com/remrin/CommandGUI.java`）。专项冒烟测试见 `testing/smoke-embedded-server.mjs`。
+
+### 2. 客户端与服务端统一为单个 jar
+
+客户端 jar 原本就已经把 `server/src/main/java` 编进 `main` 源集、并以 `environment: "*"` 发布，所以它本来就能在专用服务端独立运行；本次把这一点收口为正式形态：
+
+- `settings.gradle` 不再 `include 'server'`，`server/` 退化为普通源码目录（仍由根项目 `build.gradle` 的 `srcDir` 编入同一个 jar）。
+- 删除 `server/build.gradle` 与旧独立 mod 的 `server/src/main/resources/fabric.mod.json`，不再产出 `server-<version>.jar`。
+- `CommandGUI` 保留 `command-gui-server` 检测作为迁移守卫：同时安装新旧两个 jar 时跳过内嵌初始化并输出日志告警，避免重复注册与版本错配。
+- CI 产物只保留 `build/libs/*.jar`；README 的安装、构建产物、架构与仓库状态章节同步更新。
+- 为兼容既有服务端，配置目录 `config/command-gui-server/`、payload 频道 `command-gui-server:*` 与日志器名均保持不变。
+
+### 验证补充
+
+- `./gradlew :build -x bumpVersion --offline` 通过，`gradlew projects` 只剩根项目，`build/libs/` 只产出一个 jar。
+- `node testing/smoke-embedded-server.mjs --offline`：只加载 `command-gui` 的专用服务端在首次加载时 `/machineadmin` 与 `/cgtest` 均已注册（回退该修复后同一用例会失败）。
+- 该分支的 `docs/ui/` 截图与本节其余内容不受上述改动影响。

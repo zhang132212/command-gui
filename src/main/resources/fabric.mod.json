@@ -3,7 +3,7 @@
   "id": "command-gui",
   "version": "${version}",
   "name": "Command-GUI",
-  "description": "A simple GUI mod for quickly executing commands. Supports custom commands with placeholders (player selection, text input, number input, coordinate input), preset command groups for Vanilla and Carpet Mod, and categorized command management.",
+  "description": "A single jar for client and server. Client side: command panel, custom and preset commands, fake player controls, machine switch GUI. Server side: the same jar also runs the machine, mode, detection, timeline and permission system on dedicated servers and on the integrated server of a singleplayer or LAN world.",
   "authors": [
     "Remrin"
   ],

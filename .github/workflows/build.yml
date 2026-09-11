@@ -43,7 +43,6 @@ jobs:
           name: ${{ github.event.repository.name }}-${{ github.sha }}
           path: |
             build/libs/*.jar
-            server/build/libs/*.jar
             !**/*-sources.jar
             !**/*-dev.jar
           if-no-files-found: error
@@ -55,6 +54,5 @@ jobs:
           generate_release_notes: true
           files: |
             build/libs/*.jar
-            server/build/libs/*.jar
             !**/*-sources.jar
             !**/*-dev.jar

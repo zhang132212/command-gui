@@ -12,11 +12,12 @@
 | Java | 25+ |
 | 模组版本 | `0.2.0-beta.95-perf3`（构建成功后自动递增 beta 序号） |
 | 许可证 | GPL-3.0 |
+| 产物 | `command-gui-<version>.jar`，客户端与服务端通用 |
 
-项目包含两个 Fabric mod：
+项目现在是**单个 jar**（客户端与服务端合一），由运行环境决定执行哪一侧：
 
-- `command-gui`：客户端命令面板、自定义指令、预设指令、假人管理和机器开关 GUI。
-- `command-gui-server`：服务端机器、模式、检测、时间线调度和权限系统。
+- 客户端入口（`CommandGUIClient`）：命令面板、自定义指令、预设指令、假人管理和机器开关 GUI。
+- 服务端分支（`CommandGUI` → `MachineMod`）：机器、模式、检测、时间线调度和权限系统。专用服务端只跑这一侧；客户端的单人/局域网集成服务端也会跑它，因此单人模式不再需要额外安装服务端 mod。
 
 ## 相对旧版的主要变化
 
@@ -52,7 +53,7 @@
 
 ### 4. 原有机器开关系统继续扩展并与 GUI 对齐
 
-当前版保留旧版的双 mod 架构，并完善了客户端与服务端的数据同步和编辑流程：
+当前版把客户端与服务端合并进同一个 jar，并完善了两侧的数据同步和编辑流程：
 
 - 机器支持开机/关机时间线、多个假人、循环次数和每步延迟。
 - 模式支持单选/多选、独立开关检测、冷却间隔和模式编排。
@@ -89,10 +90,13 @@
 ## 安装
 
 1. 安装 Minecraft 26.2、Fabric Loader 0.19.3+、Fabric API 和 Java 25+。
-2. 将客户端产物放入客户端实例的 `mods/`：`command-gui-<version>.jar`。
-3. 将服务端产物放入服务端实例的 `mods/`：`command-gui-server-<version>.jar`。
-4. 需要假人功能时安装与 Minecraft 26.2 匹配的 Carpet 版本。
-5. 启动服务端和客户端；首次启动会创建相关配置文件。
+2. 客户端实例和服务端实例都放入同一个产物：`command-gui-<version>.jar`。
+   - 客户端：命令面板、假人管理与机器开关 GUI；单人/局域网主机的服务端逻辑由同一个 jar 内置执行。
+   - 专用服务端：只执行服务端分支（机器、模式、检测、时间线、权限）。
+3. 需要假人功能时安装与 Minecraft 26.2 匹配的 Carpet 版本。
+4. 启动服务端和客户端；首次启动会创建相关配置文件。
+
+> **升级提示**：旧版需要额外安装独立服务端 mod `command-gui-server`。升级时请从 `mods/` 移除该 jar——两个 jar 都带同一套 `com.remrin.server.*` 类，同时安装会出现重复类与版本错配（模组会在日志里输出告警）。
 
 ## 从源码构建
 
@@ -112,8 +116,9 @@ Linux/macOS：
 
 ```text
 build/libs/command-gui-<version>.jar
-server/build/libs/server-<version>.jar
 ```
+
+单个 jar 同时用于客户端与服务端。`server/` 只是服务端源码目录（由根项目 `build.gradle` 的 `srcDir` 编进同一个 jar），不再是独立 Gradle 子项目，也不再产出单独的 server jar。
 
 构建任务会自动递增 `gradle.properties` 中的 beta 序号，请提交前确认版本号是否符合预期。
 
@@ -133,7 +138,7 @@ GUI 参数调整后重新打开 GUI 即可验证；语言资源包调整后可�
 ## 架构
 
 ```text
-客户端 command-gui                         服务端 command-gui-server
+客户端入口（客户端实例）                     服务端分支（专用服务端 / 集成服务端）
 CommandGUIScreen                            MachineMod
 ├─ CustomCommandTab                         ├─ MachineConfig
 ├─ FakePlayerTab                 网络同步   ├─ MachineManager
@@ -148,8 +153,7 @@ CommandGUIScreen                            MachineMod
 ## 仓库状态
 
 本仓库（`zhang132212/command-gui`）为 [xgenya/command-gui](https://github.com/xgenya/command-gui) 的 fork，当前仅发布 mod 源码本体：
-- 客户端 mod `command-gui`（src/）
-- 服务端 mod `command-gui-server`（server/）
+- 单个 mod `command-gui`：客户端与服务端合一（公共入口 `src/main/java/`、客户端代码 `src/client/`、服务端代码 `server/src/main/java/`）
 - 构建配置（Gradle / GitHub Actions）
 
 `devtools/` 网页调优框架仍在本地开发，设计完善后再另行发布（本仓库 `.gitignore` 已排除）。
