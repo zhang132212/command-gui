@@ -25,6 +25,11 @@ loom {
 		client {
 			vmArg "-Ddevauth.enabled=true"
 		}
+
+		server {
+			// 无人值守运行（冒烟测试 / CI）：不弹出服务端控制台窗口
+			programArgs "--nogui"
+		}
 	}
 }
 
