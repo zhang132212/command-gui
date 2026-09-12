@@ -7,6 +7,7 @@ import com.remrin.client.machine.MachineNetworkManager;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -41,6 +42,16 @@ public class MachineSwitchTab extends AbstractCommandTab {
    private MachineSwitchTab.MachineFilter filter = MachineSwitchTab.MachineFilter.ALL;
    private static final long TICK_MS = 50L;
    private final Map<String, Long> switchCooldownUntil = new HashMap<>();
+   // 保存选择时的检测状态，确认时不得按已经变化的状态反向操作。
+   private final Map<String, String> selectedMachines = new LinkedHashMap<>();
+   private static final int CONFIRM_BAR_HEIGHT = 28;
+
+   void restoreSelection(MachineSwitchTab previous) {
+      if (previous != null) {
+         this.selectedMachines.putAll(previous.selectedMachines);
+         this.switchCooldownUntil.putAll(previous.switchCooldownUntil);
+      }
+   }
 
    @Override
    protected int sidebarOffset() {
@@ -323,7 +334,7 @@ public class MachineSwitchTab extends AbstractCommandTab {
       if (this.area != null) {
          int left = this.getCommandAreaLeft();
          int right = this.area.right();
-         int visibleRows = Math.max(1, this.area.height() / this.tunedItemHeight());
+         int visibleRows = this.getVisibleRowCount();
          int start = Math.min(this.scrollOffset, Math.max(0, this.filteredMachines.size() - visibleRows));
          this.scrollOffset = start;
          int rowStep = this.tunedItemHeight();
@@ -337,6 +348,23 @@ public class MachineSwitchTab extends AbstractCommandTab {
             int y = this.area.top() + i * rowStep;
             this.buildRow(index, left, right, y, rowStep);
          }
+         int clearWidth = 52;
+         Button confirm = GuiButton.themed(Component.literal("确认执行（" + this.selectedMachines.size() + "）"),
+            btn -> this.confirmSelection()).bounds(left, this.area.bottom() - 22, right - left - clearWidth - 6, 22).build();
+         confirm.active = !this.selectedMachines.isEmpty();
+         StringBuilder summary = new StringBuilder("左键选择多台机器，再确认执行；再次点击取消选择。\n包含其他分类或搜索条件下的已选机器：");
+         for (MachineModels.MachineData machine : MachineNetworkManager.getMachines()) {
+            String state = this.selectedMachines.get(machine.id);
+            if (state != null) summary.append("\n").append(machine.name).append("on".equals(state) ? " → 关闭" : " → 开启");
+         }
+         confirm.setTooltip(Tooltip.create(Component.literal(summary.toString())));
+         this.extraButtons.add(confirm);
+         Button clear = GuiButton.themed(Component.literal("清空"), btn -> {
+            this.selectedMachines.clear();
+            this.refreshSelectionButtons();
+         }).bounds(right - clearWidth, this.area.bottom() - 22, clearWidth, 22).build();
+         clear.active = confirm.active;
+         this.extraButtons.add(clear);
       }
    }
 
@@ -375,6 +403,11 @@ public class MachineSwitchTab extends AbstractCommandTab {
          color = -1;
       }
 
+      boolean selected = this.selectedMachines.containsKey(machine.id);
+      if (selected) {
+         suffix = "on".equals(this.selectedMachines.get(machine.id)) ? "（待关闭）" : "（待开启）";
+         color = GuiTheme.accent();
+      }
       int textMaxW = switchWidth - 16;
       int nameMaxW = Math.max(20, textMaxW - font.width(suffix));
       String name = machine.name;
@@ -387,7 +420,7 @@ public class MachineSwitchTab extends AbstractCommandTab {
       boolean blocked = locked || editedByOther;
       String switchTooltip = this.buildSwitchTooltip(machine).getString()
          + "\n"
-         + Component.translatable("screen.command-gui.machine.left_toggle_right_edit").getString();
+         + "左键选择/取消，点击底部确认后执行；右键编辑";
       if (editedByOther) {
          switchTooltip = switchTooltip + "\n§e" + machine.editingBy + " 正在编辑，无法开关/切换模式/删除";
       } else if (transition) {
@@ -397,10 +430,11 @@ public class MachineSwitchTab extends AbstractCommandTab {
          this.onSwitchClick(machine);
       }, () -> this.editMachine(machine));
       switchBtn.setTooltip(Tooltip.create(Component.literal(switchTooltip)));
-      // 始终可点击：被挡住的状态由 onSwitchClick 给出反馈，避免出现“点了完全没反应”。
+      // 被挡住时提示原因；已经选中的条目始终允许取消选择。
       switchBtn.active = true;
       switchBtn.setVisualDisabled(blocked);
       switchBtn.setTextColor(color);
+      switchBtn.selected = selected;
       this.commandButtons.add(switchBtn);
       List<Button> cluster = new ArrayList<>();
       MachineSwitchTab.ModesRowButton modesBtn = new MachineSwitchTab.ModesRowButton(
@@ -488,11 +522,16 @@ public class MachineSwitchTab extends AbstractCommandTab {
    @Override
    public int getMaxScroll() {
       if (this.area != null && !this.filteredMachines.isEmpty()) {
-         int visibleRows = Math.max(1, this.area.height() / this.tunedItemHeight());
+         int visibleRows = this.getVisibleRowCount();
          return Math.max(0, this.filteredMachines.size() - visibleRows);
       } else {
          return 0;
       }
+   }
+
+   @Override
+   public int getVisibleRowCount() {
+      return this.area == null ? 1 : Math.max(0, (this.area.height() - CONFIRM_BAR_HEIGHT) / this.tunedItemHeight());
    }
 
    @Override
@@ -689,28 +728,57 @@ public class MachineSwitchTab extends AbstractCommandTab {
       }
    }
 
-   private void toggleMachine(MachineModels.MachineData machine) {
-      MachineNetworkManager.sendToggle(machine.id);
-   }
-
-   /**
-    * 开关按钮点击。
-    *
-    * <p>旧实现在 blocked（未保存草稿/未配置检测/正在开关机/异常/他人编辑/冷却）时直接静默 return，
-    * 玩家点了既没有消息也没有动作，表现为“按键点了没反应”。现在只有服务端无法感知的本地状态
-    * （未保存草稿）才在本地拦下并提示；其余状态一律发给服务端裁决——服务端对权限、开关冷却、
-    * 运行中、异常状态、未配置检测都会回一条明确提示。</p>
-    */
+   /** 左键只修改选择，不发送开关请求。 */
    private void onSwitchClick(MachineModels.MachineData machine) {
-      if (this.hasLocalDraft(machine)) {
-         MachineNetworkManager.showLocalMessage("机器「" + machine.name + "」有未保存的编辑草稿，请先保存或放弃");
+      if (this.selectedMachines.remove(machine.id) != null) {
+         this.refreshSelectionButtons();
          return;
       }
-      if (inCooldown(this.switchCooldownUntil.get(machine.id))) {
-         return; // 防连点窗口内忽略：上一次点击已经给出反馈
+      String reason = this.selectionBlockReason(machine);
+      if (reason != null) {
+         MachineNetworkManager.showLocalMessage("机器「" + machine.name + "」" + reason);
+         return;
       }
-      this.switchCooldownUntil.put(machine.id, System.currentTimeMillis() + SWITCH_DEBOUNCE_MS);
-      MachineNetworkManager.sendToggle(machine.id);
+      this.selectedMachines.put(machine.id, machine.detected);
+      this.refreshSelectionButtons();
+   }
+
+   private String selectionBlockReason(MachineModels.MachineData machine) {
+      if (this.hasLocalDraft(machine)) return "有未保存的编辑草稿，请先保存或放弃";
+      if (machine.running) return "正在开机/关机中，请稍候";
+      if (this.isLockedByOther(machine)) return "正在被其他玩家编辑";
+      if (machine.detection == null || !machine.detection.enabled) return "未配置开关机检测";
+      if (!"on".equals(machine.detected) && !"off".equals(machine.detected)) return "检测状态异常或未知，请刷新检测后重试";
+      if (inCooldown(this.switchCooldownUntil.get(machine.id))) return "操作已提交，请稍候";
+      return null;
+   }
+
+   private void refreshSelectionButtons() {
+      this.rebuildButtons();
+      this.reRegisterAll();
+   }
+
+   private void confirmSelection() {
+      if (this.selectedMachines.isEmpty()) return;
+      List<MachineModels.MachineData> batch = new ArrayList<>();
+      for (Map.Entry<String, String> entry : this.selectedMachines.entrySet()) {
+         MachineModels.MachineData machine = MachineNetworkManager.getMachines().stream()
+            .filter(candidate -> Objects.equals(candidate.id, entry.getKey())).findFirst().orElse(null);
+         if (machine == null || !Objects.equals(machine.detected, entry.getValue()) || this.selectionBlockReason(machine) != null) {
+            // 整批不发送，避免部分提交后用户按原来的清单再次确认。
+            this.selectedMachines.clear();
+            this.refreshSelectionButtons();
+            MachineNetworkManager.showLocalMessage("所选机器状态已变化或无法操作，本次未执行，请重新选择后确认");
+            return;
+         }
+         batch.add(machine);
+      }
+      this.selectedMachines.clear();
+      this.refreshSelectionButtons();
+      for (MachineModels.MachineData machine : batch) {
+         this.switchCooldownUntil.put(machine.id, System.currentTimeMillis() + SWITCH_DEBOUNCE_MS);
+         MachineNetworkManager.sendToggle(machine.id);
+      }
    }
 
    private void editMachine(MachineModels.MachineData machine) {
@@ -735,6 +803,7 @@ public class MachineSwitchTab extends AbstractCommandTab {
       private final Runnable onRightClick;
       private boolean visualDisabled;
       private int textColor;
+      private boolean selected;
 
       MachineSwitchButton(int x, int y, int width, int height, Component message, OnPress onPress, Runnable onRightClick) {
          super(x, y, width, height, message, onPress, DEFAULT_NARRATION);
@@ -761,7 +830,7 @@ public class MachineSwitchTab extends AbstractCommandTab {
       }
 
       protected void extractContents(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY, float partialTick) {
-         GuiTheme.button(guiGraphics, this, false, !this.visualDisabled);
+         GuiTheme.button(guiGraphics, this, this.selected, !this.visualDisabled);
          guiGraphics.fill(this.getX(), this.getY() + 3, this.getX() + 2, this.getY() + this.getHeight() - 3, this.textColor);
          GuiTheme.label(guiGraphics, this, this.getMessage(), this.textColor, false);
       }

@@ -161,9 +161,11 @@ public class CommandGUIScreen extends Screen {
       this.customTab.setOnCategoryChanged(() -> this.removeTabButtons(this.customTab), () -> this.addTabButtons(this.customTab));
       this.fakePlayerTab = new FakePlayerTab(this);
       this.fakePlayerTab.setOnRebuild(() -> this.removeTabButtons(this.fakePlayerTab), () -> this.addTabButtons(this.fakePlayerTab));
+      MachineSwitchTab previousMachineTab = this.machineTab;
       this.machineTab = null;
       if (MachineNetworkManager.isServerSupported()) {
          this.machineTab = new MachineSwitchTab(this);
+         this.machineTab.restoreSelection(previousMachineTab);
          this.machineTab.setOnCategoryChanged(() -> this.removeTabButtons(this.machineTab), () -> this.addTabButtons(this.machineTab));
       }
 
@@ -610,8 +612,9 @@ public class CommandGUIScreen extends Screen {
       if (this.tabArea != null) {
          int headingY = this.tabArea.top() - 16;
          guiGraphics.text(this.font, currentTab.getTabTitle(), this.padding(), headingY, GuiTheme.text());
-         Component hint = Component.translatable(currentTab == this.fakePlayerTab
-            ? "screen.command-gui.ui.player_hint" : "screen.command-gui.ui.command_hint");
+         Component hint = currentTab == this.machineTab ? Component.literal("左键多选 · 确认执行 · 右键编辑")
+            : Component.translatable(currentTab == this.fakePlayerTab
+               ? "screen.command-gui.ui.player_hint" : "screen.command-gui.ui.command_hint");
          if (this.width > 400) {
             guiGraphics.text(this.font, hint, this.width - this.padding() - this.font.width(hint), headingY, GuiTheme.muted());
          }
