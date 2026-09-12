@@ -19,7 +19,9 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents.Disconnect;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents.Join;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
+import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import com.remrin.server.net.MachinePayloads;
 
@@ -413,10 +415,21 @@ public final class MachineNetworkManager {
       }
 
       if (!ClientPlayNetworking.canSend(MachinePayloads.ActionPayload.TYPE)) {
+         MachineDebug.log("[Net] drop action: server does not accept " + MachinePayloads.ActionPayload.TYPE.id());
+         showLocalMessage("无法发送操作：当前服务器未启用 Command-GUI 服务端支持");
          return;
       }
 
+      MachineDebug.log("[Net] send action (" + json.length() + " chars)");
       ClientPlayNetworking.send(new MachinePayloads.ActionPayload(json));
+   }
+
+   /** 客户端本地提示（不进服务端）：用于把“点了没反应”变成明确反馈。 */
+   public static void showLocalMessage(String message) {
+      Minecraft client = Minecraft.getInstance();
+      if (client != null && client.gui != null) {
+         client.gui.hud.getChat().addClientSystemMessage(Component.literal(message).withStyle(ChatFormatting.YELLOW));
+      }
    }
 
    public static boolean isServerSupported() {

@@ -28,6 +28,8 @@ public class MachineSwitchTab extends AbstractCommandTab {
    private static final int MODES_BTN_W = 48;
    private static final int REFRESH_BTN_W = 28;
    private static final int EDIT_BTN_W = 28;
+   /** 开关按钮防连点窗口：只用于避免重复发包，不再像旧实现那样按 switchInterval 长时间静默吞掉点击。 */
+   private static final long SWITCH_DEBOUNCE_MS = 400L;
    private static final int DELETE_BTN_W = 28;
    private static final int ACTION_CLUSTER_WIDTH = 77;
    private static final int MAX_CLUSTER_WIDTH = 135;
@@ -381,9 +383,8 @@ public class MachineSwitchTab extends AbstractCommandTab {
       }
 
       MutableComponent label = Component.literal(name + suffix).withColor(color);
-      boolean switchCooling = inCooldown(this.switchCooldownUntil.get(machine.id));
       boolean editedByOther = this.isLockedByOther(machine);
-      boolean blocked = locked || switchCooling || editedByOther;
+      boolean blocked = locked || editedByOther;
       String switchTooltip = this.buildSwitchTooltip(machine).getString()
          + "\n"
          + Component.translatable("screen.command-gui.machine.left_toggle_right_edit").getString();
@@ -393,12 +394,11 @@ public class MachineSwitchTab extends AbstractCommandTab {
          switchTooltip = switchTooltip + "\n§e" + ("off".equals(machine.transition) ? "正在关机中，无法编辑/切换模式" : "正在开机中，无法编辑/切换模式");
       }
       MachineSwitchTab.MachineSwitchButton switchBtn = new MachineSwitchTab.MachineSwitchButton(left, y, switchWidth, h, label, b -> {
-         if (!blocked) {
-            this.toggleMachine(machine);
-         }
+         this.onSwitchClick(machine);
       }, () -> this.editMachine(machine));
       switchBtn.setTooltip(Tooltip.create(Component.literal(switchTooltip)));
-      switchBtn.active = !transition;
+      // 始终可点击：被挡住的状态由 onSwitchClick 给出反馈，避免出现“点了完全没反应”。
+      switchBtn.active = true;
       switchBtn.setVisualDisabled(blocked);
       switchBtn.setTextColor(color);
       this.commandButtons.add(switchBtn);
@@ -690,14 +690,39 @@ public class MachineSwitchTab extends AbstractCommandTab {
    }
 
    private void toggleMachine(MachineModels.MachineData machine) {
-      this.switchCooldownUntil.put(machine.id, System.currentTimeMillis() + (long)machine.switchInterval * 50L);
+      MachineNetworkManager.sendToggle(machine.id);
+   }
+
+   /**
+    * 开关按钮点击。
+    *
+    * <p>旧实现在 blocked（未保存草稿/未配置检测/正在开关机/异常/他人编辑/冷却）时直接静默 return，
+    * 玩家点了既没有消息也没有动作，表现为“按键点了没反应”。现在只有服务端无法感知的本地状态
+    * （未保存草稿）才在本地拦下并提示；其余状态一律发给服务端裁决——服务端对权限、开关冷却、
+    * 运行中、异常状态、未配置检测都会回一条明确提示。</p>
+    */
+   private void onSwitchClick(MachineModels.MachineData machine) {
+      if (this.hasLocalDraft(machine)) {
+         MachineNetworkManager.showLocalMessage("机器「" + machine.name + "」有未保存的编辑草稿，请先保存或放弃");
+         return;
+      }
+      if (inCooldown(this.switchCooldownUntil.get(machine.id))) {
+         return; // 防连点窗口内忽略：上一次点击已经给出反馈
+      }
+      this.switchCooldownUntil.put(machine.id, System.currentTimeMillis() + SWITCH_DEBOUNCE_MS);
       MachineNetworkManager.sendToggle(machine.id);
    }
 
    private void editMachine(MachineModels.MachineData machine) {
-      if (!machine.running && !this.isLockedByOther(machine)) {
-         Minecraft.getInstance().gui.setScreen(new MachineEditorScreen((CommandGUIScreen)this.parent, machine));
+      if (machine.running) {
+         MachineNetworkManager.showLocalMessage("机器「" + machine.name + "」正在开机/关机中，暂时无法编辑");
+         return;
       }
+      if (this.isLockedByOther(machine)) {
+         MachineNetworkManager.showLocalMessage(machine.editingBy + " 正在编辑机器「" + machine.name + "」，无法同时编辑");
+         return;
+      }
+      Minecraft.getInstance().gui.setScreen(new MachineEditorScreen((CommandGUIScreen)this.parent, machine));
    }
 
    public static enum MachineFilter {
