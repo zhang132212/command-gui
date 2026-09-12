@@ -9,7 +9,11 @@ import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.Commands.CommandSelection;
+import net.minecraft.commands.SharedSuggestionProvider;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerPlayer;
+import java.util.ArrayList;
+import java.util.List;
 
 public final class MachineAdminCommand {
    private MachineAdminCommand() {
@@ -19,10 +23,41 @@ public final class MachineAdminCommand {
       dispatcher.register(
          (LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)Commands.literal("machineadmin")
                      .requires(source -> source.getPlayer() == null || Commands.LEVEL_MODERATORS.check(source.getPlayer().permissions())))
-                  .then(Commands.literal("add").then(Commands.argument("player", StringArgumentType.word()).executes(MachineAdminCommand::add))))
-               .then(Commands.literal("remove").then(Commands.argument("player", StringArgumentType.word()).executes(MachineAdminCommand::remove))))
+                  .then(Commands.literal("add").then(Commands.argument("player", StringArgumentType.word())
+                        .suggests((context, builder) -> SharedSuggestionProvider.suggest(
+                              whitelistNames(context.getSource()), builder))
+                        .executes(MachineAdminCommand::add))))
+               .then(Commands.literal("remove").then(Commands.argument("player", StringArgumentType.word())
+                     .suggests((context, builder) -> SharedSuggestionProvider.suggest(
+                           MachineConfig.getEditorWhitelist(), builder))
+                     .executes(MachineAdminCommand::remove))))
             .then(Commands.literal("list").executes(MachineAdminCommand::list))
       );
+   }
+
+   /** Tab 补全：服务端 whitelist.json 里的名字，外加当前在线玩家（含假人）。 */
+   private static List<String> whitelistNames(CommandSourceStack source) {
+      List<String> names = new ArrayList<>();
+      try {
+         for (String name : source.getServer().getPlayerList().getWhiteListNames()) {
+            if (name != null && !name.isBlank()) {
+               names.add(name);
+            }
+         }
+      } catch (Exception ignored) {
+         // 拿不到白名单就算了，退化成只补在线玩家
+      }
+      try {
+         for (ServerPlayer player : source.getServer().getPlayerList().getPlayers()) {
+            String name = player.getGameProfile().name();
+            if (!names.contains(name)) {
+               names.add(name);
+            }
+         }
+      } catch (Exception ignored) {
+         // 忽略
+      }
+      return names;
    }
 
    private static int add(CommandContext<CommandSourceStack> context) {
