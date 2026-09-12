@@ -115,12 +115,17 @@ tasks.register("bumpVersion") {
 
         def propsFile = file("gradle.properties")
         def text = propsFile.getText("UTF-8")
-        def matcher = text =~ /mod_version=0\.2\.0-beta\.(\d+)/
+        // 兼容 `<x.y.z>-beta<N>` 与 `<x.y.z>-beta.<N>` 两种写法，并保留原有的分隔符风格；
+        // 版本号命名方式变化时只需保持 "beta + 可选点 + 数字" 的后缀即可。
+        def matcher = text =~ /mod_version=(\d+\.\d+\.\d+-beta)(\.?)(\d+)/
         if (matcher.find()) {
-            def nextVersion = Integer.parseInt(matcher.group(1)) + 1
-            def updated = text.replaceFirst(/mod_version=0\.2\.0-beta\.(\d+)/, "mod_version=0.2.0-beta.${nextVersion}")
+            def nextVersion = matcher.group(3).toInteger() + 1
+            def nextFull = matcher.group(1) + matcher.group(2) + nextVersion
+            def updated = text.replaceFirst(/mod_version=\d+\.\d+\.\d+-beta(\.?)\d+/, "mod_version=${nextFull}")
             propsFile.setText(updated, "UTF-8")
-            println "Version auto-bumped to 0.2.0-beta.${nextVersion} for the next build"
+            println "Version auto-bumped to ${nextFull} for the next build"
+        } else {
+            println "mod_version does not end with -beta[.]N; skip version bump"
         }
     }
 }
