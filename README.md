@@ -40,6 +40,7 @@
 - 主界面、命令网格、机器编辑器、模式编辑器、时间线、多模式配置、检测页面和假人页面适配窗口/全屏切换。
 - 滚动列表支持滚轮和拖拽；内容不足时仍保持一致的滚动条表现。
 - 命令建议 mixin 与占位符建议 mixin 分离，避免影响聊天栏和命令方块的原版补全行为。
+- 界面外观改为「液态玻璃」：磨砂背景（沿用原版菜单模糊）+ 半透明圆角面板 + 1px 边缘高光 + 顶部光泽；按钮为胶囊形，悬停时有一道跟随光标的柔光；顶部标签改为玻璃轨道 + 浮起胶囊的分段控件。颜色与圆角都可在 `gui-tuning.json` 调整，详见 [`docs/liquid-glass.md`](docs/liquid-glass.md)。
 
 ### 3. 假人管理状态同步更完整
 
@@ -133,8 +134,8 @@ build/libs/command-gui-<version>.jar
 | 服务端机器 | `config/command-gui-server/machines.json` |
 | 中英文文案 | `src/main/resources/assets/command-gui/lang/` |
 | 预设指令 | `src/main/resources/assets/command-gui/presets/` |
-| 开发文档 | `docs/`（Carpet 规则、界面整理、标签点击修复等） |
-| 测试脚手架 | `testing/`（后端 QA：`run-backend-tests.ps1`、`smoke-embedded-server.mjs`）、`tests/carpet-rules/`（规则 QA） |
+| 开发文档 | `docs/`（Carpet 规则、液态玻璃外观、界面整理、标签点击修复等） |
+| 测试脚手架 | `testing/`（后端 QA：`run-backend-tests.ps1`、`smoke-embedded-server.mjs`）、`tests/carpet-rules/`（规则 QA）、`tests/gui-theme/`（界面截图 QA） |
 | 网页调优工具 | `devtools/`（实验性，不参与构建） |
 
 GUI 参数调整后重新打开 GUI 即可验证；语言资源包调整后可使用 `F3+T` 重载资源。Java 逻辑或资源正式发布前仍需重新构建。

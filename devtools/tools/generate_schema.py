@@ -11,6 +11,7 @@ SCHEMA_PATH = ROOT / "devtools" / "tuning-schema.json"
 TUNING_PATH = ROOT / "devtools" / "gui-tuning.json"
 
 GROUPS = {
+    "GuiTheme": "液态玻璃主题",
     "CommandGUIScreen": "主窗口与底栏",
     "AbstractCommandTab": "通用命令网格",
     "CustomCommandTab": "快捷指令页",
@@ -21,6 +22,28 @@ GROUPS = {
 }
 
 LABELS = {
+    "GuiTheme.BACKGROUND": "回退底色",
+    "GuiTheme.SCRIM_TOP": "背景压暗(上)",
+    "GuiTheme.SCRIM_BOTTOM": "背景压暗(下)",
+    "GuiTheme.PANEL": "玻璃底板",
+    "GuiTheme.PANEL_STRONG": "玻璃底板(实)",
+    "GuiTheme.SURFACE": "控件底板",
+    "GuiTheme.HOVER": "控件悬停",
+    "GuiTheme.SELECTED": "选中态",
+    "GuiTheme.BORDER": "玻璃棱边",
+    "GuiTheme.BORDER_DARK": "玻璃底边暗线",
+    "GuiTheme.SHEEN": "顶部光泽",
+    "GuiTheme.SHADOW": "投影",
+    "GuiTheme.ACCENT": "强调色",
+    "GuiTheme.ACCENT_SOFT": "强调色柔光",
+    "GuiTheme.TEXT": "正文色",
+    "GuiTheme.MUTED": "次要文字",
+    "GuiTheme.DISABLED": "禁用色",
+    "GuiTheme.DANGER": "危险色",
+    "GuiTheme.WARNING": "警告色",
+    "GuiTheme.RADIUS": "控件圆角",
+    "GuiTheme.PANEL_RADIUS": "面板圆角",
+    "GuiTheme.BLUR_ENABLED": "强制磨砂(0/1)",
     "CommandGUIScreen.FOOTER_HEIGHT": "底栏高度",
     "CommandGUIScreen.FOOTER_CONTROL_TOP_OFFSET": "底栏按钮垂直偏移",
     "CommandGUIScreen.PADDING": "页面左右留白",
@@ -102,6 +125,13 @@ DECL_RE = re.compile(r'^(?:\s*)(?:private|protected|public)\s+static\s+final\s+(
 CALL_RE = re.compile(r'GuiTuning\.get(?:Int|Float|Double|Color)\(\s*"([^"]+)"\s*,\s*([^)]+)\)')
 
 
+def is_color_key(key):
+    if key.endswith("_COLOR") or key.endswith("_OUTLINE"):
+        return True
+    # GuiTheme 的调色板全部是颜色，只有尺寸/开关例外
+    return key.startswith("GuiTheme.") and not key.endswith(("RADIUS", "PANEL_RADIUS", "BLUR_ENABLED"))
+
+
 def resolve_expr(expr, consts):
     text = expr.strip()
     if re.fullmatch(r'-?\d+', text):
@@ -151,7 +181,7 @@ def main():
             item = {
                 "key": key,
                 "label": LABELS.get(key, key.rsplit(".", 1)[-1]),
-                "type": "color" if key.endswith("_COLOR") or key.endswith("_OUTLINE") else ("int" if isinstance(value, int) else "float"),
+                "type": "color" if is_color_key(key) else ("int" if isinstance(value, int) else "float"),
                 "default": value,
                 "min": 1 if isinstance(value, int) else 0.1,
                 "max": 4096 if isinstance(value, int) else 1000.0,
@@ -161,7 +191,7 @@ def main():
             if item["type"] == "color":
                 item["min"], item["max"], item["step"] = None, None, None
             schema["items"].append(item)
-    schema["groups"] = ["主窗口与底栏", "通用命令网格", "快捷指令页", "机器开关页", "假人页", "设置页", "滚动条样式"]
+    schema["groups"] = ["液态玻璃主题", "主窗口与底栏", "通用命令网格", "快捷指令页", "机器开关页", "假人页", "设置页", "滚动条样式"]
     SCHEMA_PATH.write_text(json.dumps(schema, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     if not TUNING_PATH.exists():

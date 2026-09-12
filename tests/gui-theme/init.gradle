@@ -1,0 +1,25 @@
+// 视觉验收：把 QA 客户端注入 runClient 逐页截图，产物不进发布 jar。
+// 用法：./gradlew runClient -I tests/gui-theme/init.gradle
+gradle.projectsEvaluated {
+    def p = gradle.rootProject
+    def qa = p.sourceSets.create('themeQa') {
+        java.srcDir 'tests/gui-theme/src'
+        resources.srcDir 'tests/gui-theme/resources'
+        compileClasspath += p.sourceSets.client.compileClasspath + p.sourceSets.client.output + p.sourceSets.main.output
+    }
+    p.tasks.named('compileThemeQaJava') {
+        dependsOn p.tasks.named('clientClasses')
+        options.encoding = 'UTF-8'
+    }
+    def qaJar = p.tasks.register('themeQaJar', Jar) {
+        from qa.output
+        archiveFileName = 'theme-qa.jar'
+        destinationDirectory = p.layout.projectDirectory.dir('build/gui-theme-qa/mods')
+    }
+    p.loom.runs.client {
+        runDir 'build/gui-theme-qa'
+        vmArg '-Ddevauth.enabled=false'
+        programArgs '--username', 'UIReview', '--width', '1440', '--height', '810'
+    }
+    p.tasks.named('runClient') { dependsOn qaJar }
+}

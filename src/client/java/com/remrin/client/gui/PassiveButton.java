@@ -15,7 +15,7 @@ public class PassiveButton extends Button {
    }
 
    protected void extractContents(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY, float partialTick) {
-      GuiTheme.button(guiGraphics, this, false, this.active);
+      GuiTheme.button(guiGraphics, this, false, this.active, mouseX, mouseY);
       GuiTheme.label(guiGraphics, this, this.getMessage(), this.active ? GuiTheme.text() : GuiTheme.disabled(), true);
    }
 }

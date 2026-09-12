@@ -3,10 +3,10 @@ package com.remrin.client.gui;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 
 public final class ScrollbarHandle {
-   private static final int TRACK_COLOR = 0xFF283340;
-   private static final int THUMB_COLOR = 0xFF637B90;
-   private static final int THUMB_HOVER_COLOR = 0xFF70DFBF;
-   private static final int THUMB_OUTLINE = 0xFF223040;
+   private static final int TRACK_COLOR = 0x24FFFFFF;
+   private static final int THUMB_COLOR = 0x5CFFFFFF;
+   private static final int THUMB_HOVER_COLOR = 0xCC8DE0CC;
+   private static final int THUMB_OUTLINE = 0x33000000;
    private static final int MIN_THUMB_HEIGHT = 10;
    private final int x;
    private final int y;
@@ -37,7 +37,16 @@ public final class ScrollbarHandle {
    private void drawThumb(GuiGraphicsExtractor guiGraphics, int top, int bottom, boolean hovered) {
       int bodyColor = hovered ? GuiTuning.getColor("ScrollbarHandle.THUMB_HOVER_COLOR", THUMB_HOVER_COLOR) : GuiTuning.getColor("ScrollbarHandle.THUMB_COLOR", THUMB_COLOR);
       int inset = Math.max(0, (this.width - 4) / 2);
-      GuiTheme.rounded(guiGraphics, this.x + inset, top, this.width - inset * 2, bottom - top, 2, bodyColor);
+      int thumbWidth = Math.max(1, this.width - inset * 2);
+      int thumbHeight = Math.max(1, bottom - top);
+      int radius = GuiTheme.clampRadius(Math.min(3, thumbWidth), thumbWidth, thumbHeight);
+      GuiTheme.rounded(guiGraphics, this.x + inset, top, thumbWidth, thumbHeight, radius,
+         GuiTheme.alpha(GuiTuning.getColor("ScrollbarHandle.THUMB_OUTLINE", THUMB_OUTLINE), 0x40));
+      GuiTheme.rounded(guiGraphics, this.x + inset, top, Math.max(1, thumbWidth - 1), Math.max(1, thumbHeight - 1), radius, bodyColor);
+      if (thumbHeight > 6) {
+         guiGraphics.fill(this.x + inset + 1, top + 1, this.x + inset + thumbWidth - 1, top + 2,
+            GuiTheme.alpha(0xFFFFFFFF, hovered ? 0x33 : 0x1F));
+      }
    }
 
    public int thumbTop(int scrollOffset, int maxOffset, int viewport, int content) {

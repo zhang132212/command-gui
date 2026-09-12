@@ -687,12 +687,12 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
          int popupW = 100;
          int popupY = this.suggestionPopupY();
          int popupH = CUSTOM_SUGGESTIONS.length * 16;
-         guiGraphics.fill(fieldX - 1, popupY - 1, fieldX + popupW + 1, popupY + popupH + 1, -16777216);
+         GuiTheme.popup(guiGraphics, fieldX - 1, popupY - 1, popupW + 2, popupH + 2);
 
          for (int i = 0; i < CUSTOM_SUGGESTIONS.length; i++) {
             int y = popupY + i * 16;
             if (i == this.customSuggestionIndex % CUSTOM_SUGGESTIONS.length) {
-               guiGraphics.fill(fieldX, y, fieldX + popupW, y + 16, -13412916);
+               GuiTheme.row(guiGraphics, fieldX, y, popupW, 16, true, false);
             }
 
             guiGraphics.text(this.font, Component.literal(CUSTOM_SUGGESTIONS[i]), fieldX + 4, y + 3, -1);
@@ -1189,8 +1189,7 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
          boxY = (int)mouseY + 8;
       }
 
-      guiGraphics.fill(boxX, boxY, boxX + boxW, boxY + boxH, -301989888);
-      guiGraphics.fill(boxX + 1, boxY + 1, boxX + boxW - 1, boxY + boxH - 1, -299752926);
+      GuiTheme.popup(guiGraphics, boxX, boxY, boxW, boxH);
 
       for (int i = 0; i < lines.size(); i++) {
          guiGraphics.text(this.font, Component.literal(lines.get(i)), boxX + 4, boxY + 3 + i * 9, -1);

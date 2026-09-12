@@ -287,6 +287,7 @@ public class SettingsScreen extends BaseParentedScreen<Screen> {
    @Override
    public void extractBackground(GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {
       super.extractBackground(g, mouseX, mouseY, partialTick);
+      GuiTheme.screenBackground(g, this.width, this.height);
       if (this.contentArea == null) return;
       g.enableScissor(this.contentArea.left(), this.contentArea.top(), this.contentArea.right(), this.contentArea.bottom());
       for (SettingRow row : this.settingRows) {
@@ -383,15 +384,28 @@ public class SettingsScreen extends BaseParentedScreen<Screen> {
       }
 
       protected void extractContents(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY, float partialTick) {
-         int color = this.selected ? GuiTheme.accent() : GuiTheme.muted();
-         Component text = Component.translatable(this.selected ? "screen.command-gui.settings.yes" : "screen.command-gui.settings.no");
+         boolean on = this.selected;
+         int trackBase = on ? GuiTheme.mix(GuiTheme.surface(), GuiTheme.accent(), 0.55F) : GuiTheme.surface();
+         int trackRim = on ? GuiTheme.mix(GuiTheme.accent(), 0xFFFFFFFF, 0.3F) : GuiTheme.border();
+         int knob = on ? 0xFFF3FFFC : GuiTheme.mix(GuiTheme.muted(), 0xFFFFFFFF, 0.3F);
+         int color = on ? GuiTheme.text() : GuiTheme.muted();
+         Component text = Component.translatable(on ? "screen.command-gui.settings.yes" : "screen.command-gui.settings.no");
          Font font = Minecraft.getInstance().font;
          int switchX = this.getX() + this.getWidth() - 28;
          int switchY = this.getY() + (this.getHeight() - 14) / 2;
-         GuiTheme.rounded(guiGraphics, switchX, switchY, 28, 14, 7, this.selected ? GuiTheme.selected() : GuiTheme.surface());
-         GuiTheme.rounded(guiGraphics, switchX + (this.selected ? 16 : 2), switchY + 2, 10, 10, 5, color);
+         GuiTheme.rounded(guiGraphics, switchX, switchY, 28, 14, 7, trackRim);
+         GuiTheme.rounded(guiGraphics, switchX + 1, switchY + 1, 26, 12, 6, trackBase);
+         int knobX = switchX + (on ? 16 : 2);
+         GuiTheme.rounded(guiGraphics, knobX, switchY + 2, 10, 10, 5, GuiTheme.alpha(0xFF000000, 0x40));
+         GuiTheme.rounded(guiGraphics, knobX, switchY + 1, 10, 10, 5, knob);
          guiGraphics.text(font, text, this.getX() + 4, this.getY() + (this.getHeight() - 9) / 2, color, false);
-         if (this.isHovered() || this.isFocused()) GuiTheme.outline(guiGraphics, this.getX(), this.getY(), this.getWidth(), this.getHeight(), GuiTheme.accent());
+         if (this.isHovered() || this.isFocused()) {
+            // 方角描边和圆角玻璃不搭：用两层圆角画一圈焦点环
+            int r = GuiTheme.clampRadius(GuiTheme.radius(), this.getWidth(), this.getHeight());
+            GuiTheme.rounded(guiGraphics, this.getX(), this.getY(), this.getWidth(), this.getHeight(), r, GuiTheme.alpha(GuiTheme.accent(), 0xAA));
+            GuiTheme.rounded(guiGraphics, this.getX() + 1, this.getY() + 1, this.getWidth() - 2, this.getHeight() - 2,
+               Math.max(0, r - 1), GuiTheme.panel());
+         }
       }
    }
 }

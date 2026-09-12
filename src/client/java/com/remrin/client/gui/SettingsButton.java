@@ -38,7 +38,7 @@ public class SettingsButton extends Button {
    }
 
    protected void extractContents(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY, float partialTick) {
-      if (this.isHovered() || this.isFocused()) GuiTheme.button(guiGraphics, this, false, this.active);
+      if (this.isHovered() || this.isFocused()) GuiTheme.button(guiGraphics, this, false, this.active, mouseX, mouseY);
       int iconSize = 16;
       int iconX = this.getX() + (this.getWidth() - iconSize) / 2;
       int iconY = this.getY() + (this.getHeight() - iconSize) / 2;

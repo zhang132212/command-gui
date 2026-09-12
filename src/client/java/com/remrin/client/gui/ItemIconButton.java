@@ -30,7 +30,7 @@ public class ItemIconButton extends Button {
    }
 
    protected void extractContents(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY, float partialTick) {
-      GuiTheme.button(guiGraphics, this, false, this.active);
+      GuiTheme.button(guiGraphics, this, false, this.active, mouseX, mouseY);
       int iconX = this.getX() + (this.getWidth() - ICON_SIZE) / 2;
       int iconY = this.getY() + (this.getHeight() - ICON_SIZE) / 2;
       Matrix3x2fStack pose = guiGraphics.pose();

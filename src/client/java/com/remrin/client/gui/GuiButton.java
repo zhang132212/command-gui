@@ -27,7 +27,7 @@ public class GuiButton extends Button {
 
    @Override
    protected void extractContents(GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {
-      GuiTheme.button(g, this, this.tone == Tone.PRIMARY, this.active);
+      GuiTheme.button(g, this, this.tone == Tone.PRIMARY, this.active, mouseX, mouseY);
       int color = !this.active ? GuiTheme.disabled() : this.tone == Tone.DANGER ? GuiTheme.danger() : GuiTheme.text();
       GuiTheme.label(g, this, this.getMessage(), color, true);
    }

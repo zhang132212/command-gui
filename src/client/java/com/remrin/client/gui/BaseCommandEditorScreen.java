@@ -832,8 +832,7 @@ public abstract class BaseCommandEditorScreen extends BaseParentedScreen<Command
          tipY = (int)(mouseY - (double)tipH - 6.0);
       }
 
-      guiGraphics.fill(tipX - 1, tipY - 1, tipX + tipW + 1, tipY + tipH + 1, -16777216);
-      guiGraphics.fill(tipX, tipY, tipX + tipW, tipY + tipH, -14013910);
+      GuiTheme.popup(guiGraphics, tipX - 1, tipY - 1, tipW + 2, tipH + 2);
 
       for (int i = 0; i < lines.size(); i++) {
          guiGraphics.text(this.font, lines.get(i), tipX + 4, tipY + 4 + i * 9, -1);

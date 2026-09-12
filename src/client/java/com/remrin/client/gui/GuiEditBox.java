@@ -11,8 +11,8 @@ import net.minecraft.network.chat.Component;
  */
 public class GuiEditBox extends EditBox {
    /** 与 GuiSearchBox 相同的底板色，可用 config/command-gui/gui-tuning.json 的 GuiEditBox.BACKGROUND 覆盖。 */
-   private static final int BACKGROUND = 0xFF1D2935;
-   private static final int SHADOW = 0x50070B11;
+   private static final int BACKGROUND = 0x59141C28;
+   private static final int SHADOW = 0x40000000;
    private boolean extractingText;
    private Component hint;
    private final Font font;
@@ -55,12 +55,21 @@ public class GuiEditBox extends EditBox {
       int y = this.getY();
       int width = Math.max(1, this.getWidth());
       int height = Math.max(1, this.getHeight());
-      int stroke = this.isFocused() && this.active ? GuiTheme.accent()
-         : this.isHovered() && this.active ? GuiTheme.muted() : GuiTheme.border();
-      GuiTheme.rounded(g, x, y + 1, width, height, 6, SHADOW);
-      GuiTheme.rounded(g, x, y, width, height, 6, stroke);
-      GuiTheme.rounded(g, x + 1, y + 1, Math.max(1, width - 2), Math.max(1, height - 2), 5,
+      boolean focused = this.isFocused() && this.active;
+      int stroke = focused ? GuiTheme.accent()
+         : this.isHovered() && this.active ? GuiTheme.mix(GuiTheme.border(), 0xFFFFFFFF, 0.35F) : GuiTheme.border();
+      int radius = GuiTheme.clampRadius(GuiTheme.radius() + 2, width, height);
+      GuiTheme.rounded(g, x, y + 1, width, height, radius, SHADOW);
+      if (focused) {
+         GuiTheme.rounded(g, x - 1, y - 1, width + 2, height + 2, Math.min(radius + 1, (height + 2) / 2),
+            GuiTheme.alpha(GuiTheme.accent(), 0x2E));
+      }
+      GuiTheme.rounded(g, x, y, width, height, radius, stroke);
+      GuiTheme.rounded(g, x + 1, y + 1, Math.max(1, width - 2), Math.max(1, height - 2), Math.max(0, radius - 1),
          GuiTuning.getColor("GuiEditBox.BACKGROUND", BACKGROUND));
+      if (width > 2 * radius + 2 && height >= 8) {
+         g.fillGradient(x + radius + 1, y + 1, x + width - radius - 1, y + Math.max(3, height / 2), GuiTheme.sheen(), 0x00FFFFFF);
+      }
 
       // 原版 hint 只在未聚焦时绘制，且固定 DARK_GRAY（深灰在深色底板上几乎看不见）。
       // 这里屏蔽原版那次绘制，改由我们按主题色在两种状态下统一绘制（与 GuiSearchBox 一致）。

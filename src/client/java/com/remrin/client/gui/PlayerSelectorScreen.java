@@ -237,7 +237,7 @@ public class PlayerSelectorScreen extends BaseParentedScreen<Screen> {
       }
 
       int bottomY = this.height - 45;
-      guiGraphics.fill(0, bottomY, this.width, bottomY + 1, -11184811);
+      GuiTheme.divider(guiGraphics, 0, bottomY, this.width);
    }
 
    public boolean mouseClicked(MouseButtonEvent mouseEvent, boolean focused) {

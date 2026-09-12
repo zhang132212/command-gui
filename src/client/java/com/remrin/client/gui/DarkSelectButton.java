@@ -46,7 +46,7 @@ public class DarkSelectButton extends Button {
 
    protected void extractContents(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY, float partialTick) {
       boolean selected = this.selected.get();
-      GuiTheme.button(guiGraphics, this, selected, this.active && !this.visualMuted);
+      GuiTheme.button(guiGraphics, this, selected, this.active && !this.visualMuted, mouseX, mouseY);
       int color = selected ? this.selectedTextColor : this.unselectedTextColor;
       if (color == -1) color = selected ? GuiTheme.accent() : GuiTheme.text();
       if (!this.active || this.visualMuted) color = GuiTheme.disabled();

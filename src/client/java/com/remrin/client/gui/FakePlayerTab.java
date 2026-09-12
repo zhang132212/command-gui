@@ -983,19 +983,14 @@ public class FakePlayerTab implements Tab {
                int buttonX = this.playerListX + this.checkboxXOffset() + this.checkboxSize() + this.facePadLeft();
                int buttonW = this.playerItemWidth - (this.checkboxXOffset() + this.checkboxSize() + this.facePadLeft());
                boolean isHovered = !isSelected && mouseX >= buttonX && mouseX < buttonX + buttonW && mouseY >= y && mouseY < y + this.playerItemHeight();
-               guiGraphics.fill(buttonX, y, buttonX + buttonW, y + this.playerItemHeight() - 3,
-                  isSelected ? GuiTheme.selected() : isHovered ? GuiTheme.hover() : GuiTheme.surface());
-               GuiTheme.outline(guiGraphics, buttonX, y, buttonW, this.playerItemHeight() - 3,
-                  isSelected || isHovered ? GuiTheme.accent() : GuiTheme.border());
-               if (isSelected) {
-                  guiGraphics.fill(buttonX, y + 2, buttonX + 2, y + this.playerItemHeight() - 5, GuiTheme.accent());
-               }
+               GuiTheme.row(guiGraphics, buttonX, y, buttonW, this.playerItemHeight() - 3, isSelected, isHovered);
 
                int boxX = this.playerListX + this.checkboxXOffset();
                int boxY = y + this.checkboxTopPad();
                boolean checked = this.multiSelection.contains(name);
-               guiGraphics.fill(boxX, boxY, boxX + this.checkboxSize(), boxY + this.checkboxSize(), GuiTheme.panel());
-               GuiTheme.outline(guiGraphics, boxX, boxY, this.checkboxSize(), this.checkboxSize(), checked ? GuiTheme.accent() : GuiTheme.border());
+               GuiTheme.row(guiGraphics, boxX, boxY, this.checkboxSize(), this.checkboxSize(), checked, false);
+               GuiTheme.outline(guiGraphics, boxX, boxY, this.checkboxSize(), this.checkboxSize(),
+                  checked ? GuiTheme.accent() : GuiTheme.border());
                if (checked) {
                   guiGraphics.blitSprite(RenderPipelines.GUI_TEXTURED, Identifier.parse("minecraft:icon/checkmark"), boxX + 2, boxY + 2, 8, 8, -11141291);
                }

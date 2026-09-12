@@ -483,12 +483,14 @@ public class CommandGUIScreen extends Screen {
    @Override
    public void extractBackground(GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {
       super.extractBackground(g, mouseX, mouseY, partialTick);
-      g.fill(0, 0, this.width, this.height, GuiTheme.background());
-      g.fill(0, 0, this.width, 34, GuiTheme.panel());
-      g.fill(0, 0, this.width, 1, GuiTheme.border());
-      g.fill(0, 33, this.width, 34, GuiTheme.border());
+      GuiTheme.screenBackground(g, this.width, this.height);
+      // 顶栏与底栏也是玻璃条：半透明底 + 上下 1px 棱边，让中间的磨砂背景透出来
+      g.fill(0, 0, this.width, 34, GuiTheme.alpha(GuiTheme.panelStrong(), 0x8C));
+      g.fill(0, 0, this.width, 1, GuiTheme.mix(GuiTheme.border(), 0xFFFFFFFF, 0.25F));
+      GuiTheme.divider(g, 0, 33, this.width);
       int footerTop = this.height - this.footerHeight();
-      g.fill(0, footerTop, this.width, this.height, GuiTheme.panel());
+      g.fill(0, footerTop, this.width, this.height, GuiTheme.alpha(GuiTheme.panelStrong(), 0x8C));
+      GuiTheme.divider(g, 0, footerTop, this.width);
       if (this.tabManager == null || this.tabArea == null) return;
       Tab current = this.tabManager.getCurrentTab();
       int contentX = this.padding();

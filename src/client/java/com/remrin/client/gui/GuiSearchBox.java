@@ -62,10 +62,18 @@ public final class GuiSearchBox extends AbstractWidget {
    @Override
    protected void extractWidgetRenderState(GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {
       int x = this.getX(), y = this.getY(), w = this.getWidth(), h = this.getHeight();
-      int stroke = this.isFocused() && this.active ? GuiTheme.accent() : this.isHovered() && this.active ? GuiTheme.muted() : GuiTheme.border();
-      GuiTheme.rounded(g, x, y + 1, w, h, 6, 0x50070B11);
-      GuiTheme.rounded(g, x, y, w, h, 6, stroke);
-      GuiTheme.rounded(g, x + 1, y + 1, w - 2, h - 2, 5, GuiTuning.getColor("GuiSearchBox.BACKGROUND", 0xFF1D2935));
+      boolean focused = this.isFocused() && this.active;
+      int stroke = focused ? GuiTheme.accent() : this.isHovered() && this.active ? GuiTheme.mix(GuiTheme.border(), 0xFFFFFFFF, 0.35F) : GuiTheme.border();
+      int radius = GuiTheme.clampRadius(GuiTheme.radius() + 2, w, h);
+      GuiTheme.rounded(g, x, y + 1, w, h, radius, GuiTheme.shadow());
+      if (focused) {
+         GuiTheme.rounded(g, x - 1, y - 1, w + 2, h + 2, Math.min(radius + 1, (h + 2) / 2), GuiTheme.alpha(GuiTheme.accent(), 0x2E));
+      }
+      GuiTheme.rounded(g, x, y, w, h, radius, stroke);
+      GuiTheme.rounded(g, x + 1, y + 1, w - 2, h - 2, Math.max(0, radius - 1), GuiTuning.getColor("GuiSearchBox.BACKGROUND", 0x59141C28));
+      if (w > 2 * radius + 2 && h >= 8) {
+         g.fillGradient(x + radius + 1, y + 1, x + w - radius - 1, y + Math.max(3, h / 2), GuiTheme.sheen(), 0x00FFFFFF);
+      }
       if (w >= 48) {
          int color = this.isFocused() && this.active ? GuiTheme.accent() : GuiTheme.muted();
          var pose = g.pose();

@@ -47,9 +47,12 @@ public class MarkCheckbox extends Button {
       int boxSize = 14;
       int boxX = this.getX();
       int boxY = this.getY() + (this.getHeight() - boxSize) / 2;
-      guiGraphics.fill(boxX, boxY, boxX + boxSize, boxY + boxSize, GuiTheme.panel());
-      GuiTheme.outline(guiGraphics, boxX, boxY, boxSize, boxSize,
-         this.available && (this.isHovered() || this.isFocused() || this.selected) ? GuiTheme.accent() : GuiTheme.border());
+      GuiTheme.row(guiGraphics, boxX, boxY, boxSize, boxSize, this.selected && this.available,
+         this.available && (this.isHovered() || this.isFocused()));
+      if (this.available && (this.isHovered() || this.isFocused() || this.selected)) {
+         GuiTheme.outline(guiGraphics, boxX, boxY, boxSize, boxSize,
+            GuiTheme.alpha(GuiTheme.accent(), this.selected ? 0xC0 : 0x66));
+      }
       if (!this.available) {
          guiGraphics.blitSprite(
             RenderPipelines.GUI_TEXTURED, Identifier.parse("minecraft:spectator/close"), boxX + 2, boxY + 2, boxSize - 4, boxSize - 4, -43691

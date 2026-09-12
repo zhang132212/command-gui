@@ -59,6 +59,23 @@ public final class GuiTabBar extends TabNavigationBar {
       return false;
    }
 
+   /** iOS 式分段控件：整条玻璃轨道，选中的标签是轨道上浮起的一枚胶囊。 */
+   @Override
+   protected void extractWidgetRenderState(GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {
+      if (this.visible) {
+         int x = this.getX() - 5;
+         int y = this.getY() - 3;
+         int w = this.getWidth() + 10;
+         int h = this.getHeight() + 6;
+         int r = GuiTheme.clampRadius(GuiTheme.panelRadius(), w, h);
+         GuiTheme.rounded(g, x, y + 1, w, h, r, GuiTheme.shadow());
+         GuiTheme.rounded(g, x, y, w, h, r, GuiTheme.border());
+         GuiTheme.rounded(g, x + 1, y + 1, w - 2, h - 2, Math.max(0, r - 1), GuiTheme.alpha(GuiTheme.panel(), 0x8C));
+         g.fillGradient(x + r, y + 1, x + w - r, y + Math.max(3, h / 2), GuiTheme.sheen(), 0x00FFFFFF);
+      }
+      super.extractWidgetRenderState(g, mouseX, mouseY, partialTick);
+   }
+
    @Override
    public ScreenRectangle getRectangle() {
       return new ScreenRectangle(this.getX(), this.getY(), this.getWidth(), this.getHeight());
@@ -115,12 +132,13 @@ public final class GuiTabBar extends TabNavigationBar {
 
       @Override
       protected void extractWidgetRenderState(GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {
-         if (this.isSelected() || this.isHovered() || this.isFocused()) {
-            GuiTheme.rounded(g, this.getX(), this.getY(), this.getWidth(), this.getHeight(), 4,
-               this.isSelected() ? GuiTheme.selected() : GuiTheme.surface());
+         if (this.isSelected()) {
+            GuiTheme.button(g, this, true, true, mouseX, mouseY);
+         } else if (this.isHovered() || this.isFocused()) {
+            GuiTheme.button(g, this, false, true, mouseX, mouseY);
          }
-         if (this.isFocused()) GuiTheme.outline(g, this.getX(), this.getY(), this.getWidth(), this.getHeight(), GuiTheme.accent());
-         GuiTheme.label(g, this, this.getMessage(), this.isSelected() ? GuiTheme.accent() : GuiTheme.muted(), true);
+         GuiTheme.label(g, this, this.getMessage(),
+            this.isSelected() || this.isHovered() ? GuiTheme.text() : GuiTheme.muted(), true);
       }
    }
 }
