@@ -203,7 +203,7 @@ public final class MachineManager {
       if (!validStart) {
          sendMessage(player, "机器「" + machine.name + "」开机流程第一个指令必须是假人spawn指令");
       } else {
-         String firstCommand = firstStep.commands.get(0);
+         String firstCommand = MachineScheduler.resolveCommand(firstStep.commands.get(0), machine, firstStep.bot, player.getGameProfile().name());
          String permissionError = MachineScheduler.checkCommandPermission(firstCommand, player.getGameProfile().name());
          if (permissionError != null) {
             sendMessage(player, "机器「" + machine.name + "」启动失败：无权限执行指令（" + permissionError + "）");
@@ -430,6 +430,10 @@ public final class MachineManager {
    private static void editSession(ServerPlayer player, MinecraftServer server, String machineId, boolean open) {
       String name = player.getGameProfile().name();
       if (open) {
+         if (!canEdit(player)) {
+            sendMessage(player, "你没有权限编辑机器");
+            return;
+         }
          MachineConfig.MachineData machine = MachineConfig.getMachine(machineId);
          if (machine == null) {
             sendMessage(player, "机器不存在: " + machineId);

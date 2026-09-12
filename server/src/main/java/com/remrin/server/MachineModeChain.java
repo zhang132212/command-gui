@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.commands.CommandSourceStack;
 
 public final class MachineModeChain {
    private static final Map<String, MachineModeChain.Chain> chains = new HashMap<>();
@@ -43,9 +44,9 @@ public final class MachineModeChain {
          }
       }
 
-      List<String> singleStopOrder = orderedIds(machine, singleStop, machine.stopFollowsStart);
+      List<String> singleStopOrder = orderedIds(machine, singleStop, !machine.stopFollowsStart);
       List<String> singleStartOrder = orderedIds(machine, singleStart, false);
-      List<String> multiStopOrder = orderedIds(machine, multiStop, machine.stopFollowsStart);
+      List<String> multiStopOrder = orderedIds(machine, multiStop, !machine.stopFollowsStart);
       List<String> multiStartOrder = orderedIds(machine, multiStart, false);
       MachineModeChain.Chain chain = new MachineModeChain.Chain(triggerPlayer);
       Map<String, String> replacementOf = new HashMap<>();
@@ -150,7 +151,7 @@ public final class MachineModeChain {
             String machineId = entry.getKey();
             MachineConfig.MachineData machine = MachineConfig.getMachine(machineId);
             MachineModeChain.Chain chain = entry.getValue();
-            if (machine != null && !chain.steps.isEmpty()) {
+            if (machine != null && (!chain.steps.isEmpty() || chain.activeModeId != null)) {
                // 编辑锁认锁（每 tick 检查，含 active 等待期）：机器正被【其他】玩家编辑时，
                // 取消本切换序列，避免异步 start/stop 改状态破坏编辑者正在看的配置。
                String lockBlock = MachineManager.editingLockedByOtherMachineId(machineId, chain.triggerPlayer);
@@ -160,6 +161,7 @@ public final class MachineModeChain {
                   it.remove();
                   continue;
                }
+               if (chain.failed) { it.remove(); continue; }
                if (chain.activeModeId != null) {
                   if (!chain.activeCompleted) {
                      continue;
@@ -190,9 +192,10 @@ public final class MachineModeChain {
                         MachineMod.LOGGER.info("Chain: mode '{}' of machine '{}' no longer exists, skipping", step.modeId, machineId);
                      } else {
                         if (step.action == MachineModeChain.Action.STOP) {
-                           MachineScheduler.stopModeWithShutdown(machine, mode, chain.triggerPlayer);
+                           MachineScheduler.stopModeWithShutdown(machine, mode, chain.triggerPlayer, chain.sourceSnapshot);
                            MachineMod.LOGGER.info("Chain: stopping mode '{}' of machine '{}'", step.modeId, machineId);
-                        } else if (!launchStart(server, machine, mode, chain.triggerPlayer)) {
+                        } else if (!launchStart(server, machine, mode, chain.triggerPlayer, chain.sourceSnapshot)) {
+                           chain.failed = true;
                            continue;
                         }
 
@@ -213,7 +216,7 @@ public final class MachineModeChain {
       }
    }
 
-   private static boolean launchStart(MinecraftServer server, MachineConfig.MachineData machine, MachineConfig.ModeData mode, String triggerPlayer) {
+   private static boolean launchStart(MinecraftServer server, MachineConfig.MachineData machine, MachineConfig.ModeData mode, String triggerPlayer, CommandSourceStack snapshot) {
       if (mode.detection != null && mode.detection.enabled) {
          MachineDetector.DetectionResult detection = MachineDetector.evaluateDetection(mode.detection, server, true);
          if (detection.state() == MachineDetector.MachineState.ABNORMAL) {
@@ -229,23 +232,29 @@ public final class MachineModeChain {
          if (triggerPlayer != null && !triggerPlayer.isEmpty()) {
             MachineConfig.Step firstStep = MachineManager.firstStepEntry(mode.onTimeline);
             String firstCommand = firstStep != null && firstStep.commands != null && !firstStep.commands.isEmpty() ? firstStep.commands.get(0) : "";
-            String permissionError = MachineScheduler.checkCommandPermission(firstCommand, triggerPlayer);
+            firstCommand = MachineScheduler.resolveCommand(firstCommand, machine, firstStep.bot, triggerPlayer);
+            String permissionError = MachineScheduler.checkCommandPermission(firstCommand, server.getPlayerList().getPlayerByName(triggerPlayer) == null ? snapshot : server.getPlayerList().getPlayerByName(triggerPlayer).createCommandSourceStack());
             if (permissionError != null) {
                MachineManager.broadcastSystem("模式「" + mode.name + "」启动失败：无权限执行指令（" + permissionError + "）");
                return false;
             }
          }
 
-         MachineScheduler.startMode(machine, mode, triggerPlayer);
+         MachineScheduler.startMode(machine, mode, triggerPlayer, snapshot);
          return true;
       }
    }
 
-   public static void onModeProcessFinished(String machineId, String modeId) {
+   public static void onModeProcessFinished(String machineId, String modeId, boolean success) {
       MachineModeChain.Chain chain = chains.get(machineId);
       if (chain != null && modeId.equals(chain.activeModeId)) {
          chain.activeCompleted = true;
+         chain.failed = !success;
       }
+   }
+
+   static void onPlayerDisconnect(String name, CommandSourceStack snapshot) {
+      for (Chain chain : chains.values()) if (name.equals(chain.triggerPlayer)) chain.sourceSnapshot = snapshot;
    }
 
    public static boolean isActive(String machineId) {
@@ -267,9 +276,12 @@ public final class MachineModeChain {
       String activeModeId = null;
       boolean activeCompleted = false;
       final String triggerPlayer;
+      CommandSourceStack sourceSnapshot;
+      boolean failed;
 
       Chain(String triggerPlayer) {
          this.triggerPlayer = triggerPlayer;
+         this.sourceSnapshot = MachineScheduler.captureSource(triggerPlayer);
       }
    }
 

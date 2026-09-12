@@ -1,0 +1,23 @@
+gradle.projectsEvaluated {
+    def p = gradle.rootProject
+    def runPath = System.getProperty('backend.runDir')
+    if (!runPath) throw new GradleException('Use testing/run-backend-tests.ps1 to create an isolated test run')
+    def qa = p.sourceSets.create('backendQa') {
+        java.srcDir p.file('testing/backend/src')
+        resources.srcDir p.file('testing/backend/resources')
+        compileClasspath += p.sourceSets.main.compileClasspath + p.sourceSets.main.output
+    }
+    p.tasks.named('compileBackendQaJava') { dependsOn p.tasks.named('classes'); options.encoding = 'UTF-8' }
+    def qaJar = p.tasks.register('backendQaJar', Jar) {
+        from qa.output
+        archiveFileName = 'command-gui-backend-tests.jar'
+        destinationDirectory = new File(runPath, 'mods')
+    }
+    p.loom.runs.server {
+        runDir runPath
+        vmArg '-Dcommandgui.backendTest=true'
+        vmArg '-Dcommandgui.backendPhase=' + System.getProperty('backend.phase', 'suite')
+        vmArg '-Dfile.encoding=UTF-8'
+    }
+    p.tasks.named('runServer') { dependsOn qaJar }
+}

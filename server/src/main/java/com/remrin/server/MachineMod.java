@@ -90,6 +90,7 @@ public class MachineMod implements ModInitializer {
          MachineManager.syncTo(listener.getPlayer());
       });
       ServerPlayConnectionEvents.DISCONNECT.register((Disconnect)(listener, server) -> {
+         MachineScheduler.onPlayerDisconnect(listener.getPlayer());
          unsubscribeFakeStates(listener.getPlayer());
          unsubscribeMachineStates(listener.getPlayer());
          MachineManager.onPlayerDisconnect(listener.getPlayer().getGameProfile().name());

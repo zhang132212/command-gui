@@ -55,6 +55,20 @@ public final class FakePlayerStateTracker {
       return supported;
    }
 
+   /** Read-only readiness check using the same action pack Carpet commands manipulate. */
+   public static boolean isReady(MinecraftServer server, ServerPlayer player) {
+      resolve();
+      if (!supported || player == null || !fakePlayerClass.isInstance(player) || !player.isAlive() || player.isRemoved()
+         || player.connection == null || server.getPlayerList().getPlayer(player.getUUID()) != player
+         || player.level().getEntity(player.getUUID()) != player) return false;
+      try {
+         Object pack = getActionPackMethod.invoke(player);
+         return pack != null && actionsField.get(pack) instanceof Map;
+      } catch (ReflectiveOperationException | RuntimeException e) {
+         return false;
+      }
+   }
+
    public static String buildJson(MinecraftServer server) {
       resolve();
       JsonObject root = new JsonObject();
