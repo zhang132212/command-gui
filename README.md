@@ -10,7 +10,7 @@
 | Fabric Loader | 0.19.3+ |
 | Fabric API | 0.156.0+26.2 |
 | Java | 25+ |
-| 模组版本 | `0.2.0-beta.95-perf3`（构建成功后自动递增 beta 序号） |
+| 模组版本 | `0.3.0-beta1`（本地构建成功后自动递增 beta 序号；CI 以 `-x bumpVersion` 跳过） |
 | 许可证 | GPL-3.0 |
 | 产物 | `command-gui-<version>.jar`，客户端与服务端通用 |
 
@@ -65,8 +65,8 @@
 
 ### 5. 构建与资源组织调整
 
-- 当前客户端和服务端共用根目录版本号，服务端产物仍为独立 jar。
-- `build.gradle` 增加成功构建后的 beta 版本自动递增任务；如不希望自动修改 `gradle.properties`，请在构建前移除或禁用 `build.finalizedBy bumpVersion`。
+- 客户端与服务端共用根目录版本号，且只产出一个 jar：`server/` 只是被编进同一 jar 的源码目录，不再有独立服务端产物。
+- `build.gradle` 增加成功构建后的 beta 版本自动递增任务（同时兼容 `0.3.0-beta1` 与 `0.2.0-beta.95` 两种写法）；如不希望自动修改 `gradle.properties`，请在构建前移除或禁用 `build.finalizedBy bumpVersion`。
 - 语言文件继续提供 `en_us` 与 `zh_cn`；预设指令位于 `src/main/resources/assets/command-gui/presets/`。
 
 ## 功能概览
@@ -76,6 +76,7 @@
 - 按 `C` 打开命令面板（键位以当前客户端配置为准）。
 - 自定义指令分类、描述、多指令链和占位符：`{player}`、`{player_all}`、`{player_fake}`、`{name}`、`{number}`、`{time}`、`{coords}` 等。
 - 原版和 Carpet 预设指令。
+- 「Carpet 规则」标签：查询 Carpet 及其扩展注册的真实规则，支持批量确认设置值、`setDefault`、`removeDefault`（权限、分包与校验细节见 [`docs/carpet-rules.md`](docs/carpet-rules.md)）。
 - 假人批量生成、定时任务、攻击/使用/潜行/骑乘/停止等动作控制。
 - 机器开关、模式、检测、时间线和多模式配置页面。
 
@@ -120,7 +121,7 @@ build/libs/command-gui-<version>.jar
 
 单个 jar 同时用于客户端与服务端。`server/` 只是服务端源码目录（由根项目 `build.gradle` 的 `srcDir` 编进同一个 jar），不再是独立 Gradle 子项目，也不再产出单独的 server jar。
 
-构建任务会自动递增 `gradle.properties` 中的 beta 序号，请提交前确认版本号是否符合预期。
+构建任务会自动递增 `gradle.properties` 中 `mod_version` 的 beta 序号（如 `0.3.0-beta1` → `0.3.0-beta2`），请提交前确认版本号是否符合预期；CI 构建带 `-x bumpVersion`，不会改动仓库里的版本号。
 
 ## 配置与开发
 
@@ -132,6 +133,9 @@ build/libs/command-gui-<version>.jar
 | 服务端机器 | `config/command-gui-server/machines.json` |
 | 中英文文案 | `src/main/resources/assets/command-gui/lang/` |
 | 预设指令 | `src/main/resources/assets/command-gui/presets/` |
+| 开发文档 | `docs/`（Carpet 规则、界面整理、标签点击修复等） |
+| 测试脚手架 | `testing/`（后端 QA：`run-backend-tests.ps1`、`smoke-embedded-server.mjs`）、`tests/carpet-rules/`（规则 QA） |
+| 网页调优工具 | `devtools/`（实验性，不参与构建） |
 
 GUI 参数调整后重新打开 GUI 即可验证；语言资源包调整后可使用 `F3+T` 重载资源。Java 逻辑或资源正式发布前仍需重新构建。
 
@@ -143,20 +147,23 @@ CommandGUIScreen                            MachineMod
 ├─ CustomCommandTab                         ├─ MachineConfig
 ├─ FakePlayerTab                 网络同步   ├─ MachineManager
 ├─ PresetCommandTab              <───────>  ├─ MachineScheduler
-└─ MachineSwitchTab                        ├─ MachineModeChain
-   ├─ MachineEditorScreen                   ├─ MachineDetector
-   ├─ MachineModesScreen                    ├─ MachineBlockCache
-   └─ MachineNetworkManager                 ├─ FakePlayerStateTracker
-                                            └─ MachineAdminCommand
+├─ CarpetRulesTab                          ├─ MachineModeChain
+└─ MachineSwitchTab                        ├─ MachineDetector
+   ├─ MachineEditorScreen                   ├─ MachineBlockCache
+   ├─ MachineModesScreen                    ├─ FakePlayerStateTracker
+   └─ MachineNetworkManager                 └─ MachineAdminCommand
 ```
+
+两侧共用 `com.remrin.rules`（Carpet 规则的目录、查询与执行）与 `MachinePayloads` 网络包定义；`/cgtest` 供自动化测试驱动，`CarpetRulesTab` 只在客户端显示。
 
 ## 仓库状态
 
-本仓库（`zhang132212/command-gui`）为 [xgenya/command-gui](https://github.com/xgenya/command-gui) 的 fork，当前仅发布 mod 源码本体：
+本仓库（`zhang132212/command-gui`）为 [xgenya/command-gui](https://github.com/xgenya/command-gui) 的 fork，内容包括：
 - 单个 mod `command-gui`：客户端与服务端合一（公共入口 `src/main/java/`、客户端代码 `src/client/`、服务端代码 `server/src/main/java/`）
-- 构建配置（Gradle / GitHub Actions）
+- 构建配置（Gradle / GitHub Actions）、开发文档（`docs/`）与测试脚手架（`testing/`、`tests/`）
+- `devtools/` 网页调优框架（含 `backup/pre-tuning-layer/` 旧版 GUI 备份、调优脚本与贴图）：实验性工具，不参与构建，也不影响产物
 
-`devtools/` 网页调优框架仍在本地开发，设计完善后再另行发布（本仓库 `.gitignore` 已排除）。
+`devtools/` 与测试脚手架都会随仓库一起发布；`.gitignore` 只排除 Gradle/IDE/运行目录（`.gradle/`、`build/`、`run/` 等）。
 
 ## 许可证
 
