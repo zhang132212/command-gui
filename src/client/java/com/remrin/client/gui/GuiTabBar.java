@@ -9,6 +9,7 @@ import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.components.tabs.Tab;
 import net.minecraft.client.gui.components.tabs.TabManager;
 import net.minecraft.client.gui.components.tabs.TabNavigationBar;
+import net.minecraft.client.input.MouseButtonEvent;
 
 /** Keeps vanilla tab navigation, keyboard shortcuts and narration, with a compact custom skin. */
 public final class GuiTabBar extends TabNavigationBar {
@@ -41,8 +42,21 @@ public final class GuiTabBar extends TabNavigationBar {
    }
 
    private static final class StyledTab extends TabButton {
+      private final TabManager manager;
+
       StyledTab(TabManager manager, Tab tab) {
          super(manager, tab, 80, 22);
+         this.manager = manager;
+      }
+
+      /**
+       * 原版 {@link TabButton} 不处理点击（{@code AbstractWidget.onClick} 默认空实现），点击逻辑必须由使用方接上；
+       * 旧版用的是原版 MenuTabBar（内部自己注册按钮），换成自研 TabNavigationBar 后漏掉了这一步，
+       * 表现为所有标签点了没反应。
+       */
+      @Override
+      public void onClick(MouseButtonEvent mouseEvent, boolean focused) {
+         this.manager.setCurrentTab(this.tab(), false);
       }
 
       @Override
