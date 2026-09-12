@@ -193,6 +193,9 @@ public class CommandGUIScreen extends Screen {
          tabs.add(tab);
       }
 
+      MachineDebug.log("[UI] init tabs=" + tabs.size() + " machineTab=" + (this.machineTab != null)
+         + " serverSupported=" + MachineNetworkManager.isServerSupported() + " names="
+         + tabs.stream().map(CommandGUIScreen::tabName).toList());
       this.tabNavigationBar = new GuiTabBar(this.tabManager, this.width, tabs);
       this.addRenderableWidget(this.tabNavigationBar);
       this.tabNavigationBar.arrangeElements(this.width);
@@ -890,7 +893,12 @@ public class CommandGUIScreen extends Screen {
          this.tryStartScrollbarDrag(mouseEvent.x(), mouseEvent.y());
       }
 
-      return super.mouseClicked(mouseEvent, focused);
+      boolean handled = super.mouseClicked(mouseEvent, focused);
+      // 临时诊断：确认点击是否被某个控件吃掉、以及当前标签，便于定位“标签点不动”这类问题。
+      MachineDebug.log("[UI] screen click " + (int)mouseEvent.x() + "," + (int)mouseEvent.y()
+         + " button=" + mouseEvent.button() + " handled=" + handled
+         + " current=" + (this.tabManager.getCurrentTab() == null ? "null" : this.tabManager.getCurrentTab().getTabTitle().getString()));
+      return handled;
    }
 
    public boolean mouseDragged(MouseButtonEvent mouseEvent, double dragX, double dragY) {
@@ -1007,6 +1015,8 @@ public class CommandGUIScreen extends Screen {
       this.syncWindowSize();
       Tab currentTab = this.tabManager.getCurrentTab();
       if (this.lastTab != currentTab) {
+         MachineDebug.log("[UI] tab switch " + (this.lastTab == null ? "null" : tabName(this.lastTab))
+            + " -> " + (currentTab == null ? "null" : tabName(currentTab)));
          this.removeTabButtons(this.lastTab);
          if (this.lastTab == this.fakePlayerTab) {
             MachineNetworkManager.sendUnsubscribeFakeStates();
@@ -1021,6 +1031,8 @@ public class CommandGUIScreen extends Screen {
             this.fakePlayerRefreshTicks = 0;
             lastSelectedTabIndex = 1;
          } else if (currentTab == this.machineTab) {
+            MachineDebug.log("[UI] machine page entered: machines=" + MachineNetworkManager.getMachines().size()
+               + " canEdit=" + MachineNetworkManager.canEdit() + " buttons=" + this.machineTab.getButtons().size());
             this.machineTab.setSearchText(this.searchText);
             this.removeTabButtons(this.machineTab);
             this.machineTab.refresh();
