@@ -12,6 +12,7 @@ public class CommandGUI implements ModInitializer {
 
    public void onInitialize() {
       LOGGER.info("Command-GUI initialized!");
+      com.remrin.rules.CarpetRuleService.init();
       if (FabricLoader.getInstance().isModLoaded("command-gui-server")) {
          // 迁移守卫：旧版把服务端拆成独立 jar（command-gui-server）。两个 jar 现在都带同一套
          // com.remrin.server.* 类，同时安装会出现重复类与版本错配，所以跳过内嵌初始化，

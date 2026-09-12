@@ -1,0 +1,24 @@
+// Opt-in integration test mod; never included in the release JAR.
+gradle.projectsEvaluated {
+    def p = gradle.rootProject
+    def qa = p.sourceSets.create('carpetRuleQa') {
+        java.srcDir p.file('tests/carpet-rules/src')
+        resources.srcDir p.file('tests/carpet-rules/resources')
+        compileClasspath += p.sourceSets.client.compileClasspath + p.sourceSets.client.output + p.sourceSets.main.output
+    }
+    p.tasks.named('compileCarpetRuleQaJava') {
+        dependsOn p.tasks.named('clientClasses')
+        options.encoding = 'UTF-8'
+    }
+    def qaJar = p.tasks.register('carpetRuleQaJar', Jar) {
+        from qa.output
+        archiveFileName = 'carpet-rule-qa.jar'
+        destinationDirectory = p.layout.projectDirectory.dir('build/carpet-rules-test/mods')
+    }
+    p.loom.runs.client {
+        runDir 'build/carpet-rules-test'
+        vmArg '-Ddevauth.enabled=false'
+        programArgs '--username', 'UIReview', '--width', '1440', '--height', '810'
+    }
+    p.tasks.named('runClient') { dependsOn qaJar }
+}

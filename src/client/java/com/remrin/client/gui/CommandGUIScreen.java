@@ -174,11 +174,16 @@ public class CommandGUIScreen extends Screen {
 
       for (PresetConfig.Preset preset : PresetConfig.getPresets()) {
          if ((!"vanilla".equals(preset.id) || hasPermission && SettingsConfig.getBoolean("show_vanilla_commands"))
-            && (!"carpet".equals(preset.id) || SettingsConfig.getBoolean("show_carpet_commands"))) {
+            && (!"carpet".equals(preset.id) || com.remrin.client.rules.CarpetRuleClient.canView() && SettingsConfig.getBoolean("show_carpet_commands"))) {
             PresetCommandTab tab = new PresetCommandTab(this, preset.id, preset.nameKey);
             tab.setOnCategoryChanged(() -> this.removeTabButtons(tab), () -> this.addTabButtons(tab));
             this.presetTabs.add(tab);
          }
+      }
+      if (com.remrin.client.rules.CarpetRuleClient.canView() && SettingsConfig.getBoolean("show_carpet_commands")) {
+         CarpetRulesTab rules = new CarpetRulesTab(this);
+         rules.setOnCategoryChanged(() -> this.removeTabButtons(rules), () -> this.addTabButtons(rules));
+         this.presetTabs.add(rules);
       }
 
       List<Tab> tabs = new ArrayList<>();
@@ -400,7 +405,7 @@ public class CommandGUIScreen extends Screen {
       this.showFooterWidget(this.machineSaveButton, isMachineTab && MachineNetworkManager.hasPendingMachines());
       this.showFooterWidget(this.filterOnCheckbox, isMachineTab);
       this.showFooterWidget(this.filterOffCheckbox, isMachineTab);
-      this.showFooterWidget(this.keepOpenCheckbox, !isFakePlayerTab && !isMachineTab && !isCustomTab);
+      this.showFooterWidget(this.keepOpenCheckbox, !isFakePlayerTab && !isMachineTab && !isCustomTab && !(tab instanceof CarpetRulesTab));
       this.showFooterWidget(this.fpBatchSpawnButton, isFakePlayerTab);
       this.showFooterWidget(this.fpTimedAddButton, isFakePlayerTab);
       this.showFooterWidget(this.fpRemoveSelectedButton, isFakePlayerTab);
@@ -612,13 +617,19 @@ public class CommandGUIScreen extends Screen {
       if (this.tabArea != null) {
          int headingY = this.tabArea.top() - 16;
          guiGraphics.text(this.font, currentTab.getTabTitle(), this.padding(), headingY, GuiTheme.text());
-         Component hint = currentTab == this.machineTab ? Component.literal("左键多选 · 确认执行 · 右键编辑")
+         Component hint = currentTab instanceof CarpetRulesTab ? Component.literal("选择目标值 · 批量确认")
+            : currentTab == this.machineTab ? Component.literal("左键多选 · 确认执行 · 右键编辑")
             : Component.translatable(currentTab == this.fakePlayerTab
                ? "screen.command-gui.ui.player_hint" : "screen.command-gui.ui.command_hint");
          if (this.width > 400) {
             guiGraphics.text(this.font, hint, this.width - this.padding() - this.font.width(hint), headingY, GuiTheme.muted());
          }
-         if (currentTab instanceof AbstractCommandTab commands && commands.getFilteredCommandCount() == 0) {
+         if (currentTab instanceof CarpetRulesTab) {
+            String status = com.remrin.client.rules.CarpetRuleClient.status();
+            guiGraphics.text(this.font, this.font.plainSubstrByWidth(status, Math.max(10, this.width - this.padding() * 2 - this.closeButtonWidth() - 10)),
+               this.padding(), this.height - this.footerHeight() + 40, GuiTheme.muted(), false);
+         }
+         if (currentTab instanceof AbstractCommandTab commands && !(currentTab instanceof CarpetRulesTab) && commands.getFilteredCommandCount() == 0) {
             Component empty = Component.translatable(this.searchText.isBlank()
                ? "screen.command-gui.ui.empty_category" : "screen.command-gui.ui.no_results");
             int emptyX = commands.getCommandAreaLeft() + commands.getCommandAreaWidth() / 2;
@@ -1016,8 +1027,15 @@ public class CommandGUIScreen extends Screen {
    public void tick() {
       super.tick();
       this.syncWindowSize();
+      boolean rulesVisible = this.presetTabs.stream().anyMatch(tab -> tab instanceof CarpetRulesTab);
+      boolean rulesAllowed = com.remrin.client.rules.CarpetRuleClient.canView() && SettingsConfig.getBoolean("show_carpet_commands");
+      if (rulesVisible != rulesAllowed) {
+         this.rebuildWidgets();
+         return;
+      }
       Tab currentTab = this.tabManager.getCurrentTab();
       if (this.lastTab != currentTab) {
+         if (currentTab instanceof CarpetRulesTab) com.remrin.client.rules.CarpetRuleClient.refresh();
          MachineDebug.log("[UI] tab switch " + (this.lastTab == null ? "null" : tabName(this.lastTab))
             + " -> " + (currentTab == null ? "null" : tabName(currentTab)));
          this.removeTabButtons(this.lastTab);
@@ -1054,7 +1072,9 @@ public class CommandGUIScreen extends Screen {
          this.addTabButtons(currentTab);
          this.updateTabDependentWidgets(currentTab);
          this.lastTab = currentTab;
+         lastSelectedTabIndex = this.tabNavigationBar.getTabs().indexOf(currentTab);
       }
+      if (currentTab instanceof CarpetRulesTab rulesTab) rulesTab.tickRules();
 
       if (currentTab == this.fakePlayerTab && !MachineNetworkManager.isFakePlayerStatesSupported()) {
          this.fakePlayerRefreshTicks++;

@@ -39,6 +39,7 @@ public class CommandGUIClient implements ClientModInitializer {
       SettingsConfig.load();
       GuiTuning.load();
       MachineNetworkManager.init();
+      com.remrin.client.rules.CarpetRuleClient.init();
       if (Minecraft.getInstance().getResourceManager() instanceof ReloadableResourceManager rrm) {
          rrm.registerReloadListener(new SimpleReloadListener<Void>() {
             protected Void prepare(SharedState state) {
@@ -53,6 +54,7 @@ public class CommandGUIClient implements ClientModInitializer {
 
       openGuiKey = KeyMappingHelper.registerKeyMapping(new KeyMapping("key.command-gui.open_gui", Type.KEYSYM, 67, CMD_GUI_CATEGORY));
       ClientTickEvents.END_CLIENT_TICK.register((EndTick)client -> {
+         com.remrin.client.rules.CarpetRuleClient.tick();
          while (openGuiKey.consumeClick()) {
             if (client.gui.screen() instanceof CommandGUIScreen) {
                client.gui.setScreen(null);
