@@ -107,7 +107,7 @@ public final class MachineModels {
       public boolean running = false;
       public String transition = "";
       public String detected = "";
-      public int revision = 0;
+      public long revision = 0;
       public String editingBy = "";
    }
 

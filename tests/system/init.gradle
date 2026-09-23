@@ -1,0 +1,53 @@
+// Build once, then launch independent JVMs from the exported specs. No concurrent Loom runClient tasks.
+import groovy.json.JsonOutput
+
+gradle.projectsEvaluated {
+    def p = gradle.rootProject
+    def output = System.getProperty('system.runRoot')
+    if (!output) throw new GradleException('Use testing/run-dedicated-e2e.ps1')
+    def root = new File(output)
+    def qa = p.sourceSets.create('systemQa') {
+        java.srcDir p.file('tests/system/src')
+        resources.srcDir p.file('tests/system/resources')
+        compileClasspath += p.sourceSets.client.compileClasspath + p.sourceSets.client.output + p.sourceSets.main.output
+    }
+    p.tasks.named('compileSystemQaJava') { dependsOn p.tasks.named('clientClasses'); options.encoding = 'UTF-8' }
+    def qaJar = p.tasks.register('systemQaJar', Jar) {
+        from qa.output
+        archiveFileName = 'command-gui-system-tests.jar'
+        destinationDirectory = new File(root, 'prepared')
+    }
+    p.loom.runs.client {
+        vmArg '-Ddevauth.enabled=false'
+        programArgs '--width', '1280', '--height', '800'
+    }
+    def client = p.tasks.named('runClient').get()
+    def server = p.tasks.named('runServer').get()
+    p.tasks.register('prepareSystemTests') {
+        dependsOn qaJar, p.tasks.named('jar')
+        dependsOn client.taskDependencies.getDependencies(client), server.taskDependencies.getDependencies(server)
+        doLast {
+            root.mkdirs()
+            // Test the assembled product JAR from mods/, not the project's loose class directories.
+            def outputs = (p.sourceSets.main.output.files + p.sourceSets.client.output.files).collect { it.canonicalFile }.toSet()
+            def spec = { task ->
+                def vm = new ArrayList(task.allJvmArgs)
+                def configArg = vm.find { it.startsWith('-Dfabric.dli.config=') }
+                if (!configArg) throw new GradleException('Missing Fabric launch configuration')
+                def original = new File(configArg.substring('-Dfabric.dli.config='.length()))
+                def isolated = new File(root, 'prepared/launch.cfg')
+                isolated.parentFile.mkdirs()
+                isolated.setText(original.getText('UTF-8').readLines().findAll { !it.trim().startsWith('fabric.classPathGroups=') }.join('\n') + '\n', 'UTF-8')
+                vm.remove(configArg)
+                vm.add('-Dfabric.dli.config=' + isolated.absolutePath)
+                [mainClass: task.mainClass.get(), jvmArgs: vm,
+                 classpath: task.classpath.files.findAll { !outputs.contains(it.canonicalFile) }.collect { it.absolutePath }.join(File.pathSeparator),
+                 args: task.args.collect { it.toString() }]
+            }
+            def document = [schemaVersion: 1, server: spec(server), client: spec(client),
+                            productJar: p.tasks.named('jar').get().archiveFile.get().asFile.absolutePath,
+                            qaJar: qaJar.get().archiveFile.get().asFile.absolutePath]
+            new File(root, 'launch.json').setText(JsonOutput.prettyPrint(JsonOutput.toJson(document)), 'UTF-8')
+        }
+    }
+}

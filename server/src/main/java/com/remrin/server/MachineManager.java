@@ -50,6 +50,7 @@ public final class MachineManager {
    public static void handleAction(ServerPlayer player, MinecraftServer server, MachinePayloads.ActionPayload payload) {
       try {
          JsonObject action = JsonParser.parseString(payload.json()).getAsJsonObject();
+         MachineActionValidator.validate(action);
          String type = action.has("type") ? action.get("type").getAsString() : "";
          switch (type) {
             case "toggle":
@@ -65,7 +66,7 @@ public final class MachineManager {
                addMachine(player, server, action.getAsJsonObject("machine"));
                break;
             case "edit":
-               editMachine(player, server, action.getAsJsonObject("machine"), action.has("baseRevision") ? action.get("baseRevision").getAsInt() : -1);
+               editMachine(player, server, action.getAsJsonObject("machine"), action.get("baseRevision").getAsLong());
                break;
             case "delete":
                deleteMachine(player, server, getString(action, "machineId"));
@@ -97,6 +98,7 @@ public final class MachineManager {
          }
       } catch (Exception var7) {
          MachineMod.LOGGER.warn("Malformed machine action from {}: {}", player.getGameProfile().name(), var7.getMessage());
+         sendMessage(player, "机器请求无效，请检查数据格式");
       }
    }
 
@@ -334,6 +336,18 @@ public final class MachineManager {
             }
 
             Set<String> desired = new HashSet<>(desiredIds);
+            int selectedSingles = 0;
+            for (String modeId : desired) {
+               MachineConfig.ModeData selected = findMode(machine, modeId);
+               if (selected == null) {
+                  sendMessage(player, "模式不存在: " + modeId + "，本次未执行");
+                  return;
+               }
+               if (selected.singleSelect && ++selectedSingles > 1) {
+                  sendMessage(player, "单选模式最多选择一个，本次未执行");
+                  return;
+               }
+            }
             List<String> startIds = new ArrayList<>();
             List<String> stopIds = new ArrayList<>();
             int rejected = 0;
@@ -590,7 +604,7 @@ public final class MachineManager {
       }
    }
 
-   private static void editMachine(ServerPlayer player, MinecraftServer server, JsonObject machineJson, int baseRevision) {
+   private static void editMachine(ServerPlayer player, MinecraftServer server, JsonObject machineJson, long baseRevision) {
       if (!canEdit(player)) {
          sendMessage(player, "你没有权限编辑机器");
       } else {
@@ -605,8 +619,10 @@ public final class MachineManager {
             MachineManager.EditLock lock = editLocks.get(machine.id);
             if (lock == null || !lock.editor().equals(player.getGameProfile().name())) {
                sendMessage(player, "机器「" + machine.name + "」正在被 " + (lock != null ? lock.editor() : "其他玩家") + " 编辑，无法保存");
-            } else if (baseRevision >= 0 && baseRevision != existing.revision) {
+            } else if (baseRevision != existing.revision) {
                sendMessage(player, "机器已被其他人修改，请关闭后重新打开编辑");
+            } else if (existing.revision == Long.MAX_VALUE) {
+               sendMessage(player, "机器修订号已达上限，无法继续保存，请联系管理员");
             } else {
                String error = validate(machine);
                if (error != null) {
@@ -933,6 +949,8 @@ public final class MachineManager {
       if (machine.stopModeOrder == null) machine.stopModeOrder = new ArrayList<>();
       if (machine.id == null || machine.id.isBlank()) {
          return "id 不能为空";
+      } else if (machine.id.indexOf('#') >= 0) {
+         return "机器 id 不能包含保留分隔符 #";
       } else if (machine.name != null && !machine.name.isBlank()) {
          if (machine.category == null) {
             machine.category = "";

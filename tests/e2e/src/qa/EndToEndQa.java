@@ -38,7 +38,8 @@ public final class EndToEndQa implements ClientModInitializer {
     private static final BlockPos DETECTOR = new BlockPos(0, 80, 0);
     private final boolean carpet = FabricLoader.getInstance().isModLoaded("carpet");
     private final List<Map<String, Object>> cases = new ArrayList<>();
-    private int stage, ticks, checks, revision;
+    private int stage, ticks, checks;
+    private long revision;
     private boolean finished;
     private long stageStarted = System.nanoTime();
     private CompletableFuture<Void> serverWork;

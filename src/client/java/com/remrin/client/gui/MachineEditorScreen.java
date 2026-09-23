@@ -35,7 +35,7 @@ public class MachineEditorScreen extends BaseParentedScreen<CommandGUIScreen> {
    private final boolean isNewMachine;
    private final boolean isEditor;
    private final boolean isConfigEditor;
-   private int baseRevision;
+   private long baseRevision;
    private int rowGap = 30;
    private int buttonsRowY;
    private String errorMessage = "";

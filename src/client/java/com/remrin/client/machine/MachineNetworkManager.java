@@ -199,11 +199,11 @@ public final class MachineNetworkManager {
       structureVersion++;
    }
 
-   public static void markMachinePending(MachineModels.MachineData machine, int baseRevision) {
+   public static void markMachinePending(MachineModels.MachineData machine, long baseRevision) {
       markMachinePending(machine, baseRevision, false);
    }
 
-   public static void markMachinePending(MachineModels.MachineData machine, int baseRevision, boolean modesDirty) {
+   public static void markMachinePending(MachineModels.MachineData machine, long baseRevision, boolean modesDirty) {
       if (machine != null && machine.id != null && !machine.id.isEmpty()) {
          boolean isNew = true;
 
@@ -354,7 +354,7 @@ public final class MachineNetworkManager {
       sendMachineAction("add", machine);
    }
 
-   public static void sendEdit(MachineModels.MachineData machine, int baseRevision) {
+   public static void sendEdit(MachineModels.MachineData machine, long baseRevision) {
       sendMachineAction("edit", machine, baseRevision);
    }
 
@@ -394,7 +394,7 @@ public final class MachineNetworkManager {
       sendMachineAction(type, machine, -1);
    }
 
-   private static void sendMachineAction(String type, MachineModels.MachineData machine, int baseRevision) {
+   private static void sendMachineAction(String type, MachineModels.MachineData machine, long baseRevision) {
       JsonObject action = new JsonObject();
       action.addProperty("type", type);
       action.add("machine", GSON.toJsonTree(machine));
@@ -517,7 +517,7 @@ public final class MachineNetworkManager {
       return structureVersion;
    }
 
-   public static record PendingMachineEdit(MachineModels.MachineData machine, int baseRevision, boolean isNew, boolean modesDirty) {
+   public static record PendingMachineEdit(MachineModels.MachineData machine, long baseRevision, boolean isNew, boolean modesDirty) {
    }
 
 

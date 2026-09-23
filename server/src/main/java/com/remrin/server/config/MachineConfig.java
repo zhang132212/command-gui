@@ -2,6 +2,7 @@ package com.remrin.server.config;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonObject;
 import com.google.gson.reflect.TypeToken;
 import com.remrin.server.MachineMod;
 import java.io.IOException;
@@ -32,7 +33,11 @@ public final class MachineConfig {
    public static void load() {
       if (Files.exists(CONFIG_PATH)) {
          try (Reader reader = Files.newBufferedReader(CONFIG_PATH, StandardCharsets.UTF_8)) {
-            MachineConfig.ConfigData loaded = (MachineConfig.ConfigData)GSON.fromJson(reader, CONFIG_TYPE);
+            JsonObject document = GSON.fromJson(reader, JsonObject.class);
+            if (document == null || !document.has("machines") || !document.get("machines").isJsonArray()) {
+               throw new IllegalArgumentException("Machine config must explicitly contain a machines array");
+            }
+            MachineConfig.ConfigData loaded = (MachineConfig.ConfigData)GSON.fromJson(document, CONFIG_TYPE);
             if (loaded != null && loaded.machines != null) {
                normalizeStructure(loaded);
                migrateLegacySteps(loaded);
@@ -52,7 +57,7 @@ public final class MachineConfig {
       loaded.editorWhitelist.removeIf(name -> name == null || name.isBlank());
       Set<String> machineIds = new HashSet<>();
       for (MachineData machine : loaded.machines) {
-         if (machine == null || machine.id == null || machine.id.isBlank() || !machineIds.add(machine.id)) {
+         if (machine == null || machine.id == null || machine.id.isBlank() || machine.id.indexOf('#') >= 0 || !machineIds.add(machine.id)) {
             throw new IllegalArgumentException("Machine config contains a null, missing or duplicate machine id");
          }
          if (machine.name == null) machine.name = "";
@@ -269,6 +274,9 @@ public final class MachineConfig {
    public static boolean updateMachine(MachineConfig.MachineData machine) {
       for (int i = 0; i < configData.machines.size(); i++) {
          if (configData.machines.get(i).id.equals(machine.id)) {
+            if (configData.machines.get(i).revision == Long.MAX_VALUE) {
+               return false;
+            }
             machine.revision = configData.machines.get(i).revision + 1;
             configData.machines.set(i, machine);
             save();
@@ -349,7 +357,7 @@ public final class MachineConfig {
       public List<String> stopModeOrder = new ArrayList<>();
       public int stopModeInterval = 0;
       public boolean stopFollowsStart = false;
-      public int revision = 0;
+      public long revision = 0;
    }
 
    public static class ModeData {

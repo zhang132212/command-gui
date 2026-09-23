@@ -136,7 +136,7 @@ public final class BackendSuite implements ModInitializer {
       handler.receive(payload,new ServerPlayNetworking.Context(){public MinecraftServer server(){return server;}public ServerPlayer player(){return p;}public PacketSender responseSender(){return ServerPlayNetworking.getSender(p);}});
    }
    private void editLock(ServerPlayer p,MachineData m,boolean open){var a=action("editSession",m.id);a.addProperty("open",open);action(p,a);}
-   private void saveAction(ServerPlayer p,String type,MachineData m,int revision){var a=action(type,null);a.add("machine",GSON.toJsonTree(m));a.addProperty("baseRevision",revision);action(p,a);}
+   private void saveAction(ServerPlayer p,String type,MachineData m,long revision){var a=action(type,null);a.add("machine",GSON.toJsonTree(m));a.addProperty("baseRevision",revision);action(p,a);}
    private MachineData copy(MachineData m){return GSON.fromJson(GSON.toJson(m),MachineData.class);}
    private DetectionData detection(int x,int y,int z){
       DetectionData d=new DetectionData();d.enabled=true;d.x=x;d.y=y;d.z=z;d.blockId="minecraft:lever";d.property="powered";d.onValues.add("powered=true");d.offValues.add("powered=false");
@@ -156,7 +156,7 @@ public final class BackendSuite implements ModInitializer {
    private JsonObject sync(ServerPlayer p){Hooks.packets.remove(p.getGameProfile().name());MachineManager.syncTo(p);return json(Hooks.packets(p,MachinePayloads.SyncPayload.class).getLast().json());}
    private Object field(Class<?> type,String name)throws Exception{var f=type.getDeclaredField(name);f.setAccessible(true);return f.get(null);}
    private Object call(Class<?> type,String name,Class<?>[] types,Object...args)throws Exception{var m=type.getDeclaredMethod(name,types);m.setAccessible(true);return m.invoke(null,args);}
-   private void registerAll(){bootstrapTests();crudTests();permissionTests();validationTests();lockTests();detectionTests();schedulerTests();modeTests();fakeTests();syncTests();persistenceTests();ruleTests();interruptionTests();regressionTests();}
+   private void registerAll(){bootstrapTests();crudTests();permissionTests();validationTests();lockTests();detectionTests();schedulerTests();modeTests();fakeTests();syncTests();persistenceTests();ruleTests();interruptionTests();boundaryTests();regressionTests();}
    private void bootstrapTests(){
       test("bootstrap","entrypoints and commands",()->{
          check(FabricLoader.getInstance().isModLoaded("command-gui"),"combined mod loaded");check(!FabricLoader.getInstance().isModLoaded("command-gui-server"),"no legacy server mod");
@@ -176,8 +176,8 @@ public final class BackendSuite implements ModInitializer {
    }
    private <T>void roundtrip(StreamCodec<RegistryFriendlyByteBuf,T> codec,T value){var buf=new RegistryFriendlyByteBuf(Unpooled.buffer(),server.registryAccess());try{codec.encode(buf,value);eq(codec.decode(buf),value,"codec roundtrip");eq(buf.readableBytes(),0,"codec consumed packet");}finally{buf.release();}}
    private void crudTests(){
-      test("crud","add and unique id",()->{var m=fixture();saveAction(admin,"add",m,-1);check(MachineConfig.getMachine(m.id)!=null,"added");eq(MachineConfig.getMachine(m.id).revision,1,"initial revision");int count=MachineConfig.getMachines().size();saveAction(admin,"add",m,-1);eq(MachineConfig.getMachines().size(),count+1,"duplicate id gets unique suffix");});
-      test("crud","edit requires own lock and optimistic revision",()->{var m=stored();var edit=copy(m);edit.name="已修改";saveAction(admin,"edit",edit,m.revision);eq(MachineConfig.getMachine(m.id).name,m.name,"save without lock denied");editLock(admin,m,true);saveAction(admin,"edit",edit,9999);eq(MachineConfig.getMachine(m.id).revision,1,"stale revision denied");saveAction(admin,"edit",edit,m.revision);eq(MachineConfig.getMachine(m.id).name,"已修改","edited");eq(MachineConfig.getMachine(m.id).revision,2,"revision increments");check(MachineManager.editingLockedByOtherMachineId(m.id,"QAB_Editor")==null,"save releases lock");});
+      test("crud","add and unique id",()->{var m=fixture();saveAction(admin,"add",m,-1);check(MachineConfig.getMachine(m.id)!=null,"added");eq(MachineConfig.getMachine(m.id).revision,1L,"initial revision");int count=MachineConfig.getMachines().size();saveAction(admin,"add",m,-1);eq(MachineConfig.getMachines().size(),count+1,"duplicate id gets unique suffix");});
+      test("crud","edit requires own lock and optimistic revision",()->{var m=stored();var edit=copy(m);edit.name="已修改";saveAction(admin,"edit",edit,m.revision);eq(MachineConfig.getMachine(m.id).name,m.name,"save without lock denied");editLock(admin,m,true);saveAction(admin,"edit",edit,9999);eq(MachineConfig.getMachine(m.id).revision,1L,"stale revision denied");saveAction(admin,"edit",edit,m.revision);eq(MachineConfig.getMachine(m.id).name,"已修改","edited");eq(MachineConfig.getMachine(m.id).revision,2L,"revision increments");check(MachineManager.editingLockedByOtherMachineId(m.id,"QAB_Editor")==null,"save releases lock");});
       test("crud","delete and clear category permissions",()->{var m=stored();action(editor,action("delete",m.id));check(MachineConfig.getMachine(m.id)!=null,"whitelisted editor cannot delete");var a=action("clearCategory",null);a.addProperty("categoryId",m.category);action(guest,a);eq(m.category,"测试分类","guest cannot clear");action(admin,a);eq(m.category,"","category cleared");action(admin,action("delete",m.id));check(MachineConfig.getMachine(m.id)==null,"deleted");action(admin,action("delete","missing"));message(admin,"不存在");});
    }
    private void permissionTests(){
@@ -340,6 +340,145 @@ public final class BackendSuite implements ModInitializer {
    }
    private void registerRestart(){
       test("persistence","fresh server reloads machine whitelist and Carpet default",()->{var m=MachineConfig.getMachine("qa_restart_sentinel");check(m!=null,"machine survives process restart");eq(m.name,"重启后端验证","unicode survives restart");check(MachineConfig.getEditorWhitelist().contains("QAB_Editor"),"whitelist survives restart");eq(rule("flippinCactus").value(),"true","setDefault applies after restart");check(!MachineScheduler.hasRunning(),"no stale scheduler");check(!MachineMod.hasMachineStateSubscribers(),"no stale subscribers");});
+   }
+   private String actionBoundaryState()throws Exception{
+      var state=new LinkedHashMap<String,Object>();
+      state.put("machines",GSON.toJson(MachineConfig.getMachines()));state.put("editors",GSON.toJson(MachineConfig.getEditorWhitelist()));
+      state.put("locks",field(MachineManager.class,"editLocks").toString());state.put("runtime",MachineScheduler.dumpRuntimeState());
+      state.put("chains",new TreeSet<>(((Map<String,?>)field(MachineModeChain.class,"chains")).keySet()));
+      for(String key:List.of("lastSwitchTick","lastModeSwitchTick"))state.put(key,field(MachineScheduler.class,key).toString());
+      for(String key:List.of("machineStateSubscribers","fakeStateSubscribers"))state.put(key,new TreeSet<>((Set<UUID>)field(MachineMod.class,key)));
+      return GSON.toJson(state);
+   }
+   private JsonObject changedField(JsonObject seed,String path,String value){
+      JsonObject result=seed.deepCopy();JsonElement target=result;String[] parts=path.split("\\.");
+      for(int i=0;i<parts.length-1;i++)target=target.isJsonArray()?target.getAsJsonArray().get(Integer.parseInt(parts[i])):target.getAsJsonObject().get(parts[i]);
+      if(value==null)target.getAsJsonObject().remove(parts[parts.length-1]);
+      else target.getAsJsonObject().add(parts[parts.length-1],JsonParser.parseString(value));
+      return result;
+   }
+   private void rejectedWireAction(JsonObject malformed,String before)throws Exception{
+      Hooks.clear();receive(admin,new MachinePayloads.ActionPayload(malformed.toString()));
+      eq(actionBoundaryState(),before,"malformed wire action cannot mutate state: "+malformed);message(admin,"无效");
+   }
+   private void boundaryTests(){
+      test("transport","seeded action schema mutations preserve machines locks subscriptions and runtimes",()->{
+         var m=stored();m.id=Integer.toString(900000+serial);m.category="42";
+         var single=mode(m,"single",true);single.detection=detection(320,80,320);power(single.detection,true);m.modes.add(single);
+         editLock(admin,m,true);action(admin,action("requestSync",null));action(admin,action("fakeStatesRequest",null));
+         List<JsonObject> seeds=new ArrayList<>();
+         for(String type:List.of("toggle","delete","refreshDetection","setModes","editSession")){
+            var a=action(type,m.id);if(type.equals("setModes"))a.add("modeIds",GSON.toJsonTree(List.of("single")));if(type.equals("editSession"))a.addProperty("open",true);seeds.add(a);
+         }
+         var add=action("add",null);add.add("machine",GSON.toJsonTree(fixture()));seeds.add(add);
+         var edit=action("edit",null);edit.add("machine",GSON.toJsonTree(m));edit.addProperty("baseRevision",m.revision);seeds.add(edit);
+         var query=action("queryBlock",null);query.addProperty("dimension","minecraft:overworld");query.addProperty("x",1);query.addProperty("y",80);query.addProperty("z",1);query.addProperty("token",1L);seeds.add(query);
+         var category=action("clearCategory",null);category.addProperty("categoryId","42");seeds.add(category);
+         for(String type:List.of("requestSync","machineStatesUnsubscribe","fakeStatesRequest","fakeStatesUnsubscribe"))seeds.add(action(type,null));
+         List<JsonObject> mutations=new ArrayList<>();
+         for(var seed:seeds){
+            for(String wrong:Arrays.asList(null,"null","[]","{}","false","42"))mutations.add(changedField(seed,"type",wrong));
+            if(seed.has("machineId"))for(String wrong:Arrays.asList(null,"null","[]","{}","false",m.id))mutations.add(changedField(seed,"machineId",wrong));
+            if(seed.has("modeIds"))for(String wrong:Arrays.asList(null,"null","{}","42","false","\"single\"","[null]","[\"single\",{}]","[42]"))mutations.add(changedField(seed,"modeIds",wrong));
+            if(seed.has("open"))for(String wrong:Arrays.asList(null,"null","[]","{}","0","\"false\"","\"not-a-boolean\""))mutations.add(changedField(seed,"open",wrong));
+            if(seed.has("machine"))for(String wrong:Arrays.asList(null,"null","[]","true","\"machine\""))mutations.add(changedField(seed,"machine",wrong));
+         }
+         for(String wrong:Arrays.asList(null,"null","\"1\"","true","[]","{}","1.5","9223372036854775808","-1"))mutations.add(changedField(edit,"baseRevision",wrong));
+         for(String coordinate:List.of("x","y","z"))for(String wrong:Arrays.asList(null,"null","\"1\"","true","[]","1.5","2147483648","-2147483649"))mutations.add(changedField(query,coordinate,wrong));
+         for(String wrong:List.of("1.5","9223372036854775808","\"1\"","null"))mutations.add(changedField(query,"token",wrong));
+         mutations.add(changedField(category,"categoryId","42"));mutations.add(changedField(query,"dimension","42"));
+         Collections.shuffle(mutations,new Random(0xC0DE2026L));String before=actionBoundaryState();
+         try{for(var malformed:mutations)rejectedWireAction(malformed,before);}
+         finally{editLock(admin,m,false);MachineScheduler.invalidate(m.id);MachineModeChain.invalidate(m.id);}
+         check(mutations.size()>150,"seeded wire matrix covers all action types and malformed selectors");
+      });
+      test("validation","nested machine wire fields reject coercion null elements fractions and overflow",()->{
+         var m=fixture();m.modes.add(mode(m,"a",false));var seed=action("add",null);seed.add("machine",GSON.toJsonTree(m));
+         Map<String,List<String>> invalid=new LinkedHashMap<>();
+         for(String key:List.of("id","name"))invalid.put("machine."+key,List.of("42","true","[]","{}","null"));
+         for(String key:List.of("bots","bannedPlayers","modeOrder","stopModeOrder"))invalid.put("machine."+key,List.of("{}","false","[null]","[42]","[{}]"));
+         for(String key:List.of("permissionLevel","switchInterval","modeInterval","stopModeInterval"))invalid.put("machine."+key,List.of("null","\"0\"","true","0.5","4294967296"));
+         invalid.put("machine.revision",List.of("null","\"0\"","true","0.5","9223372036854775808"));
+         invalid.put("machine.stopFollowsStart",List.of("\"true\"","1","null"));invalid.put("machine.modes",List.of("{}","[null]"));
+         invalid.put("machine.modes.0.singleSelect",List.of("\"true\"","1","null"));
+         invalid.put("machine.onTimeline.loopCount",List.of("\"0\"","0.5","4294967296"));
+         for(String key:List.of("bot","delay","commandDelay"))invalid.put("machine.onTimeline.steps.0."+key,List.of("\"1\"","1.5","4294967297","null"));
+         invalid.put("machine.onTimeline.steps.0.commands",List.of("{}","[null]","[42]","[false]"));
+         invalid.put("machine.detection.enabled",List.of("\"true\"","1","null"));
+         for(String key:List.of("x","y","z"))invalid.put("machine.detection."+key,List.of("1.5","4294967296","\"0\""));
+         for(String key:List.of("onValues","offValues","ignoreValues"))invalid.put("machine.detection."+key,List.of("{}","[null]","[42]"));
+         String before=actionBoundaryState();Set<String> existing=new HashSet<>(MachineConfig.getMachines().stream().map(value->value.id).toList());
+         try{for(var entry:invalid.entrySet())for(String wrong:entry.getValue())rejectedWireAction(changedField(seed,entry.getKey(),wrong),before);}
+         finally{removeAddedFixtures(existing);}
+      });
+      test("locks","missing negative and stale revisions cannot bypass ownership concurrency checks",()->{
+         var m=stored();var stale=copy(m);stale.name="stale overwrite";editLock(admin,m,true);
+         var fresh=copy(m);fresh.name="fresh revision";saveAction(admin,"edit",fresh,m.revision);var live=MachineConfig.getMachine(m.id);eq(live.revision,2L,"initial owner edit succeeds");
+         editLock(editor,live,true);var a=action("edit",null);a.add("machine",GSON.toJsonTree(stale));String before=GSON.toJson(live);
+         try{
+            for(Integer revision:Arrays.asList(null,-1,1)){
+               if(revision==null)a.remove("baseRevision");else a.addProperty("baseRevision",revision);
+               action(editor,a);eq(GSON.toJson(MachineConfig.getMachine(m.id)),before,"invalid/stale revision preserves new version: "+revision);
+               check(MachineManager.editingLockedByOtherMachineId(m.id,"QAB_Admin")!=null,"rejected save preserves editor lock");
+            }
+            var valid=copy(live);valid.name="valid editor save";saveAction(editor,"edit",valid,live.revision);
+            eq(MachineConfig.getMachine(m.id).revision,3L,"current revision accepted exactly once");
+            saveAction(editor,"edit",valid,live.revision);eq(MachineConfig.getMachine(m.id).revision,3L,"replay without own lock cannot overwrite");
+         }finally{editLock(editor,live,false);}
+      });
+      test("modes","invalid mode selections cannot stop running singles or start multiple singles",()->{
+         var m=stored();var a=mode(m,"a",true);var b=mode(m,"b",true);a.detection=detection(336,80,336);b.detection=detection(337,80,336);power(a.detection,true);power(b.detection,false);m.modes.addAll(List.of(a,b));
+         try{
+            for(String[] ids:List.of(new String[]{"unknown"},new String[]{"b","unknown"},new String[]{"a","b"})){
+               setModes(m,ids);check(!MachineModeChain.isActive(m.id),"invalid selections cannot enqueue a replacement chain");
+               check(!MachineScheduler.isModeProcessRunning(m.id,"a")&&!MachineScheduler.isModeProcessRunning(m.id,"b"),"invalid selections cannot partially start or stop modes");
+               eq(MachineDetector.evaluateDetection(a.detection,server,true).state(),MachineDetector.MachineState.ON,"running single remains on");
+            }
+            setModes(m,"b");check(MachineModeChain.isActive(m.id),"one valid replacement remains supported");
+         }finally{MachineScheduler.invalidate(m.id);MachineModeChain.invalidate(m.id);}
+      });
+      test("validation","reserved machine separator cannot alias an existing mode runtime",()->{
+         var protectedMachine=stored();var mode=mode(protectedMachine,"a",false);protectedMachine.modes.add(mode);MachineScheduler.startMode(protectedMachine,mode,"QAB_Admin");
+         var malicious=fixture();malicious.id=protectedMachine.id+"#a";Set<String> existing=new HashSet<>(MachineConfig.getMachines().stream().map(value->value.id).toList());
+         try{saveAction(admin,"add",malicious,-1);check(MachineConfig.getMachine(malicious.id)==null,"reserved runtime separator rejected before persistence");check(MachineScheduler.isModeProcessRunning(protectedMachine.id,"a"),"target mode runtime untouched");}
+         finally{removeAddedFixtures(existing);MachineScheduler.invalidate(protectedMachine.id);}
+      });
+      test("persistence","reserved machine separator rejects candidate without changing live config",()->{
+         MachineConfig.save();Path file=FabricLoader.getInstance().getConfigDir().resolve("command-gui-server/machines.json");String backup=Files.readString(file),before=GSON.toJson(MachineConfig.getMachines());
+         try{var candidate=json(backup);candidate.getAsJsonArray("machines").get(0).getAsJsonObject().addProperty("id","machine#mode");Files.writeString(file,GSON.toJson(candidate));MachineConfig.load();eq(GSON.toJson(MachineConfig.getMachines()),before,"ambiguous persisted id cannot replace live configuration");}
+         finally{Files.writeString(file,backup);MachineConfig.load();}
+      });
+      test("persistence","missing or malformed machines array preserves config while explicit empty array clears",()->{
+         stored();MachineConfig.save();Path file=FabricLoader.getInstance().getConfigDir().resolve("command-gui-server/machines.json");
+         String backup=Files.readString(file),before=GSON.toJson(MachineConfig.getMachines()),editors=GSON.toJson(MachineConfig.getEditorWhitelist());
+         try{
+            for(String invalid:List.of("{}","{\"editorWhitelist\":[\"unexpected-editor\"]}","{\"machines\":null}","{\"machines\":{}}","{\"machines\":\"[]\"}","{\"machines\":false}","{\"machines\":1}","[]","null")){
+               Files.writeString(file,invalid);MachineConfig.load();eq(GSON.toJson(MachineConfig.getMachines()),before,"invalid machines field preserves loaded machines: "+invalid);
+               eq(GSON.toJson(MachineConfig.getEditorWhitelist()),editors,"invalid candidate cannot partially change editors");
+            }
+            Files.writeString(file,"{\"machines\":[],\"editorWhitelist\":[\"QAB_Editor\"]}");MachineConfig.load();
+            check(MachineConfig.getMachines().isEmpty(),"explicit empty array intentionally clears machines");eq(MachineConfig.getEditorWhitelist(),List.of("QAB_Editor"),"valid empty candidate publishes all fields together");
+         }finally{Files.writeString(file,backup);MachineConfig.load();MachineBlockCache.rebuild();}
+      });
+      test("crud","64-bit revisions cross the integer boundary and reject exhausted revisions atomically",()->{
+         var m=stored();m.revision=Integer.MAX_VALUE;MachineConfig.save();MachineConfig.load();var loaded=MachineConfig.getMachine(m.id);
+         eq(loaded.revision,(long)Integer.MAX_VALUE,"legacy 32-bit maximum loads losslessly");
+         try{
+            editLock(admin,loaded,true);var edited=copy(loaded);edited.name="revision above int";saveAction(admin,"edit",edited,loaded.revision);
+            var updated=MachineConfig.getMachine(m.id);eq(updated.revision,2147483648L,"revision increments beyond integer maximum");
+            boolean found=false;for(var value:sync(admin).getAsJsonArray("machines")){var row=value.getAsJsonObject();if(row.get("id").getAsString().equals(m.id)){eq(row.get("revision").getAsLong(),2147483648L,"wire snapshot keeps full revision");found=true;}}
+            check(found,"updated machine present in wire snapshot");
+            editLock(admin,updated,true);var stale=copy(loaded);stale.name="stale must not save";saveAction(admin,"edit",stale,Integer.MAX_VALUE);
+            eq(MachineConfig.getMachine(m.id).revision,2147483648L,"stale integer revision still rejected");eq(MachineConfig.getMachine(m.id).name,"revision above int","stale content rejected");
+            var next=copy(updated);next.name="second long save";saveAction(admin,"edit",next,updated.revision);eq(MachineConfig.getMachine(m.id).revision,2147483649L,"next long revision saves normally");
+            var exhausted=MachineConfig.getMachine(m.id);exhausted.revision=Long.MAX_VALUE;MachineConfig.save();
+            editLock(admin,exhausted,true);String before=GSON.toJson(exhausted);Path file=FabricLoader.getInstance().getConfigDir().resolve("command-gui-server/machines.json");String persisted=Files.readString(file);
+            var overflow=copy(exhausted);overflow.name="overflow must not save";Hooks.clear();saveAction(admin,"edit",overflow,Long.MAX_VALUE);
+            eq(GSON.toJson(MachineConfig.getMachine(m.id)),before,"exhausted revision preserves live object");eq(Files.readString(file),persisted,"exhausted revision never rewrites config");message(admin,"修订号已达上限");
+            check(MachineManager.editingLockedByOtherMachineId(m.id,"QAB_Editor")!=null,"exhausted save preserves owner lock");
+            check(!MachineConfig.updateMachine(overflow),"lower-level update also rejects overflow");eq(GSON.toJson(MachineConfig.getMachine(m.id)),before,"direct update rejection is atomic");
+         }finally{editLock(admin,MachineConfig.getMachine(m.id),false);}
+      });
    }
    private void regressionTests(){
       test("transport","malformed action roots and fields cannot mutate machines",()->{

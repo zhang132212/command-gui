@@ -1,0 +1,1 @@
+{"schemaVersion":1,"id":"command-gui-system-tests","version":"1.0.0","environment":"*","entrypoints":{"main":["qa.system.SystemQa"],"client":["qa.system.ClientJourney"]},"mixins":["system-tests.mixins.json"],"depends":{"command-gui":"*","fabric-api":"*"}}

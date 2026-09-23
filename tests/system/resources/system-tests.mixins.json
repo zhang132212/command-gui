@@ -1,0 +1,1 @@
+{"required":true,"package":"qa.system.mixin","compatibilityLevel":"JAVA_25","mixins":["PacketTrace","ServerMessages","ExecutionTrace"],"injectors":{"defaultRequire":1}}

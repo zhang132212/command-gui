@@ -5,7 +5,8 @@ param(
     [string]$JavaHome = $env:JAVA_HOME,
     [ValidateRange(60,3600)][int]$TimeoutSeconds = 600,
     [switch]$Offline,
-    [switch]$WithoutCarpet
+    [switch]$WithoutCarpet,
+    [string]$OutputRoot
 )
 $ErrorActionPreference = 'Stop'
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
@@ -24,7 +25,9 @@ if (!$WithoutCarpet) {
 }
 $mode = if ($WithoutCarpet) { 'without-carpet' } else { 'with-carpet' }
 $runId = (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + $mode + '-' + [Guid]::NewGuid().ToString('N').Substring(0,8)
-$outputRoot = Join-Path $repo "build/client-e2e/$runId"
+if (!$OutputRoot) { $OutputRoot = Join-Path $repo "build/client-e2e/$runId" }
+$outputRoot = [IO.Path]::GetFullPath($OutputRoot)
+if ((Test-Path -LiteralPath $outputRoot) -and @(Get-ChildItem -LiteralPath $outputRoot -Force).Count -gt 0) { throw 'OutputRoot 必须为不存在或空目录，防止旧结果误报。' }
 $runDir = Join-Path $outputRoot 'run'
 New-Item -ItemType Directory -Path (Join-Path $runDir 'mods') -Force | Out-Null
 foreach ($dependency in $dependencies) { Copy-Item -LiteralPath $dependency -Destination (Join-Path $runDir 'mods') }

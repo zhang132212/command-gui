@@ -142,6 +142,8 @@ GUI 参数调整后重新打开 GUI 即可验证；语言资源包调整后可�
 
 自动回归：专用服务端和跨进程重启见 [后端测试](testing/backend/README.md)；真实客户端点击、网络往返、单人世界切换以及无 Carpet 场景见 [端到端测试](tests/e2e/README.md)。`gradlew build` 本身不会运行这些 Minecraft 集成测试，应以对应脚本的退出码与完整报告为准。
 
+完整双端验证使用 [统一系统测试程序](testing/system/README.md)：`testing/run-system-tests.ps1` 串行启动六类测试，其中专服阶段包含一个服务端和两个通过 TCP 连接的真实客户端。输出可搜索的 HTML、JSON/JUnit、完整模组数据包日志、事件时间线和截图；参见 [本次验证与边界修复](docs/system-testing-2026-09-24.md)。
+
 ## 架构
 
 ```text

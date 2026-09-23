@@ -6,7 +6,8 @@ param(
     [string]$JavaHome = $env:JAVA_HOME,
     [int]$TimeoutSeconds = 600,
     [switch]$Offline,
-    [switch]$SkipRestart
+    [switch]$SkipRestart,
+    [string]$OutputRoot
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'backend/RunnerReports.ps1')
@@ -31,7 +32,9 @@ foreach ($pattern in @('fabric-carpet-*.jar', 'carpet-org-addition-*.jar')) {
     $dependencies += $matches[0].FullName
 }
 $runId = (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [Guid]::NewGuid().ToString('N').Substring(0,8)
-$outputRoot = Join-Path $repo "build/backend-tests/$runId"
+if (!$OutputRoot) { $OutputRoot = Join-Path $repo "build/backend-tests/$runId" }
+$outputRoot = [IO.Path]::GetFullPath($OutputRoot)
+if ((Test-Path -LiteralPath $outputRoot) -and @(Get-ChildItem -LiteralPath $outputRoot -Force).Count -gt 0) { throw 'OutputRoot 必须为不存在或空目录，防止旧结果误报。' }
 $runDir = Join-Path $outputRoot 'run'
 New-Item -ItemType Directory -Path (Join-Path $runDir 'mods') -Force | Out-Null
 Set-Content -LiteralPath (Join-Path $runDir '.backend-test-isolated') -Value $runId -Encoding utf8
