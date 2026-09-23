@@ -117,10 +117,10 @@ public class SettingsScreen extends BaseParentedScreen<Screen> {
    }
 
    private SettingsScreen.YesNoButton addSettingRow(Component label, int y, String configKey, boolean selected) {
-      int buttonWidth = GuiTuning.getInt("SettingsScreen.SETTING_BUTTON_WIDTH", SETTING_BUTTON_WIDTH);
-      int buttonHeight = GuiTuning.getInt("SettingsScreen.SETTING_BUTTON_HEIGHT", SETTING_BUTTON_HEIGHT);
+      int buttonWidth = Math.max(36, Math.min(this.contentArea.width() / 3, GuiTuning.getInt("SettingsScreen.SETTING_BUTTON_WIDTH", SETTING_BUTTON_WIDTH)));
+      int buttonHeight = Math.max(18, GuiTuning.getInt("SettingsScreen.SETTING_BUTTON_HEIGHT", SETTING_BUTTON_HEIGHT));
       List<FormattedCharSequence> lines = this.font.split(label, Math.max(24, this.contentArea.width() - buttonWidth - 36));
-      int rowHeight = Math.max(GuiTuning.getInt("SettingsScreen.ROW_HEIGHT", ROW_HEIGHT), lines.size() * 12 + 16);
+      int rowHeight = Math.max(GuiTuning.getInt("SettingsScreen.ROW_HEIGHT", ROW_HEIGHT), Math.max(buttonHeight + 12, lines.size() * 12 + 16));
       if (!this.settingRows.isEmpty()) {
          SettingRow previous = this.settingRows.getLast();
          y = previous.widget().getY() - (previous.height() - previous.widget().getHeight()) / 2 + previous.height() + 8;
@@ -286,7 +286,9 @@ public class SettingsScreen extends BaseParentedScreen<Screen> {
 
    @Override
    public void extractBackground(GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {
-      super.extractBackground(g, mouseX, mouseY, partialTick);
+      if (this.minecraft.level == null || !ReGlassBridge.prepare(g)) {
+         super.extractBackground(g, mouseX, mouseY, partialTick);
+      }
       GuiTheme.screenBackground(g, this.width, this.height);
       if (this.contentArea == null) return;
       g.enableScissor(this.contentArea.left(), this.contentArea.top(), this.contentArea.right(), this.contentArea.bottom());
@@ -377,35 +379,23 @@ public class SettingsScreen extends BaseParentedScreen<Screen> {
       }
 
       public void onPress(InputWithModifiers input) {
-         this.selected = !this.selected;
+         this.selected = !SettingsConfig.getBoolean(this.configKey);
          this.updateMessage();
          SettingsConfig.setBoolean(this.configKey, this.selected);
          SettingsConfig.save();
       }
 
       protected void extractContents(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY, float partialTick) {
-         boolean on = this.selected;
-         int trackBase = on ? GuiTheme.mix(GuiTheme.surface(), GuiTheme.accent(), 0.55F) : GuiTheme.surface();
-         int trackRim = on ? GuiTheme.mix(GuiTheme.accent(), 0xFFFFFFFF, 0.3F) : GuiTheme.border();
-         int knob = on ? 0xFFF3FFFC : GuiTheme.mix(GuiTheme.muted(), 0xFFFFFFFF, 0.3F);
-         int color = on ? GuiTheme.text() : GuiTheme.muted();
-         Component text = Component.translatable(on ? "screen.command-gui.settings.yes" : "screen.command-gui.settings.no");
-         Font font = Minecraft.getInstance().font;
-         int switchX = this.getX() + this.getWidth() - 28;
-         int switchY = this.getY() + (this.getHeight() - 14) / 2;
-         GuiTheme.rounded(guiGraphics, switchX, switchY, 28, 14, 7, trackRim);
-         GuiTheme.rounded(guiGraphics, switchX + 1, switchY + 1, 26, 12, 6, trackBase);
-         int knobX = switchX + (on ? 16 : 2);
-         GuiTheme.rounded(guiGraphics, knobX, switchY + 2, 10, 10, 5, GuiTheme.alpha(0xFF000000, 0x40));
-         GuiTheme.rounded(guiGraphics, knobX, switchY + 1, 10, 10, 5, knob);
-         guiGraphics.text(font, text, this.getX() + 4, this.getY() + (this.getHeight() - 9) / 2, color, false);
-         if (this.isHovered() || this.isFocused()) {
-            // 方角描边和圆角玻璃不搭：用两层圆角画一圈焦点环
-            int r = GuiTheme.clampRadius(GuiTheme.radius(), this.getWidth(), this.getHeight());
-            GuiTheme.rounded(guiGraphics, this.getX(), this.getY(), this.getWidth(), this.getHeight(), r, GuiTheme.alpha(GuiTheme.accent(), 0xAA));
-            GuiTheme.rounded(guiGraphics, this.getX() + 1, this.getY() + 1, this.getWidth() - 2, this.getHeight() - 2,
-               Math.max(0, r - 1), GuiTheme.panel());
+         boolean actual = SettingsConfig.getBoolean(this.configKey);
+         if (this.selected != actual) {
+            this.selected = actual;
+            this.updateMessage();
          }
+         boolean on = this.selected;
+         GuiTheme.button(guiGraphics, this, on, this.active, mouseX, mouseY);
+         Component state = Component.translatable(on ? "screen.command-gui.settings.yes" : "screen.command-gui.settings.no");
+         GuiTheme.label(guiGraphics, this, state, this.active ? GuiTheme.text() : GuiTheme.disabled(), true);
+
       }
    }
 }

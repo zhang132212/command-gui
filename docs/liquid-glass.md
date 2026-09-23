@@ -1,67 +1,117 @@
-# 液态玻璃外观
+# ReGlass 液态玻璃界面
 
-界面从「不透明深色卡片」改为半透明磨砂玻璃：世界（或标题界面的全景图）先被模糊，
-再压一层上浅下深的暗色，面板与控件浮在上面，靠 1px 棱边、顶部光泽和柔和投影拉开层次。
+基线：`origin/main` 的 `d5971ba`。适配 API：
+[ReGlass-ev](https://github.com/RLlufee/ReGlass-ev/tree/1a931e70da841ab3c4fd5a23b0995ea048c5e22c)
+（Minecraft 26.2，版本 1.1.0-ev）。
 
-## 观感要点
+## 使用
 
-- **背景**：沿用原版菜单模糊（`Options.getMenuBackgroundBlurriness()`，默认 5）。原版只在模糊度
-  `>= 1` 时调用 `GuiGraphicsExtractor.blurBeforeThisStratum()`，界面层在模糊度被关掉时会自己补一次，
-  保证玻璃始终有磨砂底；两者互斥，每帧只会模糊一次。
-- **底板**：玻璃卡片是「亮边 + 半透明底 + 顶部光泽 + 底边暗线」四层，读起来像一块有厚度的玻璃，
-  而不是一块灰色方块。
-- **棱边**：亮边统一走 `GuiTheme.border()`，顶边取更高亮度，底边用暗线，形成受光方向一致的高光。
-- **流动感**：鼠标悬停在按钮上时，玻璃表面会出现一道跟随光标的柔光带（`specular`），
-  配合强调色外发光，接近系统级控件的反馈。
-- **层次**：面板圆角 9、控件圆角 6 且高度 ≤ 22 时用胶囊形；顶部标签改为「玻璃轨道 + 浮起胶囊」
-  的分段控件。
+客户端用本次构建的 Command-GUI 替换原 jar，并放入 ReGlass-ev 的 26.2 jar。
+仍需要 Fabric Loader 0.19.3+、Fabric API 和 Java 25。
+ReGlass 是客户端可选依赖，服务端无需安装；未安装时使用内置圆角半透明材质。
+本次修改不涉及指令、机器协议或服务端功能。
 
-## 绘制层
+主界面顶栏、底栏、内容面板使用玻璃材质，按钮和列表使用蓝色选中态。
+安装 ReGlass 后，折射、高光与圆角抗锯齿由其着色器处理，折射参数沿用 ReGlass 设置。
+文本与交互区域仍由 Command-GUI 绘制和处理。
 
-全部集中在 `GuiTheme`（客户端），其余界面只调用它：
+## 调整
 
-| 方法 | 用途 |
-|---|---|
-| `screenBackground` | 磨砂底板：模糊 + 上浅下深的压暗层 + 顶部 1px 环境光 |
-| `panel` / `popup` | 玻璃卡片 / 更实的弹窗（悬浮提示、自动补全列表） |
-| `row` | 列表行：玻璃底 + 悬停 / 选中态，不投影，避免长列表开销 |
-| `button` | 胶囊玻璃按钮，支持选中（强调色染色 + 外发光）、禁用与 hover 柔光 |
-| `rounded` / `outline` / `divider` | 圆角、描边、分隔线等基础图元 |
+在游戏实例 `config/command-gui/gui-tuning.json` 合并以下数字配置，重启客户端生效：
 
-`rounded()` 每个圆角行一次 `fill`：大面板半径大但数量少，列表行和按钮半径小且只画可见行，
-所以绘制量与旧版同级，不随内容量增长。
+```json
+{
+  "GuiTheme.REGLASS_ENABLED": 1,
+  "GuiTheme.GLASS_BLUR": 8,
+  "GuiTheme.RADIUS": 4,
+  "GuiTheme.PANEL_RADIUS": 6,
+  "GuiTheme.INPUT_RADIUS": 2
+}
+```
 
-## 调参
+`REGLASS_ENABLED: 0` 关闭本模组对 API 的调用；ReGlass 自身的原版界面改造仍由其设置控制。
+`GLASS_BLUR` 限制为 1–32。旧调优文件中的颜色值仍优先于新默认值。
+要查看默认配色，可先备份旧调优文件再移走其中的 `GuiTheme.*` 颜色覆盖。
 
-所有颜色、圆角都走 `GuiTuning`，可用 `config/command-gui/gui-tuning.json` 覆盖，键名在
-`devtools/tuning-schema.json`（分组「液态玻璃主题」）。常用键：
-
-| 键 | 说明 |
-|---|---|
-| `GuiTheme.SCRIM_TOP` / `SCRIM_BOTTOM` | 背景压暗层（上 / 下） |
-| `GuiTheme.PANEL` / `PANEL_STRONG` | 玻璃卡片 / 弹窗底板 |
-| `GuiTheme.SURFACE` / `HOVER` / `SELECTED` | 控件常态 / 悬停 / 选中态 |
-| `GuiTheme.BORDER` / `SHEEN` / `SHADOW` | 棱边 / 顶部光泽 / 投影 |
-| `GuiTheme.RADIUS` / `PANEL_RADIUS` | 控件 / 面板圆角 |
-| `GuiTheme.BLUR_ENABLED` | `0` 时尊重原版模糊设置，不再强制磨砂 |
-
-`devtools/gui-tuning.json` 是全部键的默认值快照，可直接复制到
-`config/command-gui/gui-tuning.json` 再改；改完重新打开界面即可生效，不用重新打包。
+API 方法仅在首次使用时解析，后续复用；API 不兼容时记录日志并回退，避免逐帧重复报错。
+ReGlass 当前共享缓冲区最多支持 64 个元素。本模组在计数达到 56 时使用回退材质，
+为原版提示等元素预留容量。与其他大量使用 ReGlass 的模组共存时仍需实机检查。
 
 ## 验证
 
-`tests/gui-theme/` 是一段只截图的客户端 QA（不进发布 jar）：
-
-```bash
-./gradlew runClient -I tests/gui-theme/init.gradle
+```powershell
+.\gradlew.bat build -x bumpVersion
+.\gradlew.bat runClient -I tests/gui-theme/init.gradle
 ```
 
-它会在标题界面打开主界面，依次切到各标签、设置页，并把光标移到按钮上验证 hover 高光，
-截图写到 `build/gui-theme-qa/screenshots/`：
+第二条使用仓库现有独立 QA 实例，截图保存在 `build/gui-theme-qa/screenshots`，不修改玩家存档。
+将 ReGlass jar 放入 `build/gui-theme-qa/mods` 可检查 API 渲染，移走可检查回退效果。
+标题界面截图可以验证页面与着色器；实际世界、不同 GUI 缩放及其他渲染模组组合需要另行验收。
 
-![主界面](ui/main-v3.png)
-![假人页](ui/fakeplayer-v3.png)
-![设置页](ui/settings-v3.png)
-![悬停高光](ui/hover-v3.png)
+## 本次验收记录
 
-上述截图取自 2026-09-12、1440×810、模糊度 5、GUI 缩放 3 的实测客户端。
+- Command-GUI 测试包：`0.3.0-beta1+liquidglass.1`，Java 25 / Gradle 9.5 构建成功。
+- ReGlass-ev `1.1.0-ev` 从上述提交构建成功，实际客户端日志确认 API 已启用。
+- 在独立客户端实例中查看了中文主界面与设置页截图，完成页面切换和自动退出。
+- 当前标题环境仅开放快捷指令与假人两个标签；原 QA 脚本中的 machine/preset 文件名
+  不代表相应权限页面已被测试。服务器机器页面、世界背景及其他渲染模组组合未验证。
+- 最终 ReGlass 预览：`build/liquid-glass-preview/main.png`、`settings.png`。
+- 移除 ReGlass 后再次启动，截图与自动退出完成，确认可选依赖缺失时回退可用。
+
+## 第二轮编辑页调整（liquidglass.2）
+
+- 默认圆角：按钮 4、面板 6、输入框 2。输入框使用深色内嵌底板与焦点下划线，
+  不再使用按钮的折射、膨胀与高光效果。
+- 指令/假人指令页：宽窗口分离左侧基本信息与右侧指令编排；窄窗口使用上下分组。
+  指令列表按可用宽高布局，保留滚动、排序、复制、删除和补全。
+- 机器页：名称、分类、说明、假人、间隔与权限分组；执行配置在宽窗口右侧纵排、
+  窄窗口下方横排。保存/返回固定右下，删除独立放在左下。
+- 设置“是/否”使用主题按钮，底板先于文字绘制；颜色和状态文字读取实际配置，
+  支持按钮宽高调优，不再叠加固定尺寸的旧滑块。
+- 编辑页验收脚本：`./gradlew runClient -I tests/editor-layout/init.gradle`。
+  截图与日志位于独立实例 `build/editor-layout-qa`，测试辅助模组不进入发布 jar。
+
+第二轮验收通过：720×450、480×300、320×240 三种 GUI 尺寸，普通指令、假人指令、
+自定义假人指令、机器编辑与设置页全部完成控件边界/重叠检查；验证滚动后的布局、
+调整尺寸后的未保存文本保留，以及设置点击、聚焦、外部值变化时的“是/否”一致性。
+机器编辑权限由测试夹具提供，没有连接服务器或提交机器配置。
+测试包：`build/libs/command-gui-0.3.0-beta1+liquidglass.2.jar`。
+
+## 第三轮细节（liquidglass.3）
+
+- 机器编辑页宽布局的两块面板共用顶部、底部边界；普通编辑和配置权限布局均保留底部内边距。
+- 小控件采用四分之一 GUI 像素的边缘覆盖绘制，内嵌输入框和搜索框不再使用整像素描边。
+- 滚动条使用细圆角轨道与滑块，悬停略微加宽；拖动命中区域、滚动比例与位置算法保持原逻辑。
+- 假人列表移除重复方框与原版勾号贴图，改为统一勾选控件；其他 MarkCheckbox 同步使用相同风格。
+- 测试夹具新增 30 个假人的列表预览与勾选切换检查，不连接服务器、不生成实际假人。
+第三轮构建通过；三种 GUI 尺寸完成截图、布局检查、设置状态与假人勾选切换测试。搜索图标同步采用平滑圆环与线段。
+
+## Carpet 规则状态筛选（liquidglass.4）
+
+规则列表顶部新增“已开启 / 未开启”，默认均勾选。两个选项分别控制当前值为
+true、false 的规则；数字、文本等其他值始终保留。因此两项都取消时仅显示非布尔值规则。
+判断使用服务器快照当前值，不使用待确认目标值，也不依据规则类型或默认值猜测。
+状态筛选与搜索、分类取交集；切换后列表滚动回到顶部，待确认队列保留。
+滚动条起止位置同步避开筛选栏与底部操作栏。
+
+## 悬浮提示可读性（liquidglass.5）
+
+- 悬浮提示及补全弹层的默认底板从约 75% 提高到约 95% 不透明（`GuiTheme.PANEL_STRONG = 0xF2202836`）。
+- 提示底板直接在当前 GUI 层绘制，遮挡底下的界面文字，保留平滑小圆角与细描边。
+- Command GUI 主界面和子界面的原版 Tooltip 通过 `TooltipRenderUtilMixin` 使用同一底板，
+  避免 ReGlass 默认提示透明度导致样式不一致；不修改 ReGlass 全局配置。
+- 独立客户端截图夹具增加密集背景文字上的原版提示与自定义提示对照。
+
+## Carpet 筛选位置（liquidglass.6）
+
+“已开启 / 未开启”移动到底部搜索框右侧，与服务器机器开关共用勾选项的定位和间距。
+规则列表恢复顶部原来被筛选栏占用的 26 像素，滚动范围同步更新。
+默认双选、非布尔值保留以及搜索/分类组合筛选逻辑不变。
+
+## 背景蒙版（bgmask.1）
+
+亮场景（雪原、天空、纯白界面）下液态玻璃底板对比度不足时，可用 `GuiTheme.BACKGROUND_MASK`
+在模糊层与压暗渐变之间叠加一层整屏蒙版。默认 `0x33000000`（约 20% 黑），`0` 关闭，
+建议 `0x33000000` ~ `0x66000000`；主界面与各子界面共用同一实现，安装 ReGlass 时同样生效。
+调优键已加入 `devtools` 的 schema 与 `gui-tuning.json`，直接改 JSON 重启客户端即可。
+

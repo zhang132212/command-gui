@@ -67,13 +67,11 @@ public final class GuiTabBar extends TabNavigationBar {
          int y = this.getY() - 3;
          int w = this.getWidth() + 10;
          int h = this.getHeight() + 6;
-         int r = GuiTheme.clampRadius(GuiTheme.panelRadius(), w, h);
-         GuiTheme.rounded(g, x, y + 1, w, h, r, GuiTheme.shadow());
-         GuiTheme.rounded(g, x, y, w, h, r, GuiTheme.border());
-         GuiTheme.rounded(g, x + 1, y + 1, w - 2, h - 2, Math.max(0, r - 1), GuiTheme.alpha(GuiTheme.panel(), 0x8C));
-         g.fillGradient(x + r, y + 1, x + w - r, y + Math.max(3, h / 2), GuiTheme.sheen(), 0x00FFFFFF);
+         GuiTheme.panel(g, x, y, w, h, GuiTheme.panelRadius());
       }
-      super.extractWidgetRenderState(g, mouseX, mouseY, partialTick);
+      if (this.visible) {
+         for (TabButton button : this.tabButtons) button.extractRenderState(g, mouseX, mouseY, partialTick);
+      }
    }
 
    @Override

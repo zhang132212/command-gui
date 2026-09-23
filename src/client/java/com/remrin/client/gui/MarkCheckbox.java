@@ -5,9 +5,7 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.Button.OnPress;
-import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.Identifier;
 
 public class MarkCheckbox extends Button {
    private boolean selected;
@@ -47,21 +45,8 @@ public class MarkCheckbox extends Button {
       int boxSize = 14;
       int boxX = this.getX();
       int boxY = this.getY() + (this.getHeight() - boxSize) / 2;
-      GuiTheme.row(guiGraphics, boxX, boxY, boxSize, boxSize, this.selected && this.available,
+      GuiTheme.checkbox(guiGraphics, boxX, boxY, boxSize, this.selected, this.available,
          this.available && (this.isHovered() || this.isFocused()));
-      if (this.available && (this.isHovered() || this.isFocused() || this.selected)) {
-         GuiTheme.outline(guiGraphics, boxX, boxY, boxSize, boxSize,
-            GuiTheme.alpha(GuiTheme.accent(), this.selected ? 0xC0 : 0x66));
-      }
-      if (!this.available) {
-         guiGraphics.blitSprite(
-            RenderPipelines.GUI_TEXTURED, Identifier.parse("minecraft:spectator/close"), boxX + 2, boxY + 2, boxSize - 4, boxSize - 4, -43691
-         );
-      } else if (this.selected) {
-         guiGraphics.blitSprite(
-            RenderPipelines.GUI_TEXTURED, Identifier.parse("minecraft:icon/checkmark"), boxX + 2, boxY + 2, boxSize - 4, boxSize - 4, GuiTheme.accent()
-         );
-      }
 
       guiGraphics.text(font, this.getMessage(), boxX + boxSize + 4, this.getY() + (this.getHeight() - 9) / 2, this.available ? GuiTheme.text() : GuiTheme.disabled());
    }

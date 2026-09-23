@@ -38,6 +38,7 @@
     "fabric-api": "*"
   },
   "suggests": {
-    "modmenu": "*"
+    "modmenu": "*",
+    "reglass": "*"
   }
 }

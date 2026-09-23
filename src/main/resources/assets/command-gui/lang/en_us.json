@@ -605,5 +605,12 @@
   "screen.command-gui.ui.no_results": "No matching results",
   "screen.command-gui.ui.player_hint": "Select a player to manage actions",
   "screen.command-gui.ui.search_help": "Try a shorter query or clear your search",
-  "screen.command-gui.ui.permission_short": "Permission"
+  "screen.command-gui.ui.permission_short": "Permission",
+  "screen.command-gui.editor.empty_commands": "Enter a command and add it to the sequence",
+  "screen.command-gui.editor.workflow": "Execution settings",
+  "screen.command-gui.editor.record_shortcut": "Record",
+  "screen.command-gui.type.time": "Time",
+  "screen.command-gui.rules.filter_enabled": "Enabled",
+  "screen.command-gui.rules.filter_disabled": "Disabled",
+  "screen.command-gui.rules.filter_hint": "Filter current true / false values. Other values always remain visible."
 }

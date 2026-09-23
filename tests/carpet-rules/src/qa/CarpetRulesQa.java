@@ -56,7 +56,7 @@ public final class CarpetRulesQa implements ClientModInitializer {
                   require(CarpetRuleClient.rules().stream().anyMatch(r->r.options().size()>2),"nonboolean options");
                   var tab=tab();
                   ((GuiSearchBox)field(screen,"searchField")).setValue("flippinCactus");
-                  click(tab.getButtons().getFirst()); next();
+                  click(tab.getButtons().stream().filter(b -> !(b instanceof MarkCheckbox)).findFirst().orElseThrow()); next();
                } }
                case 4 -> { if(ticks>15) {
                   require(mc.gui.screen() instanceof CarpetRuleEditScreen,"rule editor opened"); shot(mc,"carpet-rule-editor");

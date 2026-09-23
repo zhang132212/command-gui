@@ -1,7 +1,5 @@
 package com.remrin.client.gui;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.function.Consumer;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -17,7 +15,6 @@ import net.minecraft.network.chat.Component;
 
 /** A custom search surface around the vanilla editor, including its IME and selection support. */
 public final class GuiSearchBox extends AbstractWidget {
-   private static final List<int[]> SEARCH_SPANS = createSearchIcon();
    private final EditBox editor;
    private final Font font;
    private Component hint = Component.empty();
@@ -63,25 +60,13 @@ public final class GuiSearchBox extends AbstractWidget {
    protected void extractWidgetRenderState(GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {
       int x = this.getX(), y = this.getY(), w = this.getWidth(), h = this.getHeight();
       boolean focused = this.isFocused() && this.active;
-      int stroke = focused ? GuiTheme.accent() : this.isHovered() && this.active ? GuiTheme.mix(GuiTheme.border(), 0xFFFFFFFF, 0.35F) : GuiTheme.border();
-      int radius = GuiTheme.clampRadius(GuiTheme.radius() + 2, w, h);
-      GuiTheme.rounded(g, x, y + 1, w, h, radius, GuiTheme.shadow());
-      if (focused) {
-         GuiTheme.rounded(g, x - 1, y - 1, w + 2, h + 2, Math.min(radius + 1, (h + 2) / 2), GuiTheme.alpha(GuiTheme.accent(), 0x2E));
-      }
-      GuiTheme.rounded(g, x, y, w, h, radius, stroke);
-      GuiTheme.rounded(g, x + 1, y + 1, w - 2, h - 2, Math.max(0, radius - 1), GuiTuning.getColor("GuiSearchBox.BACKGROUND", 0x59141C28));
-      if (w > 2 * radius + 2 && h >= 8) {
-         g.fillGradient(x + radius + 1, y + 1, x + w - radius - 1, y + Math.max(3, h / 2), GuiTheme.sheen(), 0x00FFFFFF);
-      }
+      GuiTheme.input(g, x, y, w, h, GuiTuning.getColor("GuiSearchBox.BACKGROUND", 0x59242E40),
+         focused, this.isHovered() && this.active);
       if (w >= 48) {
          int color = this.isFocused() && this.active ? GuiTheme.accent() : GuiTheme.muted();
-         var pose = g.pose();
-         pose.pushMatrix();
-         pose.translate(x + 7, y + (h - 12) / 2.0F);
-         pose.scale(0.25F, 0.25F);
-         for (int[] span : SEARCH_SPANS) g.fill(span[0], span[1], span[2], span[1] + 1, color);
-         pose.popMatrix();
+         float iconX = x + 7, iconY = y + (h - 12) / 2f;
+         SmoothGui.outline(g, iconX, iconY, 8, 8, 4, 1.25f, color);
+         SmoothGui.line(g, iconX + 6.8f, iconY + 6.8f, iconX + 11, iconY + 11, 1.3f, color);
          g.fill(x + 21, y + 6, x + 22, y + h - 6, GuiTheme.border());
       }
       this.editor.active = this.active;
@@ -102,22 +87,4 @@ public final class GuiSearchBox extends AbstractWidget {
    @Override public boolean preeditUpdated(PreeditEvent event) { return this.active && this.visible && this.isFocused() && this.editor.preeditUpdated(event); }
    @Override protected void updateWidgetNarration(NarrationElementOutput output) { this.editor.updateWidgetNarration(output); }
 
-   private static List<int[]> createSearchIcon() {
-      List<int[]> spans = new ArrayList<>();
-      for (int y = 0; y < 48; y++) {
-         int start = -1;
-         for (int x = 0; x <= 48; x++) {
-            double radius = Math.hypot(x + 0.5 - 18, y + 0.5 - 18);
-            boolean ring = radius >= 10 && radius <= 14;
-            boolean handle = x + y >= 54 && x + y <= 80 && Math.abs(x - y) <= 3;
-            boolean ink = x < 48 && (ring || handle);
-            if (ink && start < 0) start = x;
-            if (!ink && start >= 0) {
-               spans.add(new int[]{start, y, x});
-               start = -1;
-            }
-         }
-      }
-      return List.copyOf(spans);
-   }
 }

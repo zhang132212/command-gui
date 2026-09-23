@@ -21,7 +21,9 @@ public abstract class BaseParentedScreen<P extends Screen> extends Screen {
 
    @Override
    public void extractBackground(GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {
-      super.extractBackground(g, mouseX, mouseY, partialTick);
+      if (this.minecraft.level == null || !ReGlassBridge.prepare(g)) {
+         super.extractBackground(g, mouseX, mouseY, partialTick);
+      }
       GuiTheme.editorBackground(g, this.width, this.height);
    }
 

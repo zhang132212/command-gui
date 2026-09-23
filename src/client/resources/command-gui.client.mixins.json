@@ -2,7 +2,7 @@
   "required": true,
   "package": "com.remrin.client.mixin",
   "compatibilityLevel": "JAVA_25",
-  "client": ["CommandSuggestionsMixin", "CommandSuggestionsPlaceholderMixin"],
+  "client": ["CommandSuggestionsMixin", "CommandSuggestionsPlaceholderMixin", "TooltipRenderUtilMixin"],
   "injectors": {
     "defaultRequire": 1
   },

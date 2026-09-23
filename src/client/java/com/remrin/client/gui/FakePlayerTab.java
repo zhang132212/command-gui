@@ -345,9 +345,16 @@ public class FakePlayerTab implements Tab {
             }
 
             this.playerButtons.add(btn);
-            Button checkbox = GuiButton.themed(Component.empty(), b -> this.toggleMultiSelection(playerName))
-               .bounds(checkboxX, checkboxY + (i - this.scrollOffset) * this.playerItemHeight(), this.checkboxSize(), this.checkboxSize())
-               .build();
+            Button checkbox = new MarkCheckbox(checkboxX, checkboxY + (i - this.scrollOffset) * this.playerItemHeight(),
+               this.checkboxSize(), this.checkboxSize(), Component.empty(), this.multiSelection.contains(playerName), b -> this.toggleMultiSelection(playerName)) {
+               @Override protected void extractContents(GuiGraphicsExtractor g, int mx, int my, float tick) {
+                  this.setSelected(FakePlayerTab.this.multiSelection.contains(playerName));
+                  GuiTheme.checkbox(g, this.getX(), this.getY(), this.getWidth(), this.selected(), this.active, this.isHovered() || this.isFocused());
+               }
+               @Override public boolean isMouseOver(double mx, double my) {
+                  return this.active && mx >= this.getX() && mx < this.getRight() && my >= this.getY() && my < this.getBottom();
+               }
+            };
             this.checkboxButtons.add(checkbox);
          }
       }
@@ -985,15 +992,7 @@ public class FakePlayerTab implements Tab {
                boolean isHovered = !isSelected && mouseX >= buttonX && mouseX < buttonX + buttonW && mouseY >= y && mouseY < y + this.playerItemHeight();
                GuiTheme.row(guiGraphics, buttonX, y, buttonW, this.playerItemHeight() - 3, isSelected, isHovered);
 
-               int boxX = this.playerListX + this.checkboxXOffset();
-               int boxY = y + this.checkboxTopPad();
-               boolean checked = this.multiSelection.contains(name);
-               GuiTheme.row(guiGraphics, boxX, boxY, this.checkboxSize(), this.checkboxSize(), checked, false);
-               GuiTheme.outline(guiGraphics, boxX, boxY, this.checkboxSize(), this.checkboxSize(),
-                  checked ? GuiTheme.accent() : GuiTheme.border());
-               if (checked) {
-                  guiGraphics.blitSprite(RenderPipelines.GUI_TEXTURED, Identifier.parse("minecraft:icon/checkmark"), boxX + 2, boxY + 2, 8, 8, -11141291);
-               }
+
             }
          }
 

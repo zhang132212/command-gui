@@ -3,10 +3,9 @@ package com.remrin.client.gui;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 
 public final class ScrollbarHandle {
-   private static final int TRACK_COLOR = 0x24FFFFFF;
-   private static final int THUMB_COLOR = 0x5CFFFFFF;
-   private static final int THUMB_HOVER_COLOR = 0xCC8DE0CC;
-   private static final int THUMB_OUTLINE = 0x33000000;
+   private static final int TRACK_COLOR = 0x12FFFFFF;
+   private static final int THUMB_COLOR = 0x88D6E2EF;
+   private static final int THUMB_HOVER_COLOR = 0xDD78B7FF;
    private static final int MIN_THUMB_HEIGHT = 10;
    private final int x;
    private final int y;
@@ -36,17 +35,10 @@ public final class ScrollbarHandle {
 
    private void drawThumb(GuiGraphicsExtractor guiGraphics, int top, int bottom, boolean hovered) {
       int bodyColor = hovered ? GuiTuning.getColor("ScrollbarHandle.THUMB_HOVER_COLOR", THUMB_HOVER_COLOR) : GuiTuning.getColor("ScrollbarHandle.THUMB_COLOR", THUMB_COLOR);
-      int inset = Math.max(0, (this.width - 4) / 2);
-      int thumbWidth = Math.max(1, this.width - inset * 2);
-      int thumbHeight = Math.max(1, bottom - top);
-      int radius = GuiTheme.clampRadius(Math.min(3, thumbWidth), thumbWidth, thumbHeight);
-      GuiTheme.rounded(guiGraphics, this.x + inset, top, thumbWidth, thumbHeight, radius,
-         GuiTheme.alpha(GuiTuning.getColor("ScrollbarHandle.THUMB_OUTLINE", THUMB_OUTLINE), 0x40));
-      GuiTheme.rounded(guiGraphics, this.x + inset, top, Math.max(1, thumbWidth - 1), Math.max(1, thumbHeight - 1), radius, bodyColor);
-      if (thumbHeight > 6) {
-         guiGraphics.fill(this.x + inset + 1, top + 1, this.x + inset + thumbWidth - 1, top + 2,
-            GuiTheme.alpha(0xFFFFFFFF, hovered ? 0x33 : 0x1F));
-      }
+      float thumbWidth = Math.min(this.width, hovered ? 4f : 3f);
+      float left = this.x + (this.width - thumbWidth) / 2f;
+      SmoothGui.rounded(guiGraphics, left, top, thumbWidth, Math.max(1, bottom - top), thumbWidth / 2, bodyColor);
+
    }
 
    public int thumbTop(int scrollOffset, int maxOffset, int viewport, int content) {

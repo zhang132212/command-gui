@@ -1,0 +1,20 @@
+gradle.projectsEvaluated {
+    def p = gradle.rootProject
+    def qa = p.sourceSets.create('editorQa') {
+        java.srcDir 'tests/editor-layout/src'
+        resources.srcDir 'tests/editor-layout/resources'
+        compileClasspath += p.sourceSets.client.compileClasspath + p.sourceSets.client.output + p.sourceSets.main.output
+    }
+    p.tasks.named('compileEditorQaJava') { dependsOn p.tasks.named('clientClasses'); options.encoding = 'UTF-8' }
+    def qaJar = p.tasks.register('editorQaJar', Jar) {
+        from qa.output
+        archiveFileName = 'editor-qa.jar'
+        destinationDirectory = p.layout.projectDirectory.dir('build/editor-layout-qa/mods')
+    }
+    p.loom.runs.client {
+        runDir 'build/editor-layout-qa'
+        vmArg '-Ddevauth.enabled=false'
+        programArgs '--username', 'EditorQA', '--width', '1440', '--height', '900'
+    }
+    p.tasks.named('runClient') { dependsOn qaJar }
+}

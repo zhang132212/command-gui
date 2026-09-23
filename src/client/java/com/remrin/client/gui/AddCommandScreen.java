@@ -21,27 +21,8 @@ import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
 
 public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> implements StepCommandHost {
-   private static final int FIELD_WIDTH = 360;
-   private static final int FIELD_HEIGHT = 20;
-   private static final int BTN_GAP = 4;
-   private static final int COL_GAP = 6;
-   private static final int COMMAND_WIDTH = 280;
    private static final String[] CUSTOM_SUGGESTIONS = PlaceholderResolver.ALL_PLACEHOLDERS.toArray(new String[0]);
-   private static final int SUGGESTION_ROW_HEIGHT = 16;
-   private static final int TOP_FIELD_Y = 26;
-   private static final int BOT_FIELD_Y = 64;
-   private static final int QUICK_BTN_Y = 92;
-   private static final int CMD_LABEL_Y = 116;
-   private static final int CMD_FIELD_Y = 128;
-   private static final int LIST_LABEL_Y = 158;
-   private static final int LIST_TOP = 170;
    private static final int LIST_ROW_HEIGHT = 22;
-   private static final int MOVE_BTN_W = 48;
-   private static final int COPY_BTN_W = 30;
-   private static final int REMOVE_BTN_W = 30;
-   private static final int ROW_ACTION_GAP = 1;
-   private static final int ROW_NUMBER_W = 18;
-   private static final int RIGHT_RESERVED = 16;
    private final String initialCategoryId;
    private final String editingName;
    private final CommandConfig.CommandEntry editingEntry;
@@ -156,9 +137,24 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
       return defaultValue;
    }
 
-   private int fieldX() {
-      return (this.width - 360) / 2;
-   }
+   private boolean wideLayout() { return this.width >= 620 && this.height >= 300; }
+   private int contentWidth() { return Math.max(260, Math.min(840, this.width - 40)); }
+   private int fieldX() { return (this.width - this.contentWidth()) / 2; }
+   private int workX() { return this.fieldX() + (this.wideLayout() ? 224 : 0); }
+   private int workWidth() { return this.contentWidth() - (this.wideLayout() ? 224 : 0); }
+   private int metaWidth() { return this.wideLayout() ? 204 : this.contentWidth(); }
+   private int nameWidth() { return this.wideLayout() ? this.metaWidth() : (this.contentWidth() - 8) / 3; }
+   private int descriptionX() { return this.wideLayout() ? this.fieldX() : this.fieldX() + this.nameWidth() + 8; }
+   private int descriptionY() { return this.wideLayout() ? 94 : 42; }
+   private int groupWidth() { return this.wideLayout() ? this.metaWidth() : (this.contentWidth() - 16) / (this.fakeMode && !this.playerCustomMode ? 3 : 2); }
+   private int delayX() { return this.fieldX() + (!this.wideLayout() && this.fakeMode && !this.playerCustomMode ? this.groupWidth() + 8 : 0); }
+   private int delayY() { return this.wideLayout() ? 138 : 78; }
+   private int shortcutX() { return this.wideLayout() ? this.fieldX() : this.fieldX() + this.contentWidth() - this.groupWidth(); }
+   private int shortcutY() { return this.wideLayout() ? 182 : 78; }
+   private int botY() { return this.wideLayout() ? 226 : 78; }
+   private int quickY() { return this.wideLayout() ? 50 : 106; }
+   private int commandY() { return this.wideLayout() ? 94 : 140; }
+   private int listTop() { return this.wideLayout() ? 142 : 182; }
 
    private List<String> botNames() {
       List<String> names = new ArrayList<>();
@@ -188,7 +184,7 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
       }
 
       int fieldX = this.fieldX();
-      this.nameField = new GuiEditBox(this.font, fieldX, 26, 94, 20, Component.translatable("screen.command-gui.name"));
+      this.nameField = new GuiEditBox(this.font, fieldX, this.wideLayout() ? 50 : 42, this.nameWidth(), 20, Component.translatable("screen.command-gui.name"));
       this.nameField.setMaxLength(50);
       this.nameField.setValue(this.nameText);
       this.nameField.setHint(Component.translatable("screen.command-gui.name_hint"));
@@ -198,8 +194,8 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
          this.refreshShortcutConflict();
       });
       this.addRenderableWidget(this.nameField);
-      int descWidth = this.fakeMode ? 110 : 262;
-      this.descriptionField = new GuiEditBox(this.font, fieldX + 94 + 4, 26, descWidth, 20, Component.translatable("screen.command-gui.description"));
+      int descWidth = this.wideLayout() ? this.metaWidth() : this.contentWidth() - this.nameWidth() - 8;
+      this.descriptionField = new GuiEditBox(this.font, this.descriptionX(), this.descriptionY(), descWidth, 20, Component.translatable("screen.command-gui.description"));
       this.descriptionField.setMaxLength(100);
       this.descriptionField.setValue(this.descriptionText);
       this.descriptionField.setHint(Component.translatable("screen.command-gui.description_hint"));
@@ -208,22 +204,18 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
          this.markDirty();
       });
       this.addRenderableWidget(this.descriptionField);
-      if (this.fakeMode) {
-         this.shortcutButton = GuiButton.themed(Component.literal(this.shortcutMessage()), btn -> this.toggleShortcutCapture())
-            .bounds(fieldX + 94 + 4 + 110 + 4, 26, 100, 20)
-            .build();
-         this.shortcutButton.setTooltip(Tooltip.create(Component.literal(this.shortcutTooltip())));
-         this.addRenderableWidget(this.shortcutButton);
-         this.shortcutResetButton = GuiButton.themed(Component.translatable("screen.command-gui.shortcut.reset"), btn -> this.resetShortcut())
-            .bounds(fieldX + 94 + 4 + 110 + 4 + 100 + 4, 26, 42, 20)
-            .build();
-         this.shortcutResetButton.setTooltip(Tooltip.create(Component.translatable("screen.command-gui.shortcut.reset_hint")));
-         this.addRenderableWidget(this.shortcutResetButton);
-      }
+      this.shortcutButton = GuiButton.themed(Component.literal(this.shortcutMessage()), btn -> this.toggleShortcutCapture())
+         .bounds(this.shortcutX(), this.shortcutY(), this.groupWidth() - 40, 20).build();
+      this.shortcutButton.setTooltip(Tooltip.create(Component.literal(this.shortcutTooltip())));
+      this.addRenderableWidget(this.shortcutButton);
+      this.shortcutResetButton = GuiButton.themed(Component.translatable("screen.command-gui.shortcut.reset"), btn -> this.resetShortcut())
+         .bounds(this.shortcutX() + this.groupWidth() - 36, this.shortcutY(), 36, 20).build();
+      this.shortcutResetButton.setTooltip(Tooltip.create(Component.translatable("screen.command-gui.shortcut.reset_hint")));
+      this.addRenderableWidget(this.shortcutResetButton);
 
       this.refreshShortcutConflict();
       if (this.fakeMode && !this.playerCustomMode) {
-         this.botField = new GuiEditBox(this.font, fieldX, 64, 110, 20, Component.translatable("screen.command-gui.machine.step_bot"));
+         this.botField = new GuiEditBox(this.font, fieldX, this.botY(), this.groupWidth() - 44, 20, Component.translatable("screen.command-gui.machine.step_bot"));
          this.botField.setMaxLength(20);
          this.botField.setValue(this.botText);
          this.botField.setResponder(text -> {
@@ -236,16 +228,15 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
                   Component.translatable("screen.command-gui.machine.step_pick"),
                   btn -> this.minecraft.gui.setScreen(new BotSelectScreen(this, this.botNames()))
                )
-               .bounds(fieldX + 116, 64, 45, 20)
+               .bounds(fieldX + this.groupWidth() - 40, this.botY(), 40, 20)
                .build()
          );
       }
 
-      int quickRight = fieldX + 360;
-      int delayFieldW = 110;
-      int delayPickX = this.fakeMode ? quickRight - 45 : fieldX + 110 + 4;
-      int delayFieldX = this.fakeMode ? delayPickX - 4 - delayFieldW : fieldX;
-      this.delayField = new DigitsOnlyEditBox(this.font, delayFieldX, 64, delayFieldW, 20, Component.translatable("screen.command-gui.command_delay_short"));
+      int delayFieldW = this.groupWidth() - 44;
+      int delayFieldX = this.delayX();
+      int delayPickX = delayFieldX + delayFieldW + 4;
+      this.delayField = new DigitsOnlyEditBox(this.font, delayFieldX, this.delayY(), delayFieldW, 20, Component.translatable("screen.command-gui.command_delay_short"));
       this.delayField.setMaxLength(7);
       this.delayField.setValue(this.delayText);
       this.delayField.setResponder(text -> {
@@ -255,60 +246,46 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
       this.delayField.setTooltip(Tooltip.create(Component.translatable("screen.command-gui.command_delay_hint")));
       this.addRenderableWidget(this.delayField);
       this.addRenderableWidget(
-         GuiButton.themed(Component.translatable("screen.command-gui.machine.step_pick"), btn -> this.openDelayPicker()).bounds(delayPickX, 64, 45, 20).build()
+         GuiButton.themed(Component.translatable("screen.command-gui.machine.step_pick"), btn -> this.openDelayPicker()).bounds(delayPickX, this.delayY(), 40, 20).build()
       );
-      if (!this.fakeMode) {
-         int shortcutX = fieldX + 360 - 42 - 4 - 100;
-         this.shortcutButton = GuiButton.themed(Component.literal(this.shortcutMessage()), btn -> this.toggleShortcutCapture())
-            .bounds(shortcutX, 64, 100, 20)
-            .build();
-         this.shortcutButton.setTooltip(Tooltip.create(Component.literal(this.shortcutTooltip())));
-         this.addRenderableWidget(this.shortcutButton);
-         this.shortcutResetButton = GuiButton.themed(Component.translatable("screen.command-gui.shortcut.reset"), btn -> this.resetShortcut())
-            .bounds(shortcutX + 100 + 4, 64, 42, 20)
-            .build();
-         this.shortcutResetButton.setTooltip(Tooltip.create(Component.translatable("screen.command-gui.shortcut.reset_hint")));
-         this.addRenderableWidget(this.shortcutResetButton);
-      }
-
       if (this.fakeMode) {
-         int baseBtnW = 56;
-         int leftover = 340 - baseBtnW * 6;
-         int x = this.addQuickButton(fieldX, 92, baseBtnW + (leftover-- > 0 ? 1 : 0), "spawn", () -> this.minecraft.gui.setScreen(new SpawnOptionScreen(this)));
-         x = this.addQuickButton(x, 92, baseBtnW + (leftover-- > 0 ? 1 : 0), "kill", () -> this.insertQuickCommand("/player {bot} kill"));
+         int baseBtnW = (this.workWidth() - 20) / 6;
+         int leftover = this.workWidth() - 20 - baseBtnW * 6;
+         int x = this.addQuickButton(this.workX(), this.quickY(), baseBtnW + (leftover-- > 0 ? 1 : 0), "spawn", () -> this.minecraft.gui.setScreen(new SpawnOptionScreen(this)));
+         x = this.addQuickButton(x, this.quickY(), baseBtnW + (leftover-- > 0 ? 1 : 0), "kill", () -> this.insertQuickCommand("/player {bot} kill"));
          x = this.addQuickButton(
             x,
-            92,
+            this.quickY(),
             baseBtnW + (leftover-- > 0 ? 1 : 0),
             Component.translatable("screen.command-gui.machine.step_attack_use"),
             () -> this.minecraft.gui.setScreen(new ActionOptionScreen(this))
          );
          x = this.addQuickButton(
             x,
-            92,
+            this.quickY(),
             baseBtnW + (leftover-- > 0 ? 1 : 0),
             Component.translatable("screen.command-gui.machine.step_sneak"),
             () -> this.insertQuickCommand("/player {bot} sneak")
          );
          x = this.addQuickButton(
             x,
-            92,
+            this.quickY(),
             baseBtnW + (leftover-- > 0 ? 1 : 0),
             Component.translatable("screen.command-gui.machine.step_mount"),
             () -> this.insertQuickCommand("/player {bot} mount")
          );
          this.addQuickButton(
             x,
-            92,
+            this.quickY(),
             baseBtnW + (leftover-- > 0 ? 1 : 0),
             Component.translatable("screen.command-gui.machine.step_stop"),
             () -> this.insertQuickCommand("/player {bot} stop")
          );
       } else {
-         this.buildPlaceholderRow(fieldX);
+         this.buildPlaceholderRow(this.workX());
       }
 
-      this.commandField = new GuiEditBox(this.font, fieldX, 128, 280, 20, Component.translatable("screen.command-gui.command"));
+      this.commandField = new GuiEditBox(this.font, this.workX(), this.commandY(), this.workWidth() - 80, 20, Component.translatable("screen.command-gui.command"));
       this.commandField.setMaxLength(256);
       this.commandField.setValue(this.commandText);
       this.addRenderableWidget(this.commandField);
@@ -323,7 +300,7 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
       });
       this.updateCustomSuggestions(this.commandText);
       this.addRenderableWidget(
-         new PassiveButton(fieldX + 280 + 6, 128, 74, 20, Component.translatable("screen.command-gui.add_command_line"), btn -> this.addCommand())
+         new PassiveButton(this.workX() + this.workWidth() - 74, this.commandY(), 74, 20, Component.translatable("screen.command-gui.add_command_line"), btn -> this.addCommand())
       );
       this.rebuildListButtons();
       this.buildBottomBar(fieldX);
@@ -341,12 +318,13 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
    }
 
    private void buildPlaceholderRow(int x) {
-      int btnW = 48;
+      int btnW = (this.workWidth() - 24) / 7;
+      String[] shortKeys = {"player_all", "player_other", "player_fake", "text", "number", "time", "coord"};
 
       for (int i = 0; i < BaseCommandEditorScreen.PLACEHOLDERS.length; i++) {
          int index = i;
          PassiveButton btn = new PassiveButton(
-            x + i * (btnW + 4), 92, btnW, 20, Component.translatable(BaseCommandEditorScreen.TYPE_KEYS[i]), b -> this.appendPlaceholder(index)
+            x + i * (btnW + 4), this.quickY(), btnW, 20, Component.translatable(btnW < 54 ? "screen.command-gui.type." + shortKeys[i] : BaseCommandEditorScreen.TYPE_KEYS[i]), b -> this.appendPlaceholder(index)
          );
          btn.setTooltip(Tooltip.create(Component.literal(BaseCommandEditorScreen.PLACEHOLDERS[i])));
          this.addRenderableWidget(btn);
@@ -372,81 +350,26 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
    }
 
    private void buildBottomBar(int fieldX) {
-      int barY = this.height - 24;
-      if (this.playerCustomMode) {
-         boolean editing = this.customCommandIndex >= 0;
-         int total = editing ? 3 : 2;
-         int btnW = editing ? 100 : 140;
-         int gap = 8;
-         int startX = fieldX + (360 - btnW * total - gap * (total - 1)) / 2;
-         this.saveButton = GuiButton.themed(Component.translatable("screen.command-gui.save"), btn -> this.saveAndClose())
-            .bounds(startX, barY, btnW, 20)
-            .build();
-         this.addRenderableWidget(this.saveButton);
-         int nextX = startX + btnW + gap;
-         if (editing) {
-            this.addRenderableWidget(
-               GuiButton.themed(Component.translatable("screen.command-gui.action.delete"), btn -> this.deleteCustomCommand())
-                  .bounds(nextX, barY, btnW, 20)
-                  .build()
-            );
-            nextX += btnW + gap;
-         }
-
-         this.addRenderableWidget(
-            GuiButton.themed(Component.translatable("screen.command-gui.cancel"), btn -> this.requestExit())
-               .bounds(nextX, barY, btnW, 20)
-               .build()
-         );
-      } else if (this.editingName != null) {
-         int btnW = 76;
-         int gap = 4;
-         int startX = fieldX + (360 - btnW * 4 - gap * 3) / 2;
-         this.saveButton = GuiButton.themed(Component.translatable("screen.command-gui.save"), btn -> this.saveAndClose())
-            .bounds(startX, barY, btnW, 20)
-            .build();
-         this.addRenderableWidget(this.saveButton);
-         this.addRenderableWidget(
-            GuiButton.themed(
-                  Component.translatable("screen.command-gui.action.move"),
-                  btn -> this.minecraft.gui.setScreen(new MoveCategoryScreen(this, this.editingName, category -> this.movedToCategory = category))
-               )
-               .bounds(startX + btnW + gap, barY, btnW, 20)
-               .build()
-         );
-         this.addRenderableWidget(
-            GuiButton.themed(Component.translatable("screen.command-gui.action.delete"), btn -> this.deleteAndClose())
-               .bounds(startX + (btnW + gap) * 2, barY, btnW, 20)
-               .build()
-         );
-         this.addRenderableWidget(
-            GuiButton.themed(Component.translatable("screen.command-gui.cancel"), btn -> this.requestExit())
-               .bounds(startX + (btnW + gap) * 3, barY, btnW, 20)
-               .build()
-         );
-      } else {
-         boolean multi = this.categories.size() > 1;
-         int total = multi ? 3 : 2;
-         int btnW = multi ? 104 : 140;
-         int gap = 8;
-         int startX = fieldX + (360 - btnW * total - gap * (total - 1)) / 2;
-         this.saveButton = GuiButton.themed(Component.translatable("screen.command-gui.save"), btn -> this.saveAndClose())
-            .bounds(startX, barY, btnW, 20)
-            .build();
-         this.addRenderableWidget(this.saveButton);
-         int nextX = startX + btnW + gap;
-         if (multi) {
-            this.addRenderableWidget(
-               GuiButton.themed(Component.translatable("screen.command-gui.save_to_category_short"), btn -> this.openCategoryPicker())
-                  .bounds(nextX, barY, btnW, 20)
-                  .build()
-            );
-            nextX += btnW + gap;
-         }
-
-         this.addRenderableWidget(
-            GuiButton.themed(Component.translatable("screen.command-gui.cancel"), btn -> this.requestExit()).bounds(nextX, barY, btnW, 20).build()
-         );
+      int y = this.height - 26;
+      int right = fieldX + this.contentWidth();
+      this.saveButton = GuiButton.themed(Component.translatable("screen.command-gui.save"), btn -> this.saveAndClose())
+         .bounds(right - 70, y, 70, 20).tone(GuiButton.Tone.PRIMARY).build();
+      this.addRenderableWidget(this.saveButton);
+      this.addRenderableWidget(GuiButton.themed(Component.translatable("screen.command-gui.cancel"), btn -> this.requestExit())
+         .bounds(right - 146, y, 70, 20).build());
+      boolean editing = this.playerCustomMode ? this.customCommandIndex >= 0 : this.editingName != null;
+      if (editing) {
+         this.addRenderableWidget(GuiButton.themed(Component.translatable("screen.command-gui.delete"), btn -> {
+            if (this.playerCustomMode) this.deleteCustomCommand(); else this.deleteAndClose();
+         }).bounds(fieldX, y, 54, 20).tone(GuiButton.Tone.DANGER).build());
+      }
+      if (!this.playerCustomMode && this.editingName != null) {
+         this.addRenderableWidget(GuiButton.themed(Component.translatable("screen.command-gui.action.move"),
+            btn -> this.minecraft.gui.setScreen(new MoveCategoryScreen(this, this.editingName, category -> this.movedToCategory = category)))
+            .bounds(fieldX + 60, y, 62, 20).build());
+      } else if (!this.playerCustomMode && this.categories.size() > 1) {
+         this.addRenderableWidget(GuiButton.themed(Component.translatable("screen.command-gui.save_to_category_short"), btn -> this.openCategoryPicker())
+            .bounds(fieldX, y, Math.min(110, this.contentWidth() - 154), 20).build());
       }
    }
 
@@ -546,7 +469,7 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
    }
 
    private int getMaxListRows() {
-      return Math.max(1, (this.getListBottom() - LIST_TOP) / LIST_ROW_HEIGHT);
+      return Math.max(1, (this.getListBottom() - this.listTop()) / LIST_ROW_HEIGHT);
    }
 
    private int getListBottom() {
@@ -574,13 +497,13 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
       this.moveUpButtons.clear();
       this.moveDownButtons.clear();
       this.copyButtons.clear();
-      int fieldX = this.fieldX();
+      int fieldX = this.workX();
       int maxRows = this.getMaxListRows();
       this.commandScroll = Math.max(0, Math.min(this.commandScroll, this.commandList.size() - maxRows));
-      int removeX = fieldX + 360 - 16 - 30;
+      int removeX = fieldX + this.workWidth() - 16 - 30;
       int copyX = removeX - 30 - 1;
-      int downX = copyX - 48 - 1;
-      int upX = downX - 48 - 1;
+      int downX = copyX - 24 - 1;
+      int upX = downX - 24 - 1;
 
       for (int i = 0; i < maxRows; i++) {
          int index = this.commandScroll + i;
@@ -588,16 +511,18 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
             break;
          }
 
-         int y = LIST_TOP + i * LIST_ROW_HEIGHT;
-         Button upBtn = GuiButton.themed(Component.translatable("screen.command-gui.step_up_short"), btn -> this.moveCommandUp(index))
-            .bounds(upX, y, 48, 18)
+         int y = this.listTop() + i * LIST_ROW_HEIGHT;
+         Button upBtn = GuiButton.themed(Component.literal("↑"), btn -> this.moveCommandUp(index))
+            .bounds(upX, y, 24, 18)
             .build();
+         upBtn.setTooltip(Tooltip.create(Component.translatable("screen.command-gui.step_up_short")));
          upBtn.active = index > 0;
          this.moveUpButtons.add(upBtn);
          this.addRenderableWidget(upBtn);
-         Button downBtn = GuiButton.themed(Component.translatable("screen.command-gui.step_down_short"), btn -> this.moveCommandDown(index))
-            .bounds(downX, y, 48, 18)
+         Button downBtn = GuiButton.themed(Component.literal("↓"), btn -> this.moveCommandDown(index))
+            .bounds(downX, y, 24, 18)
             .build();
+         downBtn.setTooltip(Tooltip.create(Component.translatable("screen.command-gui.step_down_short")));
          downBtn.active = index < this.commandList.size() - 1;
          this.moveDownButtons.add(downBtn);
          this.addRenderableWidget(downBtn);
@@ -899,7 +824,7 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
          return partial;
       } else {
          if (this.shortcut.isEmpty()) {
-            return Component.translatable("screen.command-gui.shortcut.none").getString();
+            return Component.translatable(this.groupWidth() < 160 ? "screen.command-gui.editor.record_shortcut" : "screen.command-gui.shortcut.none").getString();
          }
          return CommandShortcut.display(this.shortcut);
       }
@@ -1090,6 +1015,22 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
       this.rebuildListButtons();
    }
 
+   private void fieldLabel(GuiGraphicsExtractor g, net.minecraft.client.gui.components.AbstractWidget field, String key) {
+      g.text(this.font, this.font.plainSubstrByWidth(Component.translatable(key).getString(), field.getWidth()),
+         field.getX(), field.getY() - 11, GuiTheme.muted(), false);
+   }
+
+   @Override
+   public void extractBackground(GuiGraphicsExtractor g, int mouseX, int mouseY, float tick) {
+      super.extractBackground(g, mouseX, mouseY, tick);
+      GuiTheme.panel(g, this.fieldX() - 8, 28, this.metaWidth() + 16, this.wideLayout() ? (this.fakeMode && !this.playerCustomMode ? 230 : 186) : 76);
+      GuiTheme.panel(g, this.workX() - 8, this.wideLayout() ? 28 : 104, this.workWidth() + 16,
+         this.getListBottom() - (this.wideLayout() ? 28 : 104));
+      GuiTheme.divider(g, this.workX(), this.listTop() - 20, this.workWidth());
+      if (this.commandList.isEmpty()) g.text(this.font, Component.translatable("screen.command-gui.editor.empty_commands"),
+         this.workX() + 6, this.listTop() + 6, GuiTheme.muted(), false);
+   }
+
    public void extractRenderState(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY, float partialTick) {
       super.extractRenderState(guiGraphics, mouseX, mouseY, partialTick);
       int fieldX = this.fieldX();
@@ -1098,35 +1039,19 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
          title = title.copy().append(" ").append(Component.translatable("screen.command-gui.unsaved_badge").withColor(GuiTheme.warning()));
       }
 
-      guiGraphics.centeredText(this.font, title, this.width / 2, 4, -1);
-      guiGraphics.text(this.font, Component.translatable("screen.command-gui.name"), fieldX, 14, GuiTheme.muted());
-      guiGraphics.text(this.font, Component.translatable("screen.command-gui.description"), fieldX + 98, 14, GuiTheme.muted());
-      if (this.fakeMode) {
-         guiGraphics.text(this.font, Component.translatable("screen.command-gui.shortcut"), fieldX + 212, 14, GuiTheme.muted());
-      } else {
-         int shortcutX = fieldX + 360 - 42 - 4 - 100;
-         guiGraphics.text(this.font, Component.translatable("screen.command-gui.shortcut"), shortcutX, 52, GuiTheme.muted());
-      }
-
-      if (this.fakeMode && !this.playerCustomMode) {
-         guiGraphics.text(this.font, Component.translatable("screen.command-gui.machine.step_bot"), fieldX, 52, GuiTheme.muted());
-      }
-
-      int labelDelayFieldX = this.fakeMode ? fieldX + 360 - 45 - 4 - 110 : fieldX;
-      guiGraphics.text(this.font, Component.translatable("screen.command-gui.machine.step_delay_label"), labelDelayFieldX, 52, GuiTheme.muted());
-      guiGraphics.text(this.font, Component.translatable("screen.command-gui.machine.command_input"), fieldX, 116, GuiTheme.muted());
-      guiGraphics.text(this.font, Component.translatable("screen.command-gui.commands_label"), fieldX, 158, GuiTheme.muted());
-      int legendX = fieldX + this.font.width(Component.translatable("screen.command-gui.commands_label")) + 6;
-      guiGraphics.text(this.font, Component.translatable("screen.command-gui.machine.cmd_legend_green"), legendX, 158, GuiTheme.accent());
-      guiGraphics.text(
-         this.font,
-         Component.translatable("screen.command-gui.machine.cmd_legend_red"),
-         legendX + this.font.width(Component.translatable("screen.command-gui.machine.cmd_legend_green")) + 4,
-         158,
-         GuiTheme.danger()
-      );
+      guiGraphics.text(this.font, title, this.fieldX(), 10, GuiTheme.text(), false);
+      this.fieldLabel(guiGraphics, this.nameField, "screen.command-gui.name");
+      this.fieldLabel(guiGraphics, this.descriptionField, "screen.command-gui.description");
+      this.fieldLabel(guiGraphics, this.delayField, "screen.command-gui.command_delay_short");
+      this.fieldLabel(guiGraphics, this.shortcutButton, "screen.command-gui.shortcut");
+      if (this.botField != null) this.fieldLabel(guiGraphics, this.botField, "screen.command-gui.machine.step_bot");
+      this.fieldLabel(guiGraphics, this.commandField, "screen.command-gui.machine.command_input");
+      guiGraphics.text(this.font, Component.translatable("screen.command-gui.commands_label").append(" (" + this.commandList.size() + ")"),
+         this.workX(), this.listTop() - 12, GuiTheme.muted(), false);
+      fieldX = this.workX();
       int maxRows = this.getMaxListRows();
-      int textWidth = 155;
+      int numberWidth = Math.max(24, this.font.width("#" + this.commandList.size()) + 6);
+      int textWidth = Math.max(24, this.workWidth() - 136 - numberWidth);
 
       for (int i = 0; i < maxRows; i++) {
          int index = this.commandScroll + i;
@@ -1137,18 +1062,18 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
          String command = this.commandList.get(index);
          boolean valid = this.commandValid.get(index);
          String display = this.font.plainSubstrByWidth(command, textWidth);
-         int y = LIST_TOP + i * LIST_ROW_HEIGHT;
+         int y = this.listTop() + i * LIST_ROW_HEIGHT;
          guiGraphics.text(this.font, Component.literal("#" + (index + 1)), fieldX + 4, y + 4, GuiTheme.muted());
-         guiGraphics.text(this.font, Component.literal(display), fieldX + 4 + 18, y + 4, valid ? GuiTheme.accent() : GuiTheme.danger());
-         int textLeft = fieldX + 4 + 18;
+         guiGraphics.text(this.font, Component.literal(display), fieldX + 4 + numberWidth, y + 4, valid ? GuiTheme.accent() : GuiTheme.danger());
+         int textLeft = fieldX + 4 + numberWidth;
          if (mouseY >= y && mouseY < y + LIST_ROW_HEIGHT - 4 && mouseX >= textLeft && mouseX < textLeft + textWidth) {
             this.renderFullCommandTooltip(guiGraphics, command, (double)mouseX, (double)mouseY);
          }
       }
 
       int maxScroll = Math.max(0, this.commandList.size() - maxRows);
-      int scrollbarX = fieldX + 360 - 12;
-      this.commandScrollbar = new ScrollbarHandle(scrollbarX, LIST_TOP, 12, this.getListBottom() - LIST_TOP);
+      int scrollbarX = fieldX + this.workWidth() - 12;
+      this.commandScrollbar = new ScrollbarHandle(scrollbarX, this.listTop(), 12, this.getListBottom() - this.listTop());
       this.commandScrollbar
          .render(
             guiGraphics,

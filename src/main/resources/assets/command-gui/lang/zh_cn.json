@@ -604,5 +604,12 @@
   "screen.command-gui.ui.no_results": "没有找到匹配的内容",
   "screen.command-gui.ui.player_hint": "选择假人 · 在右侧管理动作",
   "screen.command-gui.ui.search_help": "试试更短的关键词，或清空搜索",
-  "screen.command-gui.ui.permission_short": "权限等级"
+  "screen.command-gui.ui.permission_short": "权限等级",
+  "screen.command-gui.editor.empty_commands": "输入指令，然后点击“添加”加入执行列表",
+  "screen.command-gui.editor.workflow": "执行配置",
+  "screen.command-gui.editor.record_shortcut": "录入",
+  "screen.command-gui.type.time": "时间",
+  "screen.command-gui.rules.filter_enabled": "已开启",
+  "screen.command-gui.rules.filter_disabled": "未开启",
+  "screen.command-gui.rules.filter_hint": "按当前值筛选 true / false；数字、文本等其他规则始终显示。"
 }

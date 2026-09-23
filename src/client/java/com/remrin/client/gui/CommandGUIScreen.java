@@ -454,15 +454,10 @@ public class CommandGUIScreen extends Screen {
       } else if (current == this.machineTab && this.machineTab != null) {
          actionX = this.footerButton(this.addMachineButton, actionX, top + 26, 74) + gap;
          this.footerButton(this.machineSaveButton, actionX, top + 26, 72);
-         int filterWidth = Math.max(this.font.width(this.filterOnCheckbox.getMessage()), this.font.width(this.filterOffCheckbox.getMessage())) + 20;
-         int filtersX = this.width - left - filterWidth * 2 - gap;
-         this.filterOnCheckbox.setX(filtersX);
-         this.filterOnCheckbox.setY(top + 3);
-         this.filterOnCheckbox.setWidth(filterWidth);
-         this.filterOffCheckbox.setX(filtersX + filterWidth + gap);
-         this.filterOffCheckbox.setY(top + 3);
-         this.filterOffCheckbox.setWidth(filterWidth);
+         int filtersX = positionStateFilters(this.filterOnCheckbox, this.filterOffCheckbox);
          this.searchField.setWidth(Math.max(30, filtersX - left - gap));
+      } else if (current instanceof CarpetRulesTab rules) {
+         this.searchField.setWidth(Math.max(30, rules.layoutFilters() - left - gap));
       } else if (current == this.fakePlayerTab) {
          actionX = this.footerButton(this.fpBatchSpawnButton, actionX, top + 26, 76) + gap;
          this.footerButton(this.fpTimedAddButton, actionX, top + 26, 88);
@@ -470,6 +465,17 @@ public class CommandGUIScreen extends Screen {
          this.keepOpenCheckbox.setX(left);
          this.keepOpenCheckbox.setY(top + 26);
       }
+   }
+
+   /** Shared search-row alignment for machine and Carpet state filters. */
+   int positionStateFilters(MarkCheckbox on, MarkCheckbox off) {
+      int gap = 6;
+      int filterWidth = Math.max(this.font.width(on.getMessage()), this.font.width(off.getMessage())) + 20;
+      int filtersX = this.width - this.padding() - filterWidth * 2 - gap;
+      int y = this.height - this.footerHeight() + 9;
+      on.setX(filtersX); on.setY(y); on.setWidth(filterWidth);
+      off.setX(filtersX + filterWidth + gap); off.setY(y); off.setWidth(filterWidth);
+      return filtersX;
    }
 
    private int footerButton(Button button, int x, int y, int width) {
@@ -482,15 +488,13 @@ public class CommandGUIScreen extends Screen {
 
    @Override
    public void extractBackground(GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {
-      super.extractBackground(g, mouseX, mouseY, partialTick);
+      if (this.minecraft.level == null || !ReGlassBridge.prepare(g)) {
+         super.extractBackground(g, mouseX, mouseY, partialTick);
+      }
       GuiTheme.screenBackground(g, this.width, this.height);
-      // 顶栏与底栏也是玻璃条：半透明底 + 上下 1px 棱边，让中间的磨砂背景透出来
-      g.fill(0, 0, this.width, 34, GuiTheme.alpha(GuiTheme.panelStrong(), 0x8C));
-      g.fill(0, 0, this.width, 1, GuiTheme.mix(GuiTheme.border(), 0xFFFFFFFF, 0.25F));
-      GuiTheme.divider(g, 0, 33, this.width);
+      GuiTheme.panel(g, 4, 2, this.width - 8, 31, GuiTheme.panelRadius());
       int footerTop = this.height - this.footerHeight();
-      g.fill(0, footerTop, this.width, this.height, GuiTheme.alpha(GuiTheme.panelStrong(), 0x8C));
-      GuiTheme.divider(g, 0, footerTop, this.width);
+      GuiTheme.panel(g, 4, footerTop + 2, this.width - 8, this.footerHeight() - 4, GuiTheme.panelRadius());
       if (this.tabManager == null || this.tabArea == null) return;
       Tab current = this.tabManager.getCurrentTab();
       int contentX = this.padding();
@@ -614,8 +618,6 @@ public class CommandGUIScreen extends Screen {
    public void extractRenderState(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY, float partialTick) {
       super.extractRenderState(guiGraphics, mouseX, mouseY, partialTick);
       Tab currentTab = this.tabManager.getCurrentTab();
-      int bottomSeparatorY = this.height - this.footerHeight();
-      guiGraphics.fill(0, bottomSeparatorY, this.width, bottomSeparatorY + 1, GuiTheme.border());
       if (this.tabArea != null) {
          int headingY = this.tabArea.top() - 16;
          guiGraphics.text(this.font, currentTab.getTabTitle(), this.padding(), headingY, GuiTheme.text());
@@ -773,6 +775,10 @@ public class CommandGUIScreen extends Screen {
          int scrollbarX = !isMachineTab && currentTab != this.customTab ? this.width - this.rightMargin() - this.scrollbarWidth() : this.width - 8 - this.scrollbarWidth();
          int scrollbarTop = this.tabArea.top();
          int scrollbarHeight = this.tabArea.height();
+         if (currentTab instanceof CarpetRulesTab rules) {
+            scrollbarTop = rules.getRulesTop();
+            scrollbarHeight = rules.getRulesHeight();
+         }
          this.mainScrollbar = new ScrollbarHandle(scrollbarX, scrollbarTop, this.scrollbarWidth(), scrollbarHeight);
          boolean hovered = this.mainScrollbar.contains((double)mouseX, (double)mouseY);
          this.mainScrollbar.render(guiGraphics, scrollOffset, maxScroll, viewport, content, hovered);

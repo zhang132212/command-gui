@@ -14,6 +14,9 @@ public final class CarpetRulesTab extends PresetCommandTab {
    private final List<RuleData> filtered = new ArrayList<>();
    private String selectedCategory;
    private int revision = -1;
+   private boolean showEnabled = true;
+   private boolean showDisabled = true;
+   private MarkCheckbox enabledFilter, disabledFilter;
    public CarpetRulesTab(CommandGUIScreen parent) {
       super(parent, "carpet", "screen.command-gui.preset.carpet");
       buildFilteredCommands();
@@ -30,9 +33,18 @@ public final class CarpetRulesTab extends PresetCommandTab {
          boolean category = selectedCategory == null || selectedCategory.equals(rule.manager())
             || rule.categories().stream().anyMatch(c -> selectedCategory.equals(rule.manager() + ":" + c));
          String text = (rule.name() + " " + rule.title() + " " + rule.description() + " " + rule.manager()).toLowerCase(Locale.ROOT);
-         if (category && (searchText.isBlank() || text.contains(searchText))) filtered.add(rule);
+         if (category && matchesState(rule) && (searchText.isBlank() || text.contains(searchText))) filtered.add(rule);
       }
    }
+   /** Filter the server snapshot, never the unconfirmed target value. Other values remain visible. */
+   private boolean matchesState(RuleData rule) {
+      if ("true".equalsIgnoreCase(rule.value())) return showEnabled;
+      if ("false".equalsIgnoreCase(rule.value())) return showDisabled;
+      return true;
+   }
+   public int getRulesTop() { return area == null ? 0 : area.top(); }
+   public int getRulesHeight() { return area == null ? 0 : Math.max(0, area.height() - 28); }
+
    @Override protected void buildAllCategoryButtons() {
       allCategoryButtons.clear();
       if (area == null) return;
@@ -54,7 +66,7 @@ public final class CarpetRulesTab extends PresetCommandTab {
       button.setTooltip(Tooltip.create(Component.literal(title + (id == null ? "" : "\n" + id))));
       allCategoryButtons.add(button);
    }
-   @Override public int getVisibleRowCount() { return area == null ? 1 : Math.max(0, (area.height() - 28) / tunedItemHeight()); }
+   @Override public int getVisibleRowCount() { return area == null ? 1 : Math.max(0, getRulesHeight() / tunedItemHeight()); }
    @Override public int getMaxScroll() { return Math.max(0, filtered.size() - getVisibleRowCount()); }
    @Override public int getTotalRowCount() { return Math.max(1, filtered.size()); }
    @Override public VanillaCommands.VanillaCommand getCommandAt(int i) { return null; }
@@ -64,12 +76,26 @@ public final class CarpetRulesTab extends PresetCommandTab {
       if (area == null) return;
       int x = getCommandAreaLeft(), width = area.right() - x;
       scrollOffset = Math.min(scrollOffset, getMaxScroll());
+      int filterWidth = Math.min(100, (width - 8) / 2);
+      MarkCheckbox enabled = new MarkCheckbox(x, area.bottom() + 8, filterWidth, 14,
+         Component.translatable("screen.command-gui.rules.filter_enabled"), showEnabled, b -> {
+            showEnabled = !showEnabled; scrollOffset = 0; reload();
+         });
+      MarkCheckbox disabled = new MarkCheckbox(x + filterWidth + 8, area.bottom() + 8, filterWidth, 14,
+         Component.translatable("screen.command-gui.rules.filter_disabled"), showDisabled, b -> {
+            showDisabled = !showDisabled; scrollOffset = 0; reload();
+         });
+      Tooltip hint = Tooltip.create(Component.translatable("screen.command-gui.rules.filter_hint"));
+      enabled.setTooltip(hint); disabled.setTooltip(hint);
+      enabledFilter = enabled; disabledFilter = disabled;
+      commandButtons.add(enabled); commandButtons.add(disabled);
+      if (parent.width > 0) layoutFilters();
       for (int i = 0; i < getVisibleRowCount() && scrollOffset + i < filtered.size(); i++) {
          RuleData rule = filtered.get(scrollOffset + i);
          RuleData.Change change = CarpetRuleClient.pending.get(rule.key());
          String value = change == null ? rule.value() : change.operation().equals("removeDefault") ? "移除默认" : change.target();
          String title = rule.title() + " · " + value + (change == null ? "" : "（待确认）");
-         DarkSelectButton button = new DarkSelectButton(x, area.top() + i * tunedItemHeight(), width, tunedItemHeight() - tunedItemVerticalPad(),
+         DarkSelectButton button = new DarkSelectButton(x, getRulesTop() + i * tunedItemHeight(), width, tunedItemHeight() - tunedItemVerticalPad(),
             Component.literal(title), b -> Minecraft.getInstance().gui.setScreen(new CarpetRuleEditScreen((CommandGUIScreen)parent, rule))) {
                @Override protected void extractContents(GuiGraphicsExtractor g, int mx, int my, float tick) {
                   GuiTheme.button(g, this, CarpetRuleClient.pending.containsKey(rule.key()), this.active);
@@ -103,6 +129,11 @@ public final class CarpetRulesTab extends PresetCommandTab {
       Button refresh = GuiButton.themed(Component.literal("刷新"), b -> CarpetRuleClient.refresh()).bounds(area.right() - small, y, small, 22).build();
       refresh.active = !CarpetRuleClient.busy(); refresh.setTooltip(Tooltip.create(Component.literal(CarpetRuleClient.status()))); commandButtons.add(refresh);
    }
+   int layoutFilters() {
+      if (enabledFilter == null || disabledFilter == null) return 0;
+      return ((CommandGUIScreen)parent).positionStateFilters(enabledFilter, disabledFilter);
+   }
+
    public void tickRules() {
       if (revision != CarpetRuleClient.version()) { revision = CarpetRuleClient.version(); reload(); }
    }
