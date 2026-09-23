@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.remrin.CommandGUI;
 import java.util.*;
 import net.fabricmc.fabric.api.networking.v1.*;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 
 /** Catalogue and bounded batch adapter. All changes execute Carpet's native commands as the player. */
 public final class CarpetRuleService {
@@ -20,6 +21,10 @@ public final class CarpetRuleService {
       PayloadTypeRegistry.serverboundPlay().register(RulePayloads.Apply.TYPE, RulePayloads.Apply.CODEC);
       ServerPlayConnectionEvents.DISCONNECT.register((listener, server) -> {
          lastQuery.remove(listener.getPlayer().getUUID()); lastBatch.remove(listener.getPlayer().getUUID());
+      });
+      ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
+         lastQuery.clear();
+         lastBatch.clear();
       });
       ServerPlayNetworking.registerGlobalReceiver(RulePayloads.Apply.TYPE, (payload, ctx) -> {
          if (!ServerPlayNetworking.canSend(ctx.player(), RulePayloads.Snapshot.TYPE)) return;
@@ -61,11 +66,12 @@ public final class CarpetRuleService {
             return;
          }
          long now = System.currentTimeMillis();
-         Long last = lastQuery.put(ctx.player().getUUID(), now);
+         Long last = lastQuery.get(ctx.player().getUUID());
          if (last != null && now - last < 1000) {
             ServerPlayNetworking.send(ctx.player(), new RulePayloads.Snapshot(query.request(), GSON.toJson(new Page(0, true, "查询过于频繁，请稍后刷新", List.of()))));
             return;
          }
+         lastQuery.put(ctx.player().getUUID(), now);
          try {
             List<RuleData> rules = CarpetRuleCatalog.read();
             for (int offset = 0, page = 0; offset < Math.max(1, rules.size()); offset += 16, page++) {

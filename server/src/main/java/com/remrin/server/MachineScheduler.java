@@ -53,6 +53,15 @@ public final class MachineScheduler {
    private MachineScheduler() {
    }
 
+   public static void reset() {
+      runtimes.clear();
+      botLastTick.clear();
+      detectedModeState.clear();
+      lastSwitchTick.clear();
+      lastModeSwitchTick.clear();
+      execTrace.clear();
+   }
+
    private static String modeKey(String machineId, String modeId) {
       return machineId + "#" + modeId;
    }
@@ -69,10 +78,12 @@ public final class MachineScheduler {
    public static void tick(MinecraftServer server) {
       if (!runtimes.isEmpty()) {
          int tick = server.getTickCount();
-         Iterator<Entry<String, MachineScheduler.Runtime>> it = runtimes.entrySet().iterator();
-
-         while (it.hasNext()) {
-            MachineScheduler.Runtime runtime = it.next().getValue();
+         // Commands may synchronously stop, replace or start a timeline (for example /cgtest).
+         // New runtimes start next tick; cancelled/replaced runtimes must not execute again.
+         for (MachineScheduler.Runtime runtime : new ArrayList<>(runtimes.values())) {
+            if (runtimes.get(runtime.key) != runtime) {
+               continue;
+            }
             if (!runtime.hadFailures) for (var watched : runtime.watchedBots.entrySet()) {
                if (server.getPlayerList().getPlayerByName(watched.getKey()) != watched.getValue() || !watched.getValue().isAlive()) {
                   fail(runtime, "player " + watched.getKey(), "假人 " + watched.getKey() + " 在执行期间被移除或击杀，已中止");
@@ -95,6 +106,9 @@ public final class MachineScheduler {
                      continue;
                   }
                   MachineScheduler.CommandResult result = executeCommand(server, pending.command, runtime);
+                  if (runtimes.get(runtime.key) != runtime) {
+                     continue;
+                  }
                   if (result == MachineScheduler.CommandResult.SUCCESS && playerCommand != null && !playerCommand[2].equals("kill")
                      && !playerCommand[2].equals("spawn"))
                      runtime.watchedBots.put(playerCommand[1], server.getPlayerList().getPlayerByName(playerCommand[1]));
@@ -188,7 +202,7 @@ public final class MachineScheduler {
                         fail(runtime, "检测确认", "指令已结束，但检测状态未达到" + (runtime.isOffTimeline ? "关机" : "开机") + "状态，请检查机器");
                   }
                }
-               it.remove();
+               runtimes.remove(runtime.key, runtime);
                cleanupIfEmpty(runtime.machine.id);
                int hashIndex = runtime.key.indexOf(35);
                if (hashIndex >= 0) {
@@ -587,7 +601,7 @@ public final class MachineScheduler {
          for (MachineConfig.Step entry : timeline.steps) {
             if (entry != null) {
                if (entry.isDelay()) {
-                  wait += Math.max(1, Math.min(72000, entry.delay));
+                  wait = (int)Math.min(Integer.MAX_VALUE, (long)wait + Math.max(1, Math.min(72000, entry.delay)));
                } else {
                   result.add(
                      new MachineScheduler.EffectiveStep(
@@ -602,6 +616,10 @@ public final class MachineScheduler {
             }
          }
 
+         if (wait > 0) {
+            // A final delay is part of every loop, including the final completion boundary.
+            result.add(new MachineScheduler.EffectiveStep(wait, 0, 1, List.of()));
+         }
          return result;
       } else {
          return result;

@@ -42,6 +42,11 @@ public final class MachineManager {
    private MachineManager() {
    }
 
+   public static void reset() {
+      editLocks.clear();
+      lastStateSignature = "";
+   }
+
    public static void handleAction(ServerPlayer player, MinecraftServer server, MachinePayloads.ActionPayload payload) {
       try {
          JsonObject action = JsonParser.parseString(payload.json()).getAsJsonObject();
@@ -110,6 +115,16 @@ public final class MachineManager {
          if (MachineScheduler.isRunning(machine.id)) {
             sendMessage(player, "机器「" + machine.name + "」正在开机/关机中，请稍候");
             return;
+         }
+         if (MachineModeChain.isActive(machine.id)) {
+            sendMessage(player, "机器「" + machine.name + "」模式正在切换中，请稍候再开关机");
+            return;
+         }
+         for (MachineConfig.ModeData mode : machine.modes) {
+            if (MachineScheduler.isModeProcessRunning(machine.id, mode.id)) {
+               sendMessage(player, "机器「" + machine.name + "」模式正在执行开机/关机流程，请稍候再开关机");
+               return;
+            }
          }
          if (machine.detection != null && machine.detection.enabled) {
             int tick = server.getTickCount();
@@ -658,15 +673,21 @@ public final class MachineManager {
    public static void syncTo(ServerPlayer player) {
       if (ServerPlayNetworking.canSend(player, MachinePayloads.SyncPayload.TYPE)) {
          String json = buildSyncJson(player);
-         MachineMod.LOGGER.info("Sync machine list to {} ({} bytes)", player.getGameProfile().name(), json.length());
+         MachineMod.LOGGER.debug("Sync machine list to {} ({} bytes)", player.getGameProfile().name(), json.length());
          ServerPlayNetworking.send(player, new MachinePayloads.SyncPayload(json));
       }
    }
 
    public static void broadcastSync(PlayerList playerList) {
       if (playerList != null) {
+         JsonObject snapshot = null;
          for (ServerPlayer player : playerList.getPlayers()) {
-            syncTo(player);
+            if (ServerPlayNetworking.canSend(player, MachinePayloads.SyncPayload.TYPE)) {
+               if (snapshot == null) {
+                  snapshot = buildSyncData();
+               }
+               ServerPlayNetworking.send(player, new MachinePayloads.SyncPayload(buildSyncJson(snapshot, player)));
+            }
          }
       }
    }
@@ -796,12 +817,20 @@ public final class MachineManager {
    }
 
    private static String buildSyncJson(ServerPlayer viewer) {
+      return buildSyncJson(buildSyncData(), viewer);
+   }
+
+   private static String buildSyncJson(JsonObject snapshot, ServerPlayer viewer) {
+      snapshot.addProperty("canEdit", canEdit(viewer));
+      snapshot.addProperty("canConfig", isFullEditor(viewer));
+      return snapshot.toString();
+   }
+
+   private static JsonObject buildSyncData() {
       // 注意：不要在这里 cleanupExpiredLocks()——sync 是全服周期广播触发的，
       // 若在此清理会把仍在编辑（只是子屏停留未 tick 续期）的玩家的锁误删。
       // 过期锁只在 editSession(open)（有人尝试抢锁）与超长兜底（见 cleanupExpiredLocks 阈值）时清理。
       JsonObject root = new JsonObject();
-      root.addProperty("canEdit", canEdit(viewer));
-      root.addProperty("canConfig", isFullEditor(viewer));
       MinecraftServer server = MachineMod.getCurrentServer();
       JsonArray machines = new JsonArray();
 
@@ -859,7 +888,7 @@ public final class MachineManager {
       }
 
       root.add("machines", machines);
-      return root.toString();
+      return root;
    }
 
    private static boolean canEdit(ServerPlayer player) {
@@ -898,6 +927,10 @@ public final class MachineManager {
    }
 
    private static String validate(MachineConfig.MachineData machine) {
+      if (machine.modes == null) machine.modes = new ArrayList<>();
+      if (machine.bannedPlayers == null) machine.bannedPlayers = new ArrayList<>();
+      if (machine.modeOrder == null) machine.modeOrder = new ArrayList<>();
+      if (machine.stopModeOrder == null) machine.stopModeOrder = new ArrayList<>();
       if (machine.id == null || machine.id.isBlank()) {
          return "id 不能为空";
       } else if (machine.name != null && !machine.name.isBlank()) {
@@ -966,7 +999,6 @@ public final class MachineManager {
                            }
 
                            mode.onTimeline.loopCount = 0;
-                           mode.offTimeline.loopCount = 0;
                            if (mode.switchInterval < 0 || mode.switchInterval > 1200) {
                               return "模式「" + mode.name + "」开关间隔必须在 0-1200 tick 之间";
                            }
@@ -979,6 +1011,13 @@ public final class MachineManager {
                            String offError = validateTimeline(mode.offTimeline, machine.bots.size(), "模式「" + mode.name + "」关机流程");
                            if (offError != null) {
                               return offError;
+                           }
+                           mode.offTimeline.loopCount = 0;
+                           if (mode.detection != null && mode.detection.enabled) {
+                              String detectionError = validateDetection(mode.detection, "模式「" + mode.name + "」");
+                              if (detectionError != null) {
+                                 return detectionError;
+                              }
                            }
                         }
                      }
@@ -1007,8 +1046,12 @@ public final class MachineManager {
    private static String validateDetection(MachineConfig.DetectionData detection, String label) {
       if (detection.dimension == null || detection.dimension.isBlank()) {
          return label + "检测维度不能为空";
+      } else if (Identifier.tryParse(detection.dimension) == null) {
+         return label + "检测维度格式无效";
       } else if (detection.blockId == null || detection.blockId.isBlank()) {
          return label + "检测方块不能为空";
+      } else if (Identifier.tryParse(detection.blockId) == null) {
+         return label + "检测方块格式无效";
       } else if ("minecraft:air".equals(MachineDetector.normalizeId(detection.blockId))) {
          return label + "检测方块不能是空气";
       } else if (detection.property == null || detection.property.isBlank()) {

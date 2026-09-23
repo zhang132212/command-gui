@@ -13,7 +13,7 @@ public class TimedTaskManager {
    }
 
    public static void addSpawnTask(String playerName, int hours, int minutes, int seconds, Double x, Double y, Double z) {
-      int totalTicks = (hours * 3600 + minutes * 60 + seconds) * 20;
+      long totalTicks = delayTicks(hours, minutes, seconds);
       if (totalTicks > 0) {
          removeTask(playerName);
          pendingTasks.add(new TimedTaskManager.TimedTask(TimedTaskManager.TaskType.SPAWN, playerName, totalTicks, x, y, z));
@@ -21,7 +21,7 @@ public class TimedTaskManager {
    }
 
    public static void addKillTask(String playerName, int hours, int minutes, int seconds) {
-      int totalTicks = (hours * 3600 + minutes * 60 + seconds) * 20;
+      long totalTicks = delayTicks(hours, minutes, seconds);
       if (totalTicks > 0) {
          removeTask(playerName);
          pendingTasks.add(new TimedTaskManager.TimedTask(TimedTaskManager.TaskType.KILL, playerName, totalTicks));
@@ -30,6 +30,13 @@ public class TimedTaskManager {
 
    public static void removeTask(String playerName) {
       pendingTasks.removeIf(task -> task.playerName.equals(playerName));
+   }
+
+   private static long delayTicks(int hours, int minutes, int seconds) {
+      if (hours < 0 || minutes < 0 || seconds < 0) {
+         return 0;
+      }
+      return (hours * 3600L + minutes * 60L + seconds) * 20L;
    }
 
    public static TimedTaskManager.TimedTask getTask(String playerName) {
@@ -109,13 +116,13 @@ public class TimedTaskManager {
       public final Double spawnX;
       public final Double spawnY;
       public final Double spawnZ;
-      public int remainingTicks;
+      public long remainingTicks;
 
-      public TimedTask(TimedTaskManager.TaskType type, String playerName, int delayTicks) {
+      public TimedTask(TimedTaskManager.TaskType type, String playerName, long delayTicks) {
          this(type, playerName, delayTicks, null, null, null);
       }
 
-      public TimedTask(TimedTaskManager.TaskType type, String playerName, int delayTicks, Double x, Double y, Double z) {
+      public TimedTask(TimedTaskManager.TaskType type, String playerName, long delayTicks, Double x, Double y, Double z) {
          this.type = type;
          this.playerName = playerName;
          this.remainingTicks = delayTicks;
@@ -125,7 +132,7 @@ public class TimedTaskManager {
       }
 
       public int getRemainingSeconds() {
-         return (this.remainingTicks + 19) / 20;
+         return (int)Math.min(Integer.MAX_VALUE, Math.max(0L, this.remainingTicks / 20 + (this.remainingTicks % 20 > 0 ? 1 : 0)));
       }
    }
 }

@@ -96,21 +96,26 @@ public final class MachineNetworkManager {
       try {
          MachineDebug.log("[Net] sync received, length=" + json.length());
          JsonObject root = JsonParser.parseString(json).getAsJsonObject();
-         canEdit = root.has("canEdit") && root.get("canEdit").getAsBoolean();
-         canConfig = root.has("canConfig") && root.get("canConfig").getAsBoolean();
-         machines.clear();
+         boolean nextCanEdit = root.has("canEdit") && root.get("canEdit").getAsBoolean();
+         boolean nextCanConfig = root.has("canConfig") && root.get("canConfig").getAsBoolean();
+         List<MachineModels.MachineData> nextMachines = new ArrayList<>();
          if (root.has("machines")) {
             for (JsonElement element : root.getAsJsonArray("machines")) {
                MachineModels.MachineData machine = (MachineModels.MachineData)GSON.fromJson(element, MachineModels.MachineData.class);
                if (machine != null) {
-                  machines.add(machine);
+                  nextMachines.add(machine);
                }
             }
          }
 
+         // Parse and validate the entire snapshot before replacing a usable one.
+         String signature = computeStructureSignature(nextMachines);
+         machines.clear();
+         machines.addAll(nextMachines);
+         canEdit = nextCanEdit;
+         canConfig = nextCanConfig;
          serverSupported = true;
          syncVersion++;
-         String signature = computeStructureSignature();
          if (!signature.equals(structureSignature)) {
             structureSignature = signature;
             structureVersion++;
@@ -120,10 +125,10 @@ public final class MachineNetworkManager {
       }
    }
 
-   private static String computeStructureSignature() {
+   private static String computeStructureSignature(List<MachineModels.MachineData> source) {
       StringBuilder sb = new StringBuilder();
 
-      for (MachineModels.MachineData machine : machines) {
+      for (MachineModels.MachineData machine : source) {
          sb.append(machine.id)
             .append('|')
             .append(machine.name)
@@ -182,6 +187,7 @@ public final class MachineNetworkManager {
    private static void reset() {
       machines.clear();
       pendingMachineEdits.clear();
+      blockQueryCallback = null;
       serverSupported = false;
       canEdit = false;
       canConfig = false;
@@ -255,17 +261,22 @@ public final class MachineNetworkManager {
    private static void applyFakePlayerStates(String json) {
       try {
          JsonObject root = JsonParser.parseString(json).getAsJsonObject();
-         fakePlayerStatesSupported = root.has("supported") && root.get("supported").getAsBoolean();
-         fakePlayerStates.clear();
+         boolean nextSupported = root.has("supported") && root.get("supported").getAsBoolean();
+         Map<String, JsonObject> nextStates = new HashMap<>();
          if (root.has("players")) {
             JsonObject players = root.getAsJsonObject("players");
 
             for (Entry<String, JsonElement> entry : players.entrySet()) {
-               fakePlayerStates.put(entry.getKey(), entry.getValue().getAsJsonObject());
+               nextStates.put(entry.getKey(), entry.getValue().getAsJsonObject());
             }
          }
 
-         fakeStatesVersion++;
+         if (fakePlayerStatesSupported != nextSupported || !fakePlayerStates.equals(nextStates)) {
+            fakePlayerStatesSupported = nextSupported;
+            fakePlayerStates.clear();
+            fakePlayerStates.putAll(nextStates);
+            fakeStatesVersion++;
+         }
       } catch (Exception var5) {
       }
    }
@@ -461,7 +472,9 @@ public final class MachineNetworkManager {
    }
 
    public static void removeLocalFakePlayer(String name) {
-      fakePlayerStates.remove(name);
+      if (fakePlayerStates.remove(name) != null) {
+         fakeStatesVersion++;
+      }
    }
 
    public static boolean fakeActionActive(String name, String key) {

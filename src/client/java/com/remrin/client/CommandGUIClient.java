@@ -21,6 +21,7 @@ import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.EndTick;
 import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.resource.v1.reloader.SimpleReloadListener;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
@@ -40,6 +41,11 @@ public class CommandGUIClient implements ClientModInitializer {
       GuiTuning.load();
       MachineNetworkManager.init();
       com.remrin.client.rules.CarpetRuleClient.init();
+      ClientPlayConnectionEvents.DISCONNECT.register((listener, client) -> {
+         TimedTaskManager.clear();
+         ChainedCommandExecutor.clearDelayed();
+         shortcutPressedState.clear();
+      });
       if (Minecraft.getInstance().getResourceManager() instanceof ReloadableResourceManager rrm) {
          rrm.registerReloadListener(new SimpleReloadListener<Void>() {
             protected Void prepare(SharedState state) {

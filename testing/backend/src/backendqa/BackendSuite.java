@@ -92,7 +92,7 @@ public final class BackendSuite implements ModInitializer {
          if(bootstrap==1){
             if(phase.equals("restart")){registerRestart();bootstrap=3;return;}
             server.services().nameToIdCache().resolveOfflineUsers(true);
-            for(String name:List.of("QAB_Admin","QAB_Editor","QAB_Guest","QAB_Bot","QAB_Left","QAB_Low","QAB_Chain","QAB_InterOn","QAB_InterOff","QAB_Denied")){
+            for(String name:List.of("QAB_Admin","QAB_Editor","QAB_Guest","QAB_Bot","QAB_Left","QAB_Low","QAB_Chain","QAB_InterOn","QAB_InterOff","QAB_Denied","QAB_AdminDenied","QAB_TestDenied")){
                server.services().nameToIdCache().add(NameAndId.createOffline(name));
                command("player "+name+" spawn at 0 80 0");
             }
@@ -156,7 +156,7 @@ public final class BackendSuite implements ModInitializer {
    private JsonObject sync(ServerPlayer p){Hooks.packets.remove(p.getGameProfile().name());MachineManager.syncTo(p);return json(Hooks.packets(p,MachinePayloads.SyncPayload.class).getLast().json());}
    private Object field(Class<?> type,String name)throws Exception{var f=type.getDeclaredField(name);f.setAccessible(true);return f.get(null);}
    private Object call(Class<?> type,String name,Class<?>[] types,Object...args)throws Exception{var m=type.getDeclaredMethod(name,types);m.setAccessible(true);return m.invoke(null,args);}
-   private void registerAll(){bootstrapTests();crudTests();permissionTests();validationTests();lockTests();detectionTests();schedulerTests();modeTests();fakeTests();syncTests();persistenceTests();ruleTests();interruptionTests();}
+   private void registerAll(){bootstrapTests();crudTests();permissionTests();validationTests();lockTests();detectionTests();schedulerTests();modeTests();fakeTests();syncTests();persistenceTests();ruleTests();interruptionTests();regressionTests();}
    private void bootstrapTests(){
       test("bootstrap","entrypoints and commands",()->{
          check(FabricLoader.getInstance().isModLoaded("command-gui"),"combined mod loaded");check(!FabricLoader.getInstance().isModLoaded("command-gui-server"),"no legacy server mod");
@@ -203,10 +203,33 @@ public final class BackendSuite implements ModInitializer {
       invalid.put("spawn must be first",m->m.onTimeline.steps.getFirst().commands.set(0,"player {bot} attack"));invalid.put("bad bot index",m->m.onTimeline.steps.getFirst().bot=1);invalid.put("null step",m->m.onTimeline.steps.add(null));invalid.put("empty commands",m->m.onTimeline.steps.getFirst().commands.clear());invalid.put("command delay",m->m.onTimeline.steps.getFirst().commandDelay=0);
       invalid.put("delay bound",m->{Step s=new Step();s.kind="delay";s.delay=72001;m.onTimeline.steps.add(s);});
       invalid.put("detection air",m->m.detection.blockId="air");invalid.put("detection empty dimension",m->m.detection.dimension="");invalid.put("detection empty property",m->m.detection.property="");invalid.put("detection empty on",m->m.detection.onValues.clear());invalid.put("detection overlap",m->m.detection.offValues.add("powered=true"));
+      invalid.put("detection malformed dimension",m->m.detection.dimension="invalid dimension!");
+      invalid.put("detection malformed block id",m->m.detection.blockId="invalid block!");
+      invalid.put("mode null off timeline",m->{var mode=mode(m,"a",false);mode.offTimeline=null;m.modes.add(mode);});
+      invalid.put("mode detection malformed dimension",m->{var mode=mode(m,"a",false);mode.detection=detection(128,80,128);mode.detection.dimension="invalid dimension!";m.modes.add(mode);});
+      invalid.put("mode detection air",m->{var mode=mode(m,"a",false);mode.detection=detection(128,80,128);mode.detection.blockId="minecraft:air";m.modes.add(mode);});
       invalid.put("duplicate mode",m->{var mode=mode(m,"a",false);m.modes.add(mode);m.modes.add(mode);});
-      invalid.forEach((name,mutate)->test("validation",name,()->{var m=fixture();mutate.accept(m);int before=MachineConfig.getMachines().size();saveAction(admin,"add",m,-1);eq(MachineConfig.getMachines().size(),before,"invalid config rejected");message(admin,"无效");}));
+      invalid.forEach((name,mutate)->test("validation",name,()->{
+         var m=fixture();mutate.accept(m);Set<String> before=new HashSet<>(MachineConfig.getMachines().stream().map(machine->machine.id).toList());
+         try{saveAction(admin,"add",m,-1);eq(MachineConfig.getMachines().size(),before.size(),"invalid config rejected");message(admin,"无效");}
+         finally{removeAddedFixtures(before);}
+      }));
       for(String root:List.of("op","deop","stop","save-all","save-off","save-on","ban","ban-ip","pardon","pardon-ip","kick","whitelist","seed","kill","gamemode","give","effect","execute","function","run","forceload","datapack","reload","publish","debug","perf","tick","jfr","msg"))
-         test("validation","blocked script command "+root,()->{var m=fixture();m.onTimeline.steps.getFirst().commands.add("/"+root+" QAB_Guest");int before=MachineConfig.getMachines().size();saveAction(admin,"add",m,-1);eq(MachineConfig.getMachines().size(),before,"blocked root rejected");});
+         test("validation","blocked script command "+root,()->{
+            var m=fixture();m.onTimeline.steps.getFirst().commands.add("/"+root+" QAB_Guest");Set<String> before=new HashSet<>(MachineConfig.getMachines().stream().map(machine->machine.id).toList());
+            try{saveAction(admin,"add",m,-1);eq(MachineConfig.getMachines().size(),before.size(),"blocked root rejected");}
+            finally{removeAddedFixtures(before);}
+         });
+   }
+   private void removeAddedFixtures(Set<String> existingIds){
+      boolean changed=false;
+      for(var machine:new ArrayList<>(MachineConfig.getMachines()))if(!existingIds.contains(machine.id)){
+         // A broken validator may have published an unsafe dimension or timeline. Remove it
+         // before the next server tick; the rejection assertion above must still report FAIL.
+         MachineScheduler.invalidate(machine.id);MachineModeChain.invalidate(machine.id);MachineScheduler.clearSwitchTicks(machine.id);
+         MachineBlockCache.invalidate(machine);MachineConfig.removeMachine(machine.id);changed=true;
+      }
+      if(changed)MachineBlockCache.rebuild();
    }
    private void lockTests(){
       test("locks","mutual exclusion and owner release",()->{var m=stored();editLock(editor,m,true);editLock(admin,m,true);check(MachineManager.editingLockedByOtherMachineId(m.id,"QAB_Admin")!=null,"editor retains lock");editLock(admin,m,false);check(MachineManager.editingLockedByOtherMachineId(m.id,"QAB_Admin")!=null,"other cannot unlock");action(admin,action("toggle",m.id));check(!MachineScheduler.isRunning(m.id),"lock blocks toggle");action(admin,action("delete",m.id));check(MachineConfig.getMachine(m.id)!=null,"lock blocks deletion");editLock(editor,m,false);check(MachineManager.editingLockedByOtherMachineId(m.id,"QAB_Admin")==null,"owner releases");editLock(admin,m,true);action(admin,action("delete",m.id));check(MachineConfig.getMachine(m.id)==null,"owner may delete while editing");});
@@ -318,8 +341,193 @@ public final class BackendSuite implements ModInitializer {
    private void registerRestart(){
       test("persistence","fresh server reloads machine whitelist and Carpet default",()->{var m=MachineConfig.getMachine("qa_restart_sentinel");check(m!=null,"machine survives process restart");eq(m.name,"重启后端验证","unicode survives restart");check(MachineConfig.getEditorWhitelist().contains("QAB_Editor"),"whitelist survives restart");eq(rule("flippinCactus").value(),"true","setDefault applies after restart");check(!MachineScheduler.hasRunning(),"no stale scheduler");check(!MachineMod.hasMachineStateSubscribers(),"no stale subscribers");});
    }
+   private void regressionTests(){
+      test("transport","malformed action roots and fields cannot mutate machines",()->{
+         var m=stored();String before=GSON.toJson(MachineConfig.getMachines());
+         for(String payload:List.of("null","[]","true","42","\"text\"","{\"type\":null}","{\"type\":[]}",
+            "{\"type\":\"add\",\"machine\":null}","{\"type\":\"edit\",\"machine\":[]}",
+            "{\"type\":\"delete\",\"machineId\":{}}","{\"type\":\"setModes\",\"modeIds\":{}}")){
+            receive(admin,new MachinePayloads.ActionPayload(payload));
+            eq(GSON.toJson(MachineConfig.getMachines()),before,"malformed action rejected: "+payload);
+         }
+         check(MachineConfig.getMachine(m.id)!=null,"existing machine survives invalid requests");
+      });
+      test("detection","invalid persisted dimension produces abnormal state without crashing",()->{
+         var m=stored();m.detection.dimension="invalid dimension!";
+         try{eq(MachineDetector.evaluate(m,server),MachineDetector.MachineState.ABNORMAL,"invalid legacy dimension is abnormal");MachineBlockCache.rebuild();MachineBlockCache.prime(server);}
+         finally{m.detection.dimension="minecraft:overworld";MachineBlockCache.rebuild();}
+      });
+      test("cache-disk","chunk unload snapshots newer memory instead of stale disk",()->{
+         var m=stored();var d=m.detection;MachineBlockCache.rebuild();server.saveEverything(true,true,true);
+         var onDisk=BlockStateFileReader.read(server,d.dimension,d.x,d.y,d.z);
+         check(onDisk!=null,"fixture saved to disk");eq(onDisk.properties().get("powered"),"false","disk has old OFF value");
+         check(BlockStateFileReader.read(server,d.dimension,d.x,d.y+4096,d.z)==null,"out-of-range section cannot alias stored height");
+         power(d,true);MachineBlockCache.onChunkUnload(server.overworld(),server.overworld().getChunkAt(new BlockPos(d.x,d.y,d.z)));
+         var snapshot=MachineBlockCache.get(d.dimension,d.x,d.y,d.z);
+         check(snapshot!=null,"unload keeps snapshot");eq(snapshot.properties().get("powered"),"true","memory ON survives stale disk");
+      });
+      test("cache-disk","custom dimension never falls back to overworld files",()->{
+         var m=stored();var d=m.detection;server.saveEverything(true,true,true);
+         check(BlockStateFileReader.read(server,d.dimension,d.x,d.y,d.z)!=null,"overworld fixture exists on disk");
+         check(BlockStateFileReader.read(server,"backendqa:missing",d.x,d.y,d.z)==null,"absent custom dimension cannot return overworld data");
+         Path region=server.getWorldPath(LevelResource.ROOT).resolve("dimensions/backendqa/nested/test/region");Files.createDirectories(region);
+         eq(call(BlockStateFileReader.class,"getRegionDir",new Class<?>[]{MinecraftServer.class,String.class},server,"backendqa:nested/test"),region,"namespace and nested dimension path");
+         check(BlockStateFileReader.read(server,"backendqa:nested/test",d.x,d.y,d.z)==null,"empty custom region remains empty");
+      });
+      test("cache-disk","rebuild removes snapshots for deleted detection positions",()->{
+         var m=stored();var d=m.detection;MachineBlockCache.rebuild();MachineBlockCache.prime(server);
+         MachineBlockCache.putDiskResult(d.dimension,d.x,d.y,d.z,null);
+         check(MachineBlockCache.get(d.dimension,d.x,d.y,d.z)!=null,"initial snapshot exists");
+         MachineConfig.removeMachine(m.id);MachineBlockCache.rebuild();
+         check(MachineBlockCache.get(d.dimension,d.x,d.y,d.z)==null,"deleted watch removes snapshot");
+         check(!MachineBlockCache.hasFreshDisk(d.dimension,d.x,d.y,d.z),"deleted watch removes negative disk cache");
+      });
+      test("scheduler","commands may stop their own runtimes during the same tick",()->{
+         var first=stored();var second=stored();
+         for(var m:List.of(first,second)){m.detection.enabled=false;MachineScheduler.start(m,timeline("cgtest stop "+m.id,"qabackend MUST_NOT_RUN"),"QAB_Admin",false);}
+         MachineScheduler.tick(server);MachineScheduler.tick(server);
+         check(!MachineScheduler.isRunning(first.id)&&!MachineScheduler.isRunning(second.id),"both self-stopping runtimes removed without iterator failure");
+         check(marks.isEmpty(),"cancelled runtime does not execute trailing commands");
+      });
+      async("scheduler","consecutive trailing delays apply between loops and before completion",()->{
+         current=stored();current.detection.enabled=false;var t=timeline("qabackend loop-tail");t.loopCount=2;
+         for(int ticks:List.of(7,5)){var delay=new Step();delay.kind="delay";delay.delay=ticks;t.steps.add(delay);}
+         MachineScheduler.start(current,t,"QAB_Admin",false);
+      },()->!MachineScheduler.isRunning(current.id),()->{
+         eq(marks.size(),2,"two loops execute exactly once each");
+         check(marks.get(1).tick-marks.getFirst().tick>=12,"all trailing delays retained between loops");
+         check(server.getTickCount()-marks.getLast().tick>=12,"last loop waits before completion");
+      },120);
+      async("scheduler","delay-only shutdown remains active until its delay elapses",()->{
+         current=stored();current.detection.enabled=false;var t=new Timeline();var delay=new Step();delay.kind="delay";delay.delay=8;t.steps.add(delay);
+         MachineScheduler.start(current,t,"QAB_Admin",true);check(MachineScheduler.isShuttingDown(current.id),"delay-only shutdown registers runtime");
+      },()->!MachineScheduler.isRunning(current.id),()->{
+         check(server.getTickCount()-active.serverStartTick>=8,"delay-only timeline waits before completion");check(marks.isEmpty(),"delay-only timeline executes no command");
+      },60);
+      test("modes","main toggle cannot interrupt running or queued modes",()->{
+         var m=stored();var a=mode(m,"a",false);m.modes.add(a);MachineScheduler.startMode(m,a,"QAB_Admin");
+         check(MachineScheduler.isModeProcessRunning(m.id,a.id),"mode runtime active before toggle");action(admin,action("toggle",m.id));
+         check(!MachineScheduler.isRunning(m.id)&&MachineScheduler.isModeProcessRunning(m.id,a.id),"main toggle preserves mode runtime");message(admin,"模式");
+         MachineScheduler.invalidate(m.id);Hooks.clear();MachineModeChain.buildChains(m,List.of(a.id),List.of(),"QAB_Admin");
+         check(MachineModeChain.isActive(m.id),"mode chain queued before toggle");action(admin,action("toggle",m.id));
+         check(!MachineScheduler.isRunning(m.id)&&MachineModeChain.isActive(m.id),"main toggle preserves queued chain");message(admin,"模式");
+      });
+      for(String name:List.of("QAB_AdminDenied","QAB_TestDenied")){
+         async("permissions","offline guest cannot run "+(name.equals("QAB_AdminDenied")?"machineadmin":"cgtest"),()->{
+            var p=server.getPlayerList().getPlayerByName(name);check(p!=null,"offline permission fixture exists");permission(p,0);
+            current=stored();current.detection.enabled=false;
+            String command=name.equals("QAB_AdminDenied")?"machineadmin add "+name:"cgtest delete QAB_Admin "+current.id;
+            var t=timeline(command,"qabackend MUST_NOT_RUN");var delay=new Step();delay.kind="delay";delay.delay=20;t.steps.addFirst(delay);
+            MachineScheduler.start(current,t,name,false);command("player "+name+" kill");
+         },()->!MachineScheduler.isRunning(current.id),()->{
+            check(server.getPlayerList().getPlayerByName(name)==null,"trigger is disconnected");
+            check(!MachineConfig.getEditorWhitelist().contains(name),"detached guest cannot add editor");
+            check(MachineConfig.getMachine(current.id)!=null,"detached guest cannot delete machine as admin");
+            check(marks.isEmpty(),"denied command aborts following commands");
+         },100);
+      }
+      async("modes","empty stop timeline preserves interval and sends completion",()->{
+         current=stored();var a=mode(current,"a",false);a.offTimeline=new Timeline();current.modes.addAll(List.of(a,mode(current,"b",false)));
+         current.stopModeOrder=List.of("a","b");current.stopModeInterval=8;
+         MachineModeChain.buildChains(current,List.of(),List.of("a","b"),"QAB_Admin");
+      },()->!MachineModeChain.isActive(current.id)&&!MachineScheduler.hasRunning(),()->{
+         eq(marks.stream().map(Mark::text).toList(),List.of("stop:b"),"nonempty stop executes exactly once");
+         check(marks.getFirst().tick-active.serverStartTick>=8,"empty stop still applies configured interval");message(admin,"模式已切换");
+      },150);
+      async("modes","all empty stop timelines complete the batch",()->{
+         current=stored();var a=mode(current,"a",false);a.offTimeline=new Timeline();current.modes.add(a);
+         MachineModeChain.buildChains(current,List.of(),List.of("a"),"QAB_Admin");
+      },()->!MachineModeChain.isActive(current.id),()->{check(marks.isEmpty(),"empty stop executes no commands");message(admin,"模式已切换");},50);
+      test("rules","rejected query flood does not extend cooldown",()->{
+         var queryTimes=(Map<UUID,Long>)field(CarpetRuleService.class,"lastQuery");long accepted=System.currentTimeMillis()-100;queryTimes.put(admin.getUUID(),accepted);
+         for(int i=0;i<3;i++)receive(admin,new RulePayloads.Query(++request));
+         eq(queryTimes.get(admin.getUUID()),accepted,"rate-limited requests do not replace accepted query timestamp");
+         check(json(Hooks.packets(admin,RulePayloads.Snapshot.class).getLast().json()).get("error").getAsString().contains("频繁"),"flood receives rate-limit response");
+         queryTimes.put(admin.getUUID(),System.currentTimeMillis()-1001);Hooks.clear();receive(admin,new RulePayloads.Query(++request));
+         check(!json(Hooks.packets(admin,RulePayloads.Snapshot.class).getFirst().json()).getAsJsonArray("rules").isEmpty(),"query works once original cooldown expires");
+      });
+      test("persistence","invalid config structure never replaces live machines",()->{
+         MachineConfig.save();Path file=FabricLoader.getInstance().getConfigDir().resolve("command-gui-server/machines.json");String backup=Files.readString(file),before=GSON.toJson(MachineConfig.getMachines());
+         try{
+            for(String corruption:List.of("null machine","duplicate machine id","blank machine id","null mode","duplicate mode id")){
+               JsonObject candidate=json(backup);JsonArray machines=candidate.getAsJsonArray("machines");
+               JsonObject first=machines.get(0).getAsJsonObject();
+               switch(corruption){
+                  case "null machine" -> machines.add(JsonNull.INSTANCE);
+                  case "duplicate machine id" -> machines.add(first.deepCopy());
+                  case "blank machine id" -> first.addProperty("id","");
+                  case "null mode" -> first.getAsJsonArray("modes").add(JsonNull.INSTANCE);
+                  case "duplicate mode id" -> {var m=fixture();var mode=GSON.toJsonTree(mode(m,"duplicate",false));first.getAsJsonArray("modes").add(mode);first.getAsJsonArray("modes").add(mode.deepCopy());}
+               }
+               Files.writeString(file,GSON.toJson(candidate));MachineConfig.load();
+               eq(GSON.toJson(MachineConfig.getMachines()),before,"invalid candidate preserves live snapshot: "+corruption);
+            }
+         }finally{Files.writeString(file,backup);MachineConfig.load();}
+      });
+      test("persistence","legacy null containers normalize before publication",()->{
+         MachineConfig.save();Path file=FabricLoader.getInstance().getConfigDir().resolve("command-gui-server/machines.json");String backup=Files.readString(file);
+         try{
+            var source=fixture();JsonObject candidate=json(backup),machine=GSON.toJsonTree(source).getAsJsonObject();
+            for(String key:List.of("modes","bannedPlayers","modeOrder","stopModeOrder","onTimeline"))machine.add(key,JsonNull.INSTANCE);
+            machine.getAsJsonObject("offTimeline").add("steps",JsonNull.INSTANCE);var machines=new JsonArray();machines.add(machine);candidate.add("machines",machines);candidate.add("editorWhitelist",JsonNull.INSTANCE);
+            Files.writeString(file,GSON.toJson(candidate));MachineConfig.load();var loaded=MachineConfig.getMachine(source.id);
+            check(loaded!=null,"valid legacy machine retained");eq(MachineConfig.getMachines().size(),1,"candidate published after normalization");
+            check(loaded.modes!=null&&loaded.modes.isEmpty()&&loaded.bannedPlayers!=null&&loaded.bannedPlayers.isEmpty(),"nullable collections normalized");
+            check(loaded.modeOrder!=null&&loaded.modeOrder.isEmpty()&&loaded.stopModeOrder!=null&&loaded.stopModeOrder.isEmpty(),"nullable mode orders normalized");
+            check(loaded.onTimeline!=null&&loaded.onTimeline.steps!=null&&loaded.onTimeline.steps.isEmpty(),"null timeline normalized");
+            check(loaded.offTimeline!=null&&loaded.offTimeline.steps!=null&&loaded.offTimeline.steps.isEmpty(),"null steps normalized");
+            check(MachineConfig.getEditorWhitelist()!=null&&MachineConfig.getEditorWhitelist().isEmpty(),"null whitelist normalized");
+         }finally{Files.writeString(file,backup);MachineConfig.load();MachineBlockCache.rebuild();}
+      });
+      test("sync","shared broadcast keeps permissions specific to each viewer",()->{
+         Hooks.clear();MachineManager.broadcastSync(server.getPlayerList());
+         var owner=json(Hooks.packets(admin,MachinePayloads.SyncPayload.class).getLast().json());
+         var visitor=json(Hooks.packets(guest,MachinePayloads.SyncPayload.class).getLast().json());
+         var whitelist=json(Hooks.packets(editor,MachinePayloads.SyncPayload.class).getLast().json());
+         check(owner.get("canConfig").getAsBoolean()&&owner.get("canEdit").getAsBoolean(),"admin permissions preserved");
+         check(!visitor.get("canConfig").getAsBoolean()&&!visitor.get("canEdit").getAsBoolean(),"guest does not inherit admin permissions");
+         check(!whitelist.get("canConfig").getAsBoolean()&&whitelist.get("canEdit").getAsBoolean(),"editor permissions preserved");
+      });
+      test("sync","server lifecycle reset clears transient state and keeps machines",()->{
+         var m=stored();var mode=mode(m,"a",false);m.modes.add(mode);editLock(editor,m,true);
+         action(admin,action("requestSync",null));action(admin,action("fakeStatesRequest",null));
+         MachineScheduler.start(m,timeline("qabackend MUST_NOT_RUN"),"QAB_Admin",false);
+         MachineScheduler.recordModeSwitchTick(m.id,mode.id,server.getTickCount());MachineScheduler.updateDetectedModeState(m.id,mode.id,MachineDetector.MachineState.ON);
+         MachineModeChain.buildChains(m,List.of(mode.id),List.of(),"QAB_Admin");MachineBlockCache.rebuild();MachineBlockCache.prime(server);
+         MachineBlockCache.putDiskResult(m.detection.dimension,m.detection.x,m.detection.y,m.detection.z,null);
+         check(MachineScheduler.hasRunning()&&MachineModeChain.isActive(m.id)&&MachineMod.hasMachineStateSubscribers(),"runtime fixtures populated");
+         call(MachineMod.class,"resetServerState",new Class<?>[]{});
+         check(!MachineScheduler.hasRunning()&&!MachineModeChain.isActive(m.id),"all runtimes and chains cleared");
+         check(!MachineMod.hasMachineStateSubscribers()&&((Set<?>)field(MachineMod.class,"fakeStateSubscribers")).isEmpty(),"subscriptions cleared");
+         for(String key:List.of("runtimes","botLastTick","detectedModeState","lastSwitchTick","lastModeSwitchTick"))check(((Map<?,?>)field(MachineScheduler.class,key)).isEmpty(),"scheduler reset: "+key);
+         for(String key:List.of("watchedPositions","cache","diskCache"))check(((Map<?,?>)field(MachineBlockCache.class,key)).isEmpty(),"cache reset: "+key);
+         check(((Map<?,?>)field(MachineManager.class,"editLocks")).isEmpty(),"edit locks cleared");eq(field(MachineManager.class,"lastStateSignature"),"","state broadcast signature reset");
+         check(MachineConfig.getMachine(m.id)!=null,"persistent machine config retained");MachineBlockCache.rebuild();
+      });
+   }
    private void finish(){if(finished)return;finished=true;if(phase.equals("suite"))for(String group:GROUPS)if(results.stream().noneMatch(r->r.group.equals(group)))results.add(new Result(group,"coverage guard","FAIL",0,"No cases executed for required group"));write(true);server.halt(false);}
-   private void write(boolean complete){try{var report=new LinkedHashMap<String,Object>();report.put("phase",phase);report.put("complete",complete);report.put("passed",results.stream().filter(r->r.status.equals("PASS")).count());report.put("failed",results.stream().filter(r->r.status.equals("FAIL")).count());report.put("assertions",assertions);report.put("cases",results);Files.writeString(run.resolve("backend-"+phase+".json"),GSON.toJson(report));}catch(Exception e){throw new RuntimeException("Cannot write test report",e);}}
+   private void write(boolean complete){try{var report=new LinkedHashMap<String,Object>();report.put("phase",phase);report.put("complete",complete);report.put("passed",results.stream().filter(r->r.status.equals("PASS")).count());report.put("failed",results.stream().filter(r->r.status.equals("FAIL")).count());report.put("assertions",assertions);report.put("cases",results);Path target=run.resolve("backend-"+phase+".json"),temporary=target.resolveSibling(target.getFileName()+".tmp");Files.writeString(temporary,GSON.toJson(report));publishReport(temporary,target);}catch(Exception e){throw new RuntimeException("Cannot write test report",e);}}
+
+   private static void publishReport(Path temporary,Path target)throws java.io.IOException{
+      // Windows readers/antivirus may briefly deny replacement. Keep the previous complete
+      // JSON intact while retrying; sustained I/O errors still fail the test process.
+      boolean atomic=true;
+      for(int attempt=0;attempt<6;attempt++){
+         try{
+            if(atomic){
+               try{Files.move(temporary,target,StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING);return;}
+               catch(AtomicMoveNotSupportedException unsupported){atomic=false;}
+            }
+            Files.move(temporary,target,StandardCopyOption.REPLACE_EXISTING);return;
+         }catch(FileSystemException failure){
+            if(attempt==5)throw failure;
+            long delay=20L<<attempt;
+            System.err.println("BACKEND_REPORT retry "+(attempt+1)+"/5 after "+failure+"; waiting "+delay+"ms");
+            try{Thread.sleep(delay);}
+            catch(InterruptedException interrupted){Thread.currentThread().interrupt();throw new java.io.IOException("Interrupted while publishing test report",interrupted);}
+         }
+      }
+   }
 }
 
 

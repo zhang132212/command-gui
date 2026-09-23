@@ -306,6 +306,10 @@ public class CommandConfig {
    }
 
    public static void moveCommand(String name, String toCategoryId) {
+      CommandConfig.Category toCat = getCategory(toCategoryId);
+      if (toCat == null) {
+         return;
+      }
       CommandConfig.CommandEntry entry = null;
 
       for (CommandConfig.Category cat : configData.categories) {
@@ -316,11 +320,8 @@ public class CommandConfig {
       }
 
       if (entry != null) {
-         CommandConfig.Category toCat = getCategory(toCategoryId);
-         if (toCat != null) {
-            toCat.commands.put(name, entry);
-            save();
-         }
+         toCat.commands.put(name, entry);
+         save();
       }
    }
 

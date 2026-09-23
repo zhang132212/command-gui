@@ -2,16 +2,15 @@ package com.remrin.client.gui;
 
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.ParseResults;
+import com.mojang.brigadier.context.CommandContextBuilder;
 import com.mojang.brigadier.context.ParsedCommandNode;
-import com.mojang.brigadier.exceptions.CommandSyntaxException;
-import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.tree.CommandNode;
 import com.remrin.client.config.CommandConfig;
 import com.remrin.client.machine.MachineDebug;
 import com.remrin.client.machine.MachineNetworkManager;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
+import java.util.Locale;
 import java.util.regex.Pattern;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientSuggestionProvider;
@@ -19,7 +18,7 @@ import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.server.permissions.PermissionSet;
 
 public final class CommandHelper {
-   private static final Pattern PLACEHOLDER_PATTERN = Pattern.compile("\\{(?:player_all|player_fake|player|bot|name|number|time|coords|x)\\}");
+   private static final Pattern PLACEHOLDER_PATTERN = Pattern.compile("\\{(?:player_all|player_fake|player|bot|name|number|time|coords|x|y|z)\\}");
 
    private CommandHelper() {
    }
@@ -52,44 +51,9 @@ public final class CommandHelper {
                         return "未知指令: " + firstToken;
                      } else {
                         ParseResults<ClientSuggestionProvider> result = dispatcher.parse(c, provider);
-                        if (!result.getExceptions().isEmpty()) {
-                           String message = ((CommandSyntaxException)result.getExceptions().values().iterator().next()).getMessage();
-                           MachineDebug.log("[CmdCheck] INVALID '" + c + "' -> " + (message == null ? "?" : message));
-                           return message != null && !message.isBlank() ? "指令无效: " + message : "指令无效";
-                        } else {
-                           int consumedEnd = result.getContext().getRange().getEnd();
-                           if (consumedEnd < c.length()) {
-                              MachineDebug.log("[CmdCheck] TRAILING '" + c + "' consumed=" + consumedEnd);
-                              return "指令末尾有多余内容，未能完整解析";
-                           } else {
-                              int lastStart = c.lastIndexOf(32) + 1;
-                              if (lastStart > 0 && lastStart < c.length()) {
-                                 try {
-                                    Suggestions suggestions = (Suggestions)dispatcher.getCompletionSuggestions(result, lastStart)
-                                       .get(500L, TimeUnit.MILLISECONDS);
-                                    if (!suggestions.getList().isEmpty()) {
-                                       String token = c.substring(lastStart);
-                                       boolean numericLike = token.matches("[-+~^0-9.].*");
-                                       boolean wordLike = token.matches("[A-Za-z0-9_]+");
-                                       if (!numericLike && wordLike) {
-                                          boolean hasWordSuggestions = suggestions.getList()
-                                             .stream()
-                                             .anyMatch(s -> !s.getText().isEmpty() && s.getText().matches("[A-Za-z0-9_]+"));
-                                          boolean matched = suggestions.getList().stream().anyMatch(s -> s.getText().startsWith(token));
-                                          if (hasWordSuggestions && !matched) {
-                                             MachineDebug.log("[CmdCheck] BAD_ARG '" + c + "' -> " + token);
-                                             return "无效参数: " + token;
-                                          }
-                                       }
-                                    }
-                                 } catch (Exception var15) {
-                                 }
-                              }
-
-                              MachineDebug.log("[CmdCheck] OK '" + c + "'");
-                              return null;
-                           }
-                        }
+                        // Completion providers can require a server response and their suggestions
+                        // are not an exhaustive list of valid arguments. Parsing must never wait for them.
+                        return validateParse(result);
                      }
                   } catch (Exception var16) {
                      MachineDebug.log("[CmdCheck] checker failed for '" + c + "': " + var16);
@@ -136,27 +100,24 @@ public final class CommandHelper {
 
          String cmd = replaced.toString();
          ParseResults<ClientSuggestionProvider> result = dispatcher.parse(cmd, provider);
-         if (!result.getExceptions().isEmpty()) {
-            String message = ((CommandSyntaxException)result.getExceptions().values().iterator().next()).getMessage();
-            MachineDebug.log("[CmdCheck] PLACEHOLDER INVALID '" + cmd + "' -> " + (message == null ? "?" : message));
-            return message != null && !message.isBlank() ? "指令无效: " + message : "指令无效";
-         }
-
-         int consumedEnd = result.getContext().getRange().getEnd();
-         if (consumedEnd < cmd.length()) {
-            MachineDebug.log("[CmdCheck] PLACEHOLDER TRAILING '" + cmd + "' consumed=" + consumedEnd);
-            return "指令末尾有多余内容，未能完整解析";
+         String error = validateParse(result);
+         if (error != null) {
+            return error;
          }
 
          for (int i = 0; i < matches.size(); i++) {
             int pos = ranges.get(i)[0];
-            int nodeIndex = findNodeIndexAt(result, pos);
+            CommandContextBuilder<?> context = result.getContext();
+            while (context.getChild() != null && pos >= context.getChild().getRange().getStart()) {
+               context = context.getChild();
+            }
+            int nodeIndex = findNodeIndexAt(context, pos);
             if (nodeIndex < 0) {
                return "无法定位占位符位置: " + matches.get(i).placeholder();
             }
 
-            CommandNode<?> node = result.getContext().getNodes().get(nodeIndex).getNode();
-            List<? extends ParsedCommandNode<?>> path = result.getContext().getNodes().subList(0, nodeIndex);
+            CommandNode<?> node = context.getNodes().get(nodeIndex).getNode();
+            List<? extends ParsedCommandNode<?>> path = context.getNodes().subList(0, nodeIndex);
             if (!PlaceholderResolver.isAllowed(matches.get(i).placeholder(), node, path)) {
                return "占位符 " + matches.get(i).placeholder() + " 不能用于此位置";
             }
@@ -169,10 +130,25 @@ public final class CommandHelper {
       }
    }
 
-   private static int findNodeIndexAt(ParseResults<?> result, int pos) {
-      var nodes = result.getContext().getNodes();
+   private static String validateParse(ParseResults<?> result) {
+      if (result.getReader().canRead()) {
+         if (!result.getExceptions().isEmpty()) {
+            String message = result.getExceptions().values().iterator().next().getMessage();
+            return message != null && !message.isBlank() ? "指令无效: " + message : "指令无效";
+         }
+         return "指令末尾有多余内容，未能完整解析";
+      }
+      CommandContextBuilder<?> context = result.getContext();
+      while (context.getChild() != null) {
+         context = context.getChild();
+      }
+      return context.getCommand() == null ? "指令不完整，缺少参数" : null;
+   }
+
+   private static int findNodeIndexAt(CommandContextBuilder<?> context, int pos) {
+      var nodes = context.getNodes();
       for (int i = 0; i < nodes.size(); i++) {
-         if (nodes.get(i).getRange().getStart() <= pos && pos <= nodes.get(i).getRange().getEnd()) {
+         if (nodes.get(i).getRange().getStart() <= pos && pos < nodes.get(i).getRange().getEnd()) {
             return i;
          }
       }
@@ -180,6 +156,9 @@ public final class CommandHelper {
    }
 
    public static void sendCommand(String command) {
+      if (command == null || command.isBlank() || command.equals("/")) {
+         return;
+      }
       Minecraft mc = Minecraft.getInstance();
       if (mc != null && mc.player != null) {
          if (command.startsWith("/")) {
@@ -263,15 +242,15 @@ public final class CommandHelper {
    }
 
    public static String formatX(double x) {
-      return String.format("%.3f", x);
+      return String.format(Locale.ROOT, "%.3f", x);
    }
 
    public static String formatY(double y) {
-      return String.format("%.5f", y);
+      return String.format(Locale.ROOT, "%.5f", y);
    }
 
    public static String formatZ(double z) {
-      return String.format("%.3f", z);
+      return String.format(Locale.ROOT, "%.3f", z);
    }
 
    public static String formatTime(int seconds) {

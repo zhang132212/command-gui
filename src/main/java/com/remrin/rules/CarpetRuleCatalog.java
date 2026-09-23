@@ -12,31 +12,48 @@ public final class CarpetRuleCatalog {
       Class<?> managerApi = Class.forName("carpet.api.settings.SettingsManager");
       Class<?> ruleApi = Class.forName("carpet.api.settings.CarpetRule");
       Class<?> helper = Class.forName("carpet.api.settings.RuleHelper");
+      // Resolve API methods once per snapshot, rather than for every rule/category.
+      // Do not cache rule values: native Carpet commands can change them at any time.
+      var identifier = managerApi.getMethod("identifier");
+      var managerLocked = managerApi.getMethod("locked");
+      var getRules = managerApi.getMethod("getCarpetRules");
+      var ruleName = ruleApi.getMethod("name");
+      var ruleCategories = ruleApi.getMethod("categories");
+      var translatedCategory = helper.getMethod("translatedCategory", String.class, String.class);
+      var translatedName = helper.getMethod("translatedName", ruleApi);
+      var translatedDescription = helper.getMethod("translatedDescription", ruleApi);
+      var extraInfo = ruleApi.getMethod("extraInfo");
+      var suggestions = ruleApi.getMethod("suggestions");
+      var toRuleString = helper.getMethod("toRuleString", Object.class);
+      var value = ruleApi.getMethod("value");
+      var defaultValue = ruleApi.getMethod("defaultValue");
+      var type = ruleApi.getMethod("type");
+      var strict = ruleApi.getMethod("strict");
       List<Object> managers = new ArrayList<>();
       carpet.getMethod("forEachManager", Consumer.class).invoke(null, (Consumer<Object>)managers::add);
       List<RuleData> result = new ArrayList<>();
       for (Object manager : managers) {
          if (manager == null) continue;
-         String id = (String)managerApi.getMethod("identifier").invoke(manager);
-         boolean locked = (boolean)managerApi.getMethod("locked").invoke(manager);
+         String id = (String)identifier.invoke(manager);
+         boolean locked = (boolean)managerLocked.invoke(manager);
          if (!RuleData.token(id)) continue;
-         for (Object rule : (Collection<?>)managerApi.getMethod("getCarpetRules").invoke(manager)) {
-            String name = (String)ruleApi.getMethod("name").invoke(rule);
+         for (Object rule : (Collection<?>)getRules.invoke(manager)) {
+            String name = (String)ruleName.invoke(rule);
             if (!RuleData.token(name)) continue;
-            List<String> categories = strings(ruleApi.getMethod("categories").invoke(rule));
+            List<String> categories = strings(ruleCategories.invoke(rule));
             List<String> labels = new ArrayList<>();
-            for (String category : categories) labels.add((String)helper.getMethod("translatedCategory", String.class, String.class).invoke(null, id, category));
-            String title = (String)helper.getMethod("translatedName", ruleApi).invoke(null, rule);
-            String description = (String)helper.getMethod("translatedDescription", ruleApi).invoke(null, rule);
-            for (Object info : (List<?>)ruleApi.getMethod("extraInfo").invoke(rule)) {
+            for (String category : categories) labels.add((String)translatedCategory.invoke(null, id, category));
+            String title = (String)translatedName.invoke(null, rule);
+            String description = (String)translatedDescription.invoke(null, rule);
+            for (Object info : (List<?>)extraInfo.invoke(rule)) {
                if (info instanceof Component text) description += "\n" + text.getString();
             }
             result.add(new RuleData(id, name, title, description.substring(0, Math.min(3000, description.length())),
-               categories, labels, strings(ruleApi.getMethod("suggestions").invoke(rule)),
-               (String)helper.getMethod("toRuleString", Object.class).invoke(null, ruleApi.getMethod("value").invoke(rule)),
-               (String)helper.getMethod("toRuleString", Object.class).invoke(null, ruleApi.getMethod("defaultValue").invoke(rule)),
-               ((Class<?>)ruleApi.getMethod("type").invoke(rule)).getSimpleName(),
-               (boolean)ruleApi.getMethod("strict").invoke(rule), locked));
+               categories, labels, strings(suggestions.invoke(rule)),
+               (String)toRuleString.invoke(null, value.invoke(rule)),
+               (String)toRuleString.invoke(null, defaultValue.invoke(rule)),
+               ((Class<?>)type.invoke(rule)).getSimpleName(),
+               (boolean)strict.invoke(rule), locked));
          }
       }
       result.sort(Comparator.comparing(RuleData::manager).thenComparing(RuleData::name));

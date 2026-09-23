@@ -42,7 +42,7 @@ public final class MachineTestCommand {
 
    public static void register(CommandDispatcher<CommandSourceStack> dispatcher, CommandBuildContext ctx, CommandSelection selection) {
       LiteralArgumentBuilder<CommandSourceStack> root = Commands.literal("cgtest")
-         .requires(src -> src.getPlayer() == null || net.minecraft.commands.Commands.LEVEL_MODERATORS.check(src.getPlayer().permissions()));
+         .requires(src -> Commands.LEVEL_MODERATORS.check(src.permissions()));
       root.then(Commands.literal("lock").then(Commands.literal("list").executes(MachineTestCommand::lockList)));
       root.then(
          Commands.literal("edit")

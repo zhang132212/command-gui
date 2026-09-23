@@ -21,7 +21,11 @@ public final class MachineDetector {
 
    public static MachineDetector.DetectionResult evaluateDetection(MachineConfig.DetectionData detection, MinecraftServer server, boolean useCache) {
       if (detection != null && detection.enabled) {
-         ServerLevel level = server.getLevel(ResourceKey.create(Registries.DIMENSION, Identifier.parse(detection.dimension)));
+         Identifier dimension = detection.dimension == null ? null : Identifier.tryParse(detection.dimension);
+         if (dimension == null) {
+            return new MachineDetector.DetectionResult(MachineDetector.MachineState.ABNORMAL, "检测维度格式无效");
+         }
+         ServerLevel level = server.getLevel(ResourceKey.create(Registries.DIMENSION, dimension));
          if (level == null) {
             return new MachineDetector.DetectionResult(MachineDetector.MachineState.ABNORMAL, "维度不存在");
          } else {

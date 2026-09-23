@@ -104,7 +104,7 @@ public final class BlockStateFileReader {
    }
 
    private static BlockStateFileReader.BlockStateEntry readBlockState(CompoundTag chunkNbt, int x, int y, int z) {
-      byte sectionY = (byte)(y >> 4);
+      int sectionY = y >> 4;
       ListTag sections = chunkNbt.getListOrEmpty("sections");
 
       for (int i = 0; i < sections.size(); i++) {
@@ -196,11 +196,16 @@ public final class BlockStateFileReader {
 
    private static Path getRegionDir(MinecraftServer server, String dimension) throws IOException {
       Path worldDir = server.getWorldPath(LevelResource.ROOT);
+      Identifier identifier = Identifier.parse(dimension);
 
-      return switch (dimension) {
+      return switch (identifier.toString()) {
          case "minecraft:the_nether" -> regionOr(worldDir, "DIM-1", "dimensions/minecraft/the_nether");
          case "minecraft:the_end" -> regionOr(worldDir, "DIM1", "dimensions/minecraft/the_end");
-         default -> regionOr(worldDir, "", "dimensions/minecraft/overworld");
+         case "minecraft:overworld" -> regionOr(worldDir, "", "dimensions/minecraft/overworld");
+         default -> {
+            Path region = worldDir.resolve("dimensions").resolve(identifier.getNamespace()).resolve(identifier.getPath()).resolve("region");
+            yield Files.isDirectory(region) ? region : null;
+         }
       };
    }
 

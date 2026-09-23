@@ -11,7 +11,7 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 
 public class ChainedCommandExecutor {
-   private static final Pattern PARSE_PATTERN = Pattern.compile("\\{(player_all|player_fake|player|bot|name|number|time|coords|x)\\}");
+   private static final Pattern PARSE_PATTERN = Pattern.compile("\\{(player_all|player_fake|player|bot|name|number|time|coords|x|y|z)\\}");
    private static final int SPAWN_DELAY_TICKS = 20;
    private static final List<ChainedCommandExecutor.DelayedBatch> delayedQueue = new ArrayList<>();
    private final Screen parent;
@@ -131,18 +131,19 @@ public class ChainedCommandExecutor {
       }
 
       List<ChainedCommandExecutor.DelayedBatch> ready = new ArrayList<>();
-      for (ChainedCommandExecutor.DelayedBatch batch : delayedQueue) {
+      delayedQueue.removeIf(batch -> {
          batch.remainingTicks--;
          if (batch.remainingTicks <= 0) {
             ready.add(batch);
+            return true;
          }
-      }
+         return false;
+      });
 
       if (ready.isEmpty()) {
          return;
       }
 
-      delayedQueue.removeAll(ready);
       for (ChainedCommandExecutor.DelayedBatch batch : ready) {
          if (batch.action != null) {
             batch.action.run();
@@ -152,6 +153,10 @@ public class ChainedCommandExecutor {
             }
          }
       }
+   }
+
+   public static void clearDelayed() {
+      delayedQueue.clear();
    }
 
    private static List<String> botNames() {
@@ -175,14 +180,13 @@ public class ChainedCommandExecutor {
             case "name" -> ChainedCommandExecutor.PlaceholderType.NAME;
             case "number" -> ChainedCommandExecutor.PlaceholderType.NUMBER;
             case "time" -> ChainedCommandExecutor.PlaceholderType.TIME;
-            case "coords", "x" -> ChainedCommandExecutor.PlaceholderType.COORDS;
+            case "coords", "x", "y", "z" -> ChainedCommandExecutor.PlaceholderType.COORDS;
             default -> null;
          };
          if (type != null
             && (
                type != ChainedCommandExecutor.PlaceholderType.COORDS
-                  || this.pendingTypes.isEmpty()
-                  || this.pendingTypes.get(this.pendingTypes.size() - 1) != ChainedCommandExecutor.PlaceholderType.COORDS
+                  || !this.pendingTypes.contains(ChainedCommandExecutor.PlaceholderType.COORDS)
             )) {
             this.pendingTypes.add(type);
          }
@@ -204,7 +208,7 @@ public class ChainedCommandExecutor {
          case PLAYER_ALL: {
             PlayerSelectorScreen screen = new PlayerSelectorScreen(
                this.parent, Component.translatable("screen.command-gui.select_player"), null, PlayerSelectorScreen.FilterMode.ALL, playerName -> {
-                  this.currentCommand = this.currentCommand.replaceFirst("\\{player_all\\}", playerName);
+                  this.currentCommand = this.currentCommand.replaceFirst("\\{player_all\\}", Matcher.quoteReplacement(playerName));
                   this.currentIndex++;
                   this.start();
                }
@@ -215,7 +219,7 @@ public class ChainedCommandExecutor {
          case PLAYER_OTHER: {
             PlayerSelectorScreen screen = new PlayerSelectorScreen(
                this.parent, Component.translatable("screen.command-gui.select_player"), null, PlayerSelectorScreen.FilterMode.NORMAL, playerName -> {
-                  this.currentCommand = this.currentCommand.replaceFirst("\\{player\\}", playerName);
+                  this.currentCommand = this.currentCommand.replaceFirst("\\{player\\}", Matcher.quoteReplacement(playerName));
                   this.currentIndex++;
                   this.start();
                }
@@ -230,7 +234,7 @@ public class ChainedCommandExecutor {
                null,
                PlayerSelectorScreen.FilterMode.ONLY_FAKE_PLAYERS,
                playerName -> {
-                  this.currentCommand = this.currentCommand.replaceFirst("\\{player_fake\\}", playerName);
+                  this.currentCommand = this.currentCommand.replaceFirst("\\{player_fake\\}", Matcher.quoteReplacement(playerName));
                   this.currentIndex++;
                   this.start();
                }
@@ -243,7 +247,7 @@ public class ChainedCommandExecutor {
                this.parent,
                ChainedCommandExecutor.botNames(),
                botName -> {
-                  this.currentCommand = this.currentCommand.replaceFirst("\\{bot\\}", botName);
+                  this.currentCommand = this.currentCommand.replaceFirst("\\{(?:bot|player_fake)\\}", Matcher.quoteReplacement(botName));
                   this.currentIndex++;
                   this.start();
                }
@@ -256,7 +260,7 @@ public class ChainedCommandExecutor {
 
                @Override
                protected void onInputConfirmed(String input) {
-                  ChainedCommandExecutor.this.currentCommand = ChainedCommandExecutor.this.currentCommand.replaceFirst("\\{name\\}", input);
+                  ChainedCommandExecutor.this.currentCommand = ChainedCommandExecutor.this.currentCommand.replaceFirst("\\{name\\}", Matcher.quoteReplacement(input));
                   ChainedCommandExecutor.this.currentIndex++;
                   ChainedCommandExecutor.this.start();
                }
@@ -276,7 +280,7 @@ public class ChainedCommandExecutor {
 
                @Override
                protected void onNumberConfirmed(String number) {
-                  ChainedCommandExecutor.this.currentCommand = ChainedCommandExecutor.this.currentCommand.replaceFirst("\\{number\\}", number);
+                  ChainedCommandExecutor.this.currentCommand = ChainedCommandExecutor.this.currentCommand.replaceFirst("\\{number\\}", Matcher.quoteReplacement(number));
                   ChainedCommandExecutor.this.currentIndex++;
                   ChainedCommandExecutor.this.start();
                }
@@ -289,7 +293,7 @@ public class ChainedCommandExecutor {
 
                @Override
                protected void onTimeConfirmed(String time) {
-                  ChainedCommandExecutor.this.currentCommand = ChainedCommandExecutor.this.currentCommand.replaceFirst("\\{time\\}", time);
+                  ChainedCommandExecutor.this.currentCommand = ChainedCommandExecutor.this.currentCommand.replaceFirst("\\{time\\}", Matcher.quoteReplacement(time));
                   ChainedCommandExecutor.this.currentIndex++;
                   ChainedCommandExecutor.this.start();
                }

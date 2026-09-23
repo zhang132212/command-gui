@@ -1,0 +1,20 @@
+gradle.projectsEvaluated {
+    def p = gradle.rootProject
+    def qa = p.sourceSets.create('clientRegressionQa') {
+        java.srcDir 'tests/client-regressions/src'
+        resources.srcDir 'tests/client-regressions/resources'
+        compileClasspath += p.sourceSets.client.compileClasspath + p.sourceSets.client.output + p.sourceSets.main.output
+    }
+    p.tasks.named('compileClientRegressionQaJava') { dependsOn p.tasks.named('clientClasses'); options.encoding = 'UTF-8' }
+    def qaJar = p.tasks.register('clientRegressionQaJar', Jar) {
+        from qa.output
+        archiveFileName = 'client-regressions-qa.jar'
+        destinationDirectory = p.layout.projectDirectory.dir('build/client-regressions-qa/mods')
+    }
+    p.loom.runs.client {
+        runDir 'build/client-regressions-qa'
+        vmArg '-Ddevauth.enabled=false'
+        programArgs '--username', 'RegressionQA', '--width', '1280', '--height', '800'
+    }
+    p.tasks.named('runClient') { dependsOn qaJar }
+}

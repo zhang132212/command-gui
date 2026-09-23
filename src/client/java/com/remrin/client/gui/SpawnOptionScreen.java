@@ -288,8 +288,8 @@ public class SpawnOptionScreen extends BaseParentedScreen<Screen> {
    private void fillOwnRotation() {
       Minecraft mc = Minecraft.getInstance();
       if (mc.player != null) {
-         this.yawText = String.format("%.1f", (float)Math.round(mc.player.getYRot() * 10.0F) / 10.0F);
-         this.pitchText = String.format("%.1f", (float)Math.round(mc.player.getXRot() * 10.0F) / 10.0F);
+         this.yawText = String.format(java.util.Locale.ROOT, "%.1f", (float)Math.round(mc.player.getYRot() * 10.0F) / 10.0F);
+         this.pitchText = String.format(java.util.Locale.ROOT, "%.1f", (float)Math.round(mc.player.getXRot() * 10.0F) / 10.0F);
          this.yawField.setValue(this.yawText);
          this.pitchField.setValue(this.pitchText);
       }

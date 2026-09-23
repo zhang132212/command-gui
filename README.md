@@ -140,6 +140,8 @@ build/libs/command-gui-<version>.jar
 
 GUI 参数调整后重新打开 GUI 即可验证；语言资源包调整后可使用 `F3+T` 重载资源。Java 逻辑或资源正式发布前仍需重新构建。
 
+自动回归：专用服务端和跨进程重启见 [后端测试](testing/backend/README.md)；真实客户端点击、网络往返、单人世界切换以及无 Carpet 场景见 [端到端测试](tests/e2e/README.md)。`gradlew build` 本身不会运行这些 Minecraft 集成测试，应以对应脚本的退出码与完整报告为准。
+
 ## 架构
 
 ```text

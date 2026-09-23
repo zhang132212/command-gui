@@ -22,7 +22,7 @@ public final class MachineAdminCommand {
    public static void register(CommandDispatcher<CommandSourceStack> dispatcher, CommandBuildContext buildContext, CommandSelection selection) {
       dispatcher.register(
          (LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)Commands.literal("machineadmin")
-                     .requires(source -> source.getPlayer() == null || Commands.LEVEL_MODERATORS.check(source.getPlayer().permissions())))
+                     .requires(source -> Commands.LEVEL_MODERATORS.check(source.permissions())))
                   .then(Commands.literal("add").then(Commands.argument("player", StringArgumentType.word())
                         .suggests((context, builder) -> SharedSuggestionProvider.suggest(
                               whitelistNames(context.getSource()), builder))

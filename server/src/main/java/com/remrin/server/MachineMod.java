@@ -118,15 +118,25 @@ public class MachineMod implements ModInitializer {
          }
       });
       ServerLifecycleEvents.SERVER_STARTED.register((ServerStarted)server -> {
+         resetServerState();
+         currentServer = server;
          MachineBlockCache.rebuild();
          MachineBlockCache.prime(server);
       });
       ServerLifecycleEvents.SERVER_STOPPING.register((ServerStopping)server -> {
          currentServer = null;
-         lastFakeStatesJson = "";
-         fakeStateSubscribers.clear();
-         machineStateSubscribers.clear();
+         resetServerState();
       });
       LOGGER.info("Command-GUI Server initialized!");
+   }
+
+   private static void resetServerState() {
+      lastFakeStatesJson = "";
+      fakeStateSubscribers.clear();
+      machineStateSubscribers.clear();
+      MachineScheduler.reset();
+      MachineModeChain.reset();
+      MachineManager.reset();
+      MachineBlockCache.reset();
    }
 }

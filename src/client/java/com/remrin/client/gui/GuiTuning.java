@@ -51,8 +51,8 @@ public final class GuiTuning {
          return;
       }
 
-      try {
-         Map<String, Object> parsed = (Map<String, Object>)GSON.fromJson(Files.newBufferedReader(path, StandardCharsets.UTF_8), MAP_TYPE);
+      try (var reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
+         Map<String, Object> parsed = (Map<String, Object>)GSON.fromJson(reader, MAP_TYPE);
          if (parsed != null) {
             values = parsed;
          }

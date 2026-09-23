@@ -41,9 +41,11 @@ public final class PlaceholderResolver {
    public static final String TIME = "{time}";
    public static final String COORDS = "{coords}";
    public static final String X = "{x}";
+   public static final String Y = "{y}";
+   public static final String Z = "{z}";
    public static final List<String> ALL_PLACEHOLDERS = List.of(PLAYER_ALL, PLAYER, BOT, NAME, NUMBER, TIME, COORDS);
 
-   private static final Pattern PLACEHOLDER_PATTERN = Pattern.compile("\\{(?:player_all|player_fake|player|bot|name|number|time|coords|x)\\}");
+   private static final Pattern PLACEHOLDER_PATTERN = Pattern.compile("\\{(?:player_all|player_fake|player|bot|name|number|time|coords|x|y|z)\\}");
 
    private PlaceholderResolver() {
    }
@@ -74,7 +76,7 @@ public final class PlaceholderResolver {
       }
       return switch (placeholder) {
          case PLAYER_FAKE -> BOT;
-         case X -> COORDS;
+         case X, Y, Z -> COORDS;
          default -> placeholder;
       };
    }
@@ -150,6 +152,9 @@ public final class PlaceholderResolver {
    }
 
    public static String dummyFor(String placeholder) {
+      if (X.equals(placeholder) || Y.equals(placeholder) || Z.equals(placeholder)) {
+         return "1";
+      }
       return switch (normalizePlaceholder(placeholder)) {
          case PLAYER_ALL, PLAYER -> "Steve";
          case BOT -> "Bot";

@@ -14,7 +14,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import net.fabricmc.loader.api.FabricLoader;
 
 public final class MachineConfig {
@@ -32,10 +34,12 @@ public final class MachineConfig {
          try (Reader reader = Files.newBufferedReader(CONFIG_PATH, StandardCharsets.UTF_8)) {
             MachineConfig.ConfigData loaded = (MachineConfig.ConfigData)GSON.fromJson(reader, CONFIG_TYPE);
             if (loaded != null && loaded.machines != null) {
+               normalizeStructure(loaded);
+               migrateLegacySteps(loaded);
+               normalizeDelays(loaded);
+               migrateDetectionKeys(loaded);
+               // Publish only after the complete candidate is safe to consume.
                configData = loaded;
-               migrateLegacySteps();
-               normalizeDelays();
-               migrateDetectionKeys();
             }
          } catch (Exception var5) {
             MachineMod.LOGGER.error("Failed to load machine config", var5);
@@ -43,8 +47,47 @@ public final class MachineConfig {
       }
    }
 
-   private static void migrateLegacySteps() {
-      for (MachineConfig.MachineData machine : configData.machines) {
+   private static void normalizeStructure(ConfigData loaded) {
+      if (loaded.editorWhitelist == null) loaded.editorWhitelist = new ArrayList<>();
+      loaded.editorWhitelist.removeIf(name -> name == null || name.isBlank());
+      Set<String> machineIds = new HashSet<>();
+      for (MachineData machine : loaded.machines) {
+         if (machine == null || machine.id == null || machine.id.isBlank() || !machineIds.add(machine.id)) {
+            throw new IllegalArgumentException("Machine config contains a null, missing or duplicate machine id");
+         }
+         if (machine.name == null) machine.name = "";
+         if (machine.description == null) machine.description = "";
+         if (machine.category == null) machine.category = "";
+         if (machine.bots == null) machine.bots = new ArrayList<>();
+         if (machine.bots.stream().anyMatch(name -> name == null || name.isBlank())) {
+            throw new IllegalArgumentException("Machine config contains an empty bot name: " + machine.id);
+         }
+         if (machine.bannedPlayers == null) machine.bannedPlayers = new ArrayList<>();
+         if (machine.modeOrder == null) machine.modeOrder = new ArrayList<>();
+         if (machine.stopModeOrder == null) machine.stopModeOrder = new ArrayList<>();
+         if (machine.modes == null) machine.modes = new ArrayList<>();
+         machine.onTimeline = timelineOrEmpty(machine.onTimeline);
+         machine.offTimeline = timelineOrEmpty(machine.offTimeline);
+         Set<String> modeIds = new HashSet<>();
+         for (ModeData mode : machine.modes) {
+            if (mode == null || mode.id == null || mode.id.isBlank() || !modeIds.add(mode.id)) {
+               throw new IllegalArgumentException("Machine config contains a null, missing or duplicate mode id: " + machine.id);
+            }
+            if (mode.name == null) mode.name = "";
+            mode.onTimeline = timelineOrEmpty(mode.onTimeline);
+            mode.offTimeline = timelineOrEmpty(mode.offTimeline);
+         }
+      }
+   }
+
+   private static Timeline timelineOrEmpty(Timeline timeline) {
+      if (timeline == null) timeline = new Timeline();
+      if (timeline.steps == null) timeline.steps = new ArrayList<>();
+      return timeline;
+   }
+
+   private static void migrateLegacySteps(ConfigData loaded) {
+      for (MachineConfig.MachineData machine : loaded.machines) {
          if (machine == null) {
             continue;
          }
@@ -95,8 +138,8 @@ public final class MachineConfig {
       }
    }
 
-   private static void normalizeDelays() {
-      for (MachineConfig.MachineData machine : configData.machines) {
+   private static void normalizeDelays(ConfigData loaded) {
+      for (MachineConfig.MachineData machine : loaded.machines) {
          if (machine == null) {
             continue;
          }
@@ -139,8 +182,8 @@ public final class MachineConfig {
       }
    }
 
-   private static void migrateDetectionKeys() {
-      for (MachineConfig.MachineData machine : configData.machines) {
+   private static void migrateDetectionKeys(ConfigData loaded) {
+      for (MachineConfig.MachineData machine : loaded.machines) {
          if (machine == null) {
             continue;
          }

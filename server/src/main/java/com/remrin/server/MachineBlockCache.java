@@ -55,6 +55,12 @@ public final class MachineBlockCache {
    private MachineBlockCache() {
    }
 
+   public static void reset() {
+      watchedPositions.clear();
+      cache.clear();
+      diskCache.clear();
+   }
+
    public static void rebuild() {
       watchedPositions.clear();
 
@@ -66,13 +72,30 @@ public final class MachineBlockCache {
             }
          }
       }
+      pruneUnwatched(cache);
+      pruneUnwatched(diskCache);
+   }
+
+   private static <T> void pruneUnwatched(Map<String, Map<BlockPos, T>> values) {
+      values.entrySet().removeIf(entry -> {
+         Set<BlockPos> watched = watchedPositions.get(entry.getKey());
+         if (watched == null) {
+            return true;
+         }
+         entry.getValue().keySet().retainAll(watched);
+         return entry.getValue().isEmpty();
+      });
    }
 
 
    public static void prime(MinecraftServer server) {
       for (Map.Entry<String, Set<BlockPos>> entry : watchedPositions.entrySet()) {
          String dimension = entry.getKey();
-         ServerLevel level = server.getLevel(ResourceKey.create(Registries.DIMENSION, Identifier.parse(dimension)));
+         Identifier identifier = Identifier.tryParse(dimension);
+         if (identifier == null) {
+            continue;
+         }
+         ServerLevel level = server.getLevel(ResourceKey.create(Registries.DIMENSION, identifier));
          if (level == null) {
             continue;
          }
@@ -133,23 +156,15 @@ public final class MachineBlockCache {
 
          for (BlockPos pos : watched) {
             if (pos.getX() >> 4 == chunkX && pos.getZ() >> 4 == chunkZ) {
-               BlockStateFileReader.BlockStateEntry entry = BlockStateFileReader.read(
-                  level.getServer(), level.dimension().identifier().toString(), pos.getX(), pos.getY(), pos.getZ()
-               );
-               if (entry == null) {
-                  entry = snapshot(chunk.getBlockState(pos));
-               }
-
-               if (entry != null) {
-                  dimCache.put(pos, entry);
-               }
+               // The unloading chunk is authoritative; its latest changes may not be on disk yet.
+               dimCache.put(pos, snapshot(chunk.getBlockState(pos)));
             }
          }
       }
    }
 
    public static BlockStateFileReader.BlockStateEntry get(String dimension, int x, int y, int z) {
-      Map<BlockPos, BlockStateFileReader.BlockStateEntry> dimCache = cache.get(dimension);
+      Map<BlockPos, BlockStateFileReader.BlockStateEntry> dimCache = cache.get(dimOf(dimension));
       if (dimCache == null) {
          return null;
       }

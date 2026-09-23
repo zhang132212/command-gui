@@ -9,6 +9,7 @@ param(
     [switch]$SkipRestart
 )
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'backend/RunnerReports.ps1')
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 if ($TimeoutSeconds -lt 30) { throw 'TimeoutSeconds 必须至少为 30 秒。' }
 if (!(Test-Path -LiteralPath $EulaFile) -or (Get-Content -LiteralPath $EulaFile -Raw) -notmatch '(?m)^\s*eula\s*=\s*true\s*$') {
@@ -63,29 +64,34 @@ try {
     if (!$SkipRestart) { $phases += 'restart' }
     foreach ($phase in $phases) {
         Write-Host "[backend] $phase：启动隔离专用服务端，报告目录 $outputRoot"
-        $psi = [Diagnostics.ProcessStartInfo]::new()
-        $psi.FileName = $javaExe
-        $psi.WorkingDirectory = $repo
-        $psi.UseShellExecute = $false
-        $psi.CreateNoWindow = $true
-        $psi.RedirectStandardOutput = $true
-        $psi.RedirectStandardError = $true
-        $psi.StandardOutputEncoding = [Text.Encoding]::UTF8
-        $psi.StandardErrorEncoding = [Text.Encoding]::UTF8
-        $psi.Environment['JAVA_HOME'] = $JavaHome
-        $arguments = @('-classpath', (Join-Path $repo 'gradle/wrapper/gradle-wrapper.jar'), 'org.gradle.wrapper.GradleWrapperMain',
-            ':runServer', '-I', (Join-Path $PSScriptRoot 'backend/init.gradle'), '--console=plain', '--no-daemon', '-x', 'bumpVersion',
-            "-Dbackend.runDir=$runDir", "-Dbackend.phase=$phase", '-Dorg.gradle.jvmargs=-Xmx2G -Dfile.encoding=COMPAT')
-        if ($Offline) { $arguments += '--offline' }
-        foreach ($argument in $arguments) { $psi.ArgumentList.Add($argument) }
-        $process = [Diagnostics.Process]::new()
-        $process.StartInfo = $psi
-        [void]$process.Start()
-        $stdout = $process.StandardOutput.ReadToEndAsync()
-        $stderr = $process.StandardError.ReadToEndAsync()
-        $timer = [Diagnostics.Stopwatch]::StartNew()
-        $lastProgress = 0
+        $phaseError = $null
+        $exitCode = $null
+        $process = $null
+        $stdout = $null
+        $stderr = $null
         try {
+            $psi = [Diagnostics.ProcessStartInfo]::new()
+            $psi.FileName = $javaExe
+            $psi.WorkingDirectory = $repo
+            $psi.UseShellExecute = $false
+            $psi.CreateNoWindow = $true
+            $psi.RedirectStandardOutput = $true
+            $psi.RedirectStandardError = $true
+            $psi.StandardOutputEncoding = [Text.Encoding]::UTF8
+            $psi.StandardErrorEncoding = [Text.Encoding]::UTF8
+            $psi.Environment['JAVA_HOME'] = $JavaHome
+            $arguments = @('-classpath', (Join-Path $repo 'gradle/wrapper/gradle-wrapper.jar'), 'org.gradle.wrapper.GradleWrapperMain',
+                ':runServer', '-I', (Join-Path $PSScriptRoot 'backend/init.gradle'), '--console=plain', '--no-daemon', '-x', 'bumpVersion',
+                "-Dbackend.runDir=$runDir", "-Dbackend.phase=$phase", '-Dorg.gradle.jvmargs=-Xmx2G -Dfile.encoding=COMPAT')
+            if ($Offline) { $arguments += '--offline' }
+            foreach ($argument in $arguments) { $psi.ArgumentList.Add($argument) }
+            $process = [Diagnostics.Process]::new()
+            $process.StartInfo = $psi
+            [void]$process.Start()
+            $stdout = $process.StandardOutput.ReadToEndAsync()
+            $stderr = $process.StandardError.ReadToEndAsync()
+            $timer = [Diagnostics.Stopwatch]::StartNew()
+            $lastProgress = 0
             while (!$process.WaitForExit(500)) {
                 if ($timer.Elapsed.TotalSeconds -gt $TimeoutSeconds) { throw "$phase 超时（$TimeoutSeconds 秒）" }
                 if ($timer.Elapsed.TotalSeconds -ge $lastProgress + 15) {
@@ -93,17 +99,24 @@ try {
                     Write-Host "[backend] $phase 运行中（${lastProgress}s）"
                 }
             }
+        } catch {
+            $phaseError = $_.Exception.Message
         } finally {
-            if (!$process.HasExited) { $process.Kill($true); $process.WaitForExit() }
-            $log = $stdout.GetAwaiter().GetResult() + "`n" + $stderr.GetAwaiter().GetResult()
+            if ($null -ne $stdout) {
+                if (!$process.HasExited) { $process.Kill($true); $process.WaitForExit() }
+                $exitCode = $process.ExitCode
+                $log = $stdout.GetAwaiter().GetResult() + "`n" + $stderr.GetAwaiter().GetResult()
+            } else { $log = [string]$phaseError }
             [IO.File]::WriteAllText((Join-Path $outputRoot "$phase.log"), $log, [Text.Encoding]::UTF8)
+            if ($null -ne $process) { $process.Dispose() }
         }
         $reportPath = Join-Path $runDir "backend-$phase.json"
-        if (!(Test-Path -LiteralPath $reportPath)) { throw "$phase 未生成结果（启动失败或崩溃），请查看 $phase.log" }
-        $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json
+        $report = Read-BackendPhaseResult -ReportPath $reportPath -Phase $phase -ExitCode $exitCode -RuntimeError $phaseError
         $metadata.phases += $report
         Write-Host "[backend] $phase：通过 $($report.passed)，失败 $($report.failed)，断言 $($report.assertions)"
-        if ($process.ExitCode -ne 0 -or !$report.complete -or $report.failed -gt 0) { $failed = $true }
+        if ($report.runnerErrors.Count -gt 0 -or $report.failed -gt 0) { $failed = $true }
+        foreach ($errorMessage in $report.runnerErrors) { Write-Host "[backend] $errorMessage" -ForegroundColor Red }
+        if (!$report.complete -or $report.runnerErrors.Count -gt 0) { break }
     }
     if ($SkipRestart) { $metadata['notRun'] = @('跨进程重启持久化（SkipRestart）') }
 } catch {
@@ -114,44 +127,11 @@ try {
     $metadata['finished'] = (Get-Date).ToString('o')
     $metadata['passed'] = !$failed -and !$SkipRestart
     $metadata | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $outputRoot 'report.json') -Encoding utf8
-    $xmlSettings = [Xml.XmlWriterSettings]::new()
-    $xmlSettings.Indent = $true
-    $xmlSettings.Encoding = [Text.UTF8Encoding]::new($false)
-    $xml = [Xml.XmlWriter]::Create((Join-Path $outputRoot 'junit.xml'), $xmlSettings)
-    try {
-        $xml.WriteStartDocument()
-        $xml.WriteStartElement('testsuites')
-        foreach ($phaseReport in $metadata.phases) {
-            $xml.WriteStartElement('testsuite')
-            $xml.WriteAttributeString('name', [string]$phaseReport.phase)
-            $xml.WriteAttributeString('tests', [string]$phaseReport.cases.Count)
-            $xml.WriteAttributeString('failures', [string]$phaseReport.failed)
-            foreach ($case in $phaseReport.cases) {
-                $xml.WriteStartElement('testcase')
-                $xml.WriteAttributeString('classname', [string]$case.group)
-                $xml.WriteAttributeString('name', [string]$case.name)
-                if ($case.status -ne 'PASS') { $xml.WriteElementString('failure', [string]$case.error) }
-                $xml.WriteEndElement()
-            }
-            $xml.WriteEndElement()
-        }
-        if ($metadata.Contains('error') -or $SkipRestart) {
-            $xml.WriteStartElement('testsuite')
-            $xml.WriteAttributeString('name', 'runner')
-            $xml.WriteAttributeString('tests', '1')
-            $xml.WriteStartElement('testcase')
-            $xml.WriteAttributeString('name', 'complete-run')
-            if ($metadata.Contains('error')) { $xml.WriteElementString('error', [string]$metadata.error) }
-            else { $xml.WriteElementString('skipped', 'Restart phase not run') }
-            $xml.WriteEndElement()
-            $xml.WriteEndElement()
-        }
-        $xml.WriteEndElement()
-        $xml.WriteEndDocument()
-    } finally { $xml.Dispose() }
+    Write-BackendJUnit -Metadata $metadata -Path (Join-Path $outputRoot 'junit.xml') -SkipRestart:$SkipRestart
     $lines = @('# Command-GUI 后端测试', '', "结果：$(if($failed){'FAIL'}elseif($SkipRestart){'PARTIAL'}else{'PASS'})", '', '|阶段|用例|状态|说明|', '|---|---|---|---|')
     foreach ($phaseReport in $metadata.phases) {
         foreach ($case in $phaseReport.cases) { $lines += "|$($phaseReport.phase)|$($case.group)/$($case.name)|$($case.status)|$(([string]$case.error).Replace('|','/').Replace("`n",' '))|" }
+        foreach ($errorMessage in $phaseReport.runnerErrors) { $lines += "|$($phaseReport.phase)|runner/phase-completion|ERROR|$($errorMessage.Replace('|','/').Replace("`n",' '))|" }
     }
     if ($metadata.Contains('error')) { $lines += "`n运行错误：$($metadata.error)" }
     if ($SkipRestart) { $lines += "`n未运行：跨进程重启持久化。此次结果不算全量通过。" }

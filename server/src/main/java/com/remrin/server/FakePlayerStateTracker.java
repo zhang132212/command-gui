@@ -78,15 +78,16 @@ public final class FakePlayerStateTracker {
          for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             if (fakePlayerClass.isInstance(player)) {
                JsonObject state = new JsonObject();
-               state.addProperty("attack", hasPersistentAction(player, "ATTACK", true));
-               state.addProperty("use", hasPersistentAction(player, "USE", true));
-               state.addProperty("jump", hasPersistentAction(player, "JUMP", true));
-               state.addProperty("attackInterval", hasPersistentAction(player, "ATTACK", false));
-               state.addProperty("useInterval", hasPersistentAction(player, "USE", false));
-               state.addProperty("attackIntervalTicks", persistentActionTicks(player, "ATTACK", false));
-               state.addProperty("useIntervalTicks", persistentActionTicks(player, "USE", false));
-               state.addProperty("sneak", isSneaking(player));
-               state.addProperty("sprint", isSprinting(player));
+               state.addProperty("attack", false);
+               state.addProperty("use", false);
+               state.addProperty("jump", false);
+               state.addProperty("attackInterval", false);
+               state.addProperty("useInterval", false);
+               state.addProperty("attackIntervalTicks", 0);
+               state.addProperty("useIntervalTicks", 0);
+               state.addProperty("sneak", false);
+               state.addProperty("sprint", false);
+               readState(player, state);
                players.add(player.getGameProfile().name(), state);
             }
          }
@@ -96,75 +97,33 @@ public final class FakePlayerStateTracker {
       return root.toString();
    }
 
-   private static boolean hasPersistentAction(ServerPlayer player, String typeName, boolean continuous) {
+   private static void readState(ServerPlayer player, JsonObject state) {
       try {
+         // One action-pack lookup and one action-map traversal per player per tick.
          Object pack = getActionPackMethod.invoke(player);
          Map<?, ?> actions = (Map<?, ?>)actionsField.get(pack);
-
          for (Entry<?, ?> entry : actions.entrySet()) {
-            if (entry.getKey().toString().equals(typeName)) {
-               Object action = entry.getValue();
-               if (action == null) {
-                  return false;
-               }
-
-               int limit = ((Number)limitField.get(action)).intValue();
-               if (limit >= 0) {
-                  return false;
-               }
-
-               return isContinuousField.getBoolean(action) == continuous;
+            String property = switch (entry.getKey().toString()) {
+               case "ATTACK" -> "attack";
+               case "USE" -> "use";
+               case "JUMP" -> "jump";
+               default -> null;
+            };
+            Object action = entry.getValue();
+            if (property == null || action == null || ((Number)limitField.get(action)).intValue() >= 0) {
+               continue;
+            }
+            if (isContinuousField.getBoolean(action)) {
+               state.addProperty(property, true);
+            } else if (!property.equals("jump")) {
+               state.addProperty(property + "Interval", true);
+               state.addProperty(property + "IntervalTicks", ((Number)intervalField.get(action)).intValue());
             }
          }
-
-         return false;
-      } catch (ReflectiveOperationException var9) {
-         return false;
-      }
-   }
-
-   private static int persistentActionTicks(ServerPlayer player, String typeName, boolean continuous) {
-      try {
-         Object pack = getActionPackMethod.invoke(player);
-         Map<?, ?> actions = (Map<?, ?>)actionsField.get(pack);
-
-         for (Entry<?, ?> entry : actions.entrySet()) {
-            if (entry.getKey().toString().equals(typeName)) {
-               Object action = entry.getValue();
-               if (action == null) {
-                  return 0;
-               }
-
-               int limit = ((Number)limitField.get(action)).intValue();
-               if (limit < 0 && isContinuousField.getBoolean(action) == continuous) {
-                  return ((Number)intervalField.get(action)).intValue();
-               }
-
-               return 0;
-            }
-         }
-
-         return 0;
-      } catch (ReflectiveOperationException var9) {
-         return 0;
-      }
-   }
-
-   private static boolean isSneaking(ServerPlayer player) {
-      try {
-         Object pack = getActionPackMethod.invoke(player);
-         return sneakingField.getBoolean(pack);
-      } catch (ReflectiveOperationException var2) {
-         return false;
-      }
-   }
-
-   private static boolean isSprinting(ServerPlayer player) {
-      try {
-         Object pack = getActionPackMethod.invoke(player);
-         return sprintingField.getBoolean(pack);
-      } catch (ReflectiveOperationException var2) {
-         return false;
+         state.addProperty("sneak", sneakingField.getBoolean(pack));
+         state.addProperty("sprint", sprintingField.getBoolean(pack));
+      } catch (ReflectiveOperationException | RuntimeException ignored) {
+         // Preserve a usable snapshot if a Carpet implementation changes its action-pack shape.
       }
    }
 }

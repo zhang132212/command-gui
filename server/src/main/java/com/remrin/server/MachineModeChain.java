@@ -18,6 +18,10 @@ public final class MachineModeChain {
    private MachineModeChain() {
    }
 
+   public static void reset() {
+      chains.clear();
+   }
+
    public static void buildChains(MachineConfig.MachineData machine, List<String> startIds, List<String> stopIds, String triggerPlayer) {
       int startInterval = Math.max(0, machine.modeInterval);
       int stopInterval = machine.stopFollowsStart ? startInterval : Math.max(0, machine.stopModeInterval);
@@ -151,7 +155,7 @@ public final class MachineModeChain {
             String machineId = entry.getKey();
             MachineConfig.MachineData machine = MachineConfig.getMachine(machineId);
             MachineModeChain.Chain chain = entry.getValue();
-            if (machine != null && (!chain.steps.isEmpty() || chain.activeModeId != null)) {
+            if (machine != null && (!chain.steps.isEmpty() || chain.activeModeId != null || chain.activeCompleted)) {
                // 编辑锁认锁（每 tick 检查，含 active 等待期）：机器正被【其他】玩家编辑时，
                // 取消本切换序列，避免异步 start/stop 改状态破坏编辑者正在看的配置。
                String lockBlock = MachineManager.editingLockedByOtherMachineId(machineId, chain.triggerPlayer);
@@ -162,11 +166,10 @@ public final class MachineModeChain {
                   continue;
                }
                if (chain.failed) { it.remove(); continue; }
-               if (chain.activeModeId != null) {
-                  if (!chain.activeCompleted) {
-                     continue;
-                  }
-
+               if (chain.activeModeId != null && !chain.activeCompleted) {
+                  continue;
+               }
+               if (chain.activeCompleted) {
                   chain.activeModeId = null;
                   chain.activeCompleted = false;
                   MachineModeChain.Step next = chain.steps.peek();
@@ -190,6 +193,7 @@ public final class MachineModeChain {
                      MachineConfig.ModeData mode = findMode(machine, step.modeId);
                      if (mode == null) {
                         MachineMod.LOGGER.info("Chain: mode '{}' of machine '{}' no longer exists, skipping", step.modeId, machineId);
+                        chain.activeCompleted = true;
                      } else {
                         if (step.action == MachineModeChain.Action.STOP) {
                            MachineScheduler.stopModeWithShutdown(machine, mode, chain.triggerPlayer, chain.sourceSnapshot);

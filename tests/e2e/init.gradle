@@ -1,0 +1,25 @@
+// Real client + integrated server, with actual Fabric packet handlers (no network mocks).
+gradle.projectsEvaluated {
+    def p = gradle.rootProject
+    def runPath = System.getProperty('e2e.runDir')
+    if (!runPath) throw new GradleException('Use testing/run-client-e2e.ps1 for an isolated run')
+    def qa = p.sourceSets.create('e2eQa') {
+        java.srcDir p.file('tests/e2e/src')
+        java.srcDir p.file('tests/client-regressions/src')
+        resources.srcDir p.file('tests/e2e/resources')
+        compileClasspath += p.sourceSets.client.compileClasspath + p.sourceSets.client.output + p.sourceSets.main.output
+    }
+    p.tasks.named('compileE2eQaJava') { dependsOn p.tasks.named('clientClasses'); options.encoding = 'UTF-8' }
+    def qaJar = p.tasks.register('e2eQaJar', Jar) {
+        from qa.output
+        archiveFileName = 'command-gui-e2e-tests.jar'
+        destinationDirectory = new File(runPath, 'mods')
+    }
+    p.loom.runs.client {
+        runDir runPath
+        vmArg '-Ddevauth.enabled=false'
+        vmArg '-Dfile.encoding=UTF-8'
+        programArgs '--username', 'CommandE2E', '--width', '1280', '--height', '800'
+    }
+    p.tasks.named('runClient') { dependsOn qaJar }
+}

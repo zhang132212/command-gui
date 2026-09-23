@@ -37,6 +37,10 @@ jobs:
         # -x bumpVersion: CI must not auto-bump gradle.properties on each build
         run: ./gradlew build -x bumpVersion
 
+      - name: Verify test runner failure reporting
+        shell: pwsh
+        run: ./testing/backend/test-runner-reports.ps1
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
