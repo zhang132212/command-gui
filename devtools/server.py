@@ -25,7 +25,7 @@ import webbrowser
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, unquote
 
 ROOT = Path(__file__).resolve().parents[1]
 DEVTOOLS = ROOT / "devtools"
@@ -393,7 +393,21 @@ class Handler(BaseHTTPRequestHandler):
         print(f"[DevStudio] {self.address_string()} {fmt % args}")
 
     def _send_file(self, rel: Path):
-        if not rel.exists():
+        # Check both the lexical path and its resolved target: absolute request
+        # paths and symlinks must not escape the files served by DevStudio.
+        try:
+            root = DEVTOOLS.resolve()
+            if not rel.is_relative_to(root):
+                self.send_error(403)
+                return
+            rel = rel.resolve()
+            if not rel.is_relative_to(root):
+                self.send_error(403)
+                return
+        except (OSError, ValueError):
+            self.send_error(403)
+            return
+        if not rel.is_file():
             self.send_error(404)
             return
         content_type = {
@@ -413,7 +427,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _route(self):
         parsed = urlparse(self.path)
-        path = parsed.path
+        path = unquote(parsed.path)
         query = parse_qs(parsed.query)
 
         if path == "/" or path == "/index.html":

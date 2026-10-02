@@ -23,7 +23,7 @@ import net.minecraft.network.chat.Component;
 public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> implements StepCommandHost {
    private static final String[] CUSTOM_SUGGESTIONS = PlaceholderResolver.ALL_PLACEHOLDERS.toArray(new String[0]);
    private static final int LIST_ROW_HEIGHT = 22;
-   private final String initialCategoryId;
+   private final String editingCategoryId;
    private final String editingName;
    private final CommandConfig.CommandEntry editingEntry;
    private final boolean fakeMode;
@@ -31,8 +31,8 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
    private final int customCommandIndex;
    private List<CommandConfig.Category> categories;
    private Button saveButton;
-   private int selectedCategoryIndex = 0;
-   private String movedToCategory = null;
+   private String selectedCategoryId;
+   private String saveError = "";
    private EditBox nameField;
    private EditBox descriptionField;
    private EditBox botField;
@@ -86,7 +86,10 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
 
    private AddCommandScreen(CommandGUIScreen parent, String initialCategoryId, String editingName, CommandConfig.CommandEntry editingEntry, boolean fakeMode, boolean playerCustomMode, int customCommandIndex) {
       super(Component.translatable(playerCustomMode ? "screen.command-gui.fakeplayer.custom_commands.title" : (editingName != null ? "screen.command-gui.edit_title" : "screen.command-gui.add_title")), parent);
-      this.initialCategoryId = initialCategoryId;
+      this.editingCategoryId = editingName == null ? null
+         : initialCategoryId != null ? initialCategoryId : CommandConfig.findCommandCategory(editingName);
+      this.selectedCategoryId = initialCategoryId != null ? initialCategoryId
+         : this.editingCategoryId != null ? this.editingCategoryId : "default";
       this.editingName = editingName;
       this.editingEntry = editingEntry;
       this.fakeMode = fakeMode;
@@ -174,13 +177,9 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
    protected void init() {
       super.init();
       this.categories = CommandConfig.getCategories();
-      if (this.initialCategoryId != null) {
-         for (int i = 0; i < this.categories.size(); i++) {
-            if (this.categories.get(i).id.equals(this.initialCategoryId)) {
-               this.selectedCategoryIndex = i;
-               break;
-            }
-         }
+      // Keep the chosen destination through child-screen navigation and resize.
+      if (CommandConfig.getCategory(this.selectedCategoryId) == null && !this.categories.isEmpty()) {
+         this.selectedCategoryId = this.categories.get(0).id;
       }
 
       int fieldX = this.fieldX();
@@ -226,7 +225,7 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
          this.addRenderableWidget(
             GuiButton.themed(
                   Component.translatable("screen.command-gui.machine.step_pick"),
-                  btn -> this.minecraft.gui.setScreen(new BotSelectScreen(this, this.botNames()))
+                  btn -> this.minecraft.gui.setScreen(new BotSelectScreen(this, this.botNames(), true))
                )
                .bounds(fieldX + this.groupWidth() - 40, this.botY(), 40, 20)
                .build()
@@ -365,7 +364,7 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
       }
       if (!this.playerCustomMode && this.editingName != null) {
          this.addRenderableWidget(GuiButton.themed(Component.translatable("screen.command-gui.action.move"),
-            btn -> this.minecraft.gui.setScreen(new MoveCategoryScreen(this, this.editingName, category -> this.movedToCategory = category)))
+            btn -> this.openCategoryPicker())
             .bounds(fieldX + 60, y, 62, 20).build());
       } else if (!this.playerCustomMode && this.categories.size() > 1) {
          this.addRenderableWidget(GuiButton.themed(Component.translatable("screen.command-gui.save_to_category_short"), btn -> this.openCategoryPicker())
@@ -473,7 +472,7 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
    }
 
    private int getListBottom() {
-      return this.height - 24 - 4;
+      return this.height - 44;
    }
 
    private void rebuildListButtons() {
@@ -688,18 +687,11 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
       }
 
       if (!name.isEmpty() && !commands.isEmpty()) {
-         String categoryId = this.categories.isEmpty() ? "default" : this.categories.get(this.selectedCategoryIndex).id;
-         if (this.editingName != null) {
-            boolean renamed = !name.equals(this.editingName);
-            String target = this.movedToCategory != null ? this.movedToCategory : (renamed ? CommandConfig.findCommandCategory(this.editingName) : null);
-            if (!renamed && this.movedToCategory == null) {
-               CommandConfig.updateCommandMulti(name, commands, this.descriptionText, this.parseDelay(), this.shortcut);
-            } else {
-               CommandConfig.removeCommand(this.editingName);
-               CommandConfig.addCommandMulti(target != null ? target : categoryId, name, commands, this.descriptionText, this.parseDelay(), this.shortcut);
-            }
-         } else {
-            CommandConfig.addCommandMulti(categoryId, name, commands, this.descriptionText, this.parseDelay(), this.shortcut);
+         String error = CommandConfig.saveCommand(this.editingCategoryId, this.editingName, this.selectedCategoryId,
+            name, commands, this.descriptionText, this.parseDelay(), this.shortcut);
+         if (error != null) {
+            this.showSaveError(error);
+            return;
          }
 
          this.dirty = false;
@@ -731,7 +723,11 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
                Component.translatable("screen.command-gui.action.delete"),
                Component.translatable("screen.command-gui.cancel"),
                () -> {
-                  CommandConfig.removeCommand(this.editingName);
+                  String error = CommandConfig.removeCommand(this.editingCategoryId, this.editingName);
+                  if (error != null) {
+                     this.showSaveError(error);
+                     return;
+                  }
                   if (this.parent != null) {
                      this.parent.refresh();
                   }
@@ -744,8 +740,16 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
    }
 
    private void markDirty() {
+      this.saveError = "";
       this.dirty = true;
       this.updateSaveButtonState();
+   }
+
+   private void showSaveError(String error) {
+      this.saveError = error;
+      if (this.minecraft.gui.screen() != this) {
+         this.minecraft.gui.setScreen(this);
+      }
    }
 
    private boolean allCommandsContainBot(List<String> commands) {
@@ -804,15 +808,14 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
    }
 
    private void openCategoryPicker() {
-      String currentId = this.categories.isEmpty() ? "default" : this.categories.get(this.selectedCategoryIndex).id;
-      this.minecraft.gui.setScreen(new SelectCategoryScreen(this, currentId, categoryId -> {
-         for (int i = 0; i < this.categories.size(); i++) {
-            if (this.categories.get(i).id.equals(categoryId)) {
-               this.selectedCategoryIndex = i;
-               break;
-            }
-         }
+      this.minecraft.gui.setScreen(new SelectCategoryScreen(this, this.selectedCategoryId, categoryId -> {
+         this.selectedCategoryId = categoryId;
+         this.markDirty();
       }));
+   }
+
+   public String getSelectedCategoryId() {
+      return this.selectedCategoryId;
    }
 
    private String shortcutMessage() {
@@ -881,7 +884,7 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
 
       String selfOldName = !this.playerCustomMode && this.editingName != null ? this.editingName : null;
       int selfCustomIndex = this.playerCustomMode ? this.customCommandIndex : -1;
-      this.shortcutConflict = CommandShortcut.findConflict(this.shortcut, this.nameText, selfOldName, selfCustomIndex);
+      this.shortcutConflict = CommandShortcut.findConflict(this.shortcut, this.nameText, this.editingCategoryId, selfOldName, selfCustomIndex);
    }
 
    private boolean captureShortcutKey(KeyEvent keyEvent) {
@@ -1040,6 +1043,10 @@ public class AddCommandScreen extends BaseParentedScreen<CommandGUIScreen> imple
       }
 
       guiGraphics.text(this.font, title, this.fieldX(), 10, GuiTheme.text(), false);
+      if (!this.saveError.isEmpty()) {
+         guiGraphics.text(this.font, this.font.plainSubstrByWidth(this.saveError, this.contentWidth()),
+            this.fieldX(), this.height - 40, GuiTheme.danger(), false);
+      }
       this.fieldLabel(guiGraphics, this.nameField, "screen.command-gui.name");
       this.fieldLabel(guiGraphics, this.descriptionField, "screen.command-gui.description");
       this.fieldLabel(guiGraphics, this.delayField, "screen.command-gui.command_delay_short");

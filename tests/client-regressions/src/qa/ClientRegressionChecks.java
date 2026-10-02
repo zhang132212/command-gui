@@ -36,6 +36,8 @@ public final class ClientRegressionChecks {
          timerBoundaries();
          delayedBatches();
          commandMove();
+         checks += CommandIdentityChecks.run(mc);
+         checks += CommandExecutionChecks.run(mc);
          snapshots();
          disconnect(mc);
          System.out.println("CLIENT_REGRESSIONS_COMPLETE checks=" + checks);

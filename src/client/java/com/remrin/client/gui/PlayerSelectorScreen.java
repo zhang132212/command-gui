@@ -2,6 +2,7 @@ package com.remrin.client.gui;
 
 import com.mojang.authlib.GameProfile;
 import com.remrin.client.machine.MachineNetworkManager;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -35,6 +36,7 @@ public class PlayerSelectorScreen extends BaseParentedScreen<Screen> {
    private List<PlayerInfo> players = new ArrayList<>();
    private int scrollOffset = 0;
    private boolean initialized = false;
+   private final FakePlayerSelection fakePlayerSelection = new FakePlayerSelection();
    private ScrollbarHandle scrollbar = null;
    private boolean draggingScrollbar = false;
    private double scrollbarGrabOffset = 0.0;
@@ -66,6 +68,11 @@ public class PlayerSelectorScreen extends BaseParentedScreen<Screen> {
 
    protected void init() {
       super.init();
+      if (this.filterMode != PlayerSelectorScreen.FilterMode.EXCLUDE_SELF) {
+         if (this.fakePlayerSelection.poll()) {
+            this.initialized = false;
+         }
+      }
       this.playerButtons.clear();
       if (!this.initialized) {
          this.loadPlayers();
@@ -117,21 +124,39 @@ public class PlayerSelectorScreen extends BaseParentedScreen<Screen> {
                   }
             }
          }
+      }
 
-         if ((this.filterMode == PlayerSelectorScreen.FilterMode.ALL || this.filterMode == PlayerSelectorScreen.FilterMode.ONLY_FAKE_PLAYERS)
-            && MachineNetworkManager.isFakePlayerStatesSupported()) {
-            Set<String> existing = new HashSet<>();
-            for (PlayerInfo player : this.players) {
-               existing.add(player.getProfile().name());
-            }
+      if ((this.filterMode == PlayerSelectorScreen.FilterMode.ALL || this.filterMode == PlayerSelectorScreen.FilterMode.ONLY_FAKE_PLAYERS)
+         && MachineNetworkManager.isFakePlayerStatesSupported()) {
+         Set<String> existing = new HashSet<>();
+         for (PlayerInfo player : this.players) {
+            existing.add(player.getProfile().name());
+         }
 
-            for (String name : MachineNetworkManager.getServerFakePlayers()) {
-               if (existing.add(name)) {
-                  this.players.add(new PlayerInfo(new GameProfile(UUID.nameUUIDFromBytes(name.getBytes()), name), false));
-               }
+         for (String name : MachineNetworkManager.getServerFakePlayers()) {
+            if (existing.add(name)) {
+               this.players.add(new PlayerInfo(new GameProfile(UUID.nameUUIDFromBytes(name.getBytes(StandardCharsets.UTF_8)), name), false));
             }
          }
       }
+   }
+
+   @Override
+   public void tick() {
+      super.tick();
+      if (this.filterMode != PlayerSelectorScreen.FilterMode.EXCLUDE_SELF && this.fakePlayerSelection.poll()) {
+         this.loadPlayers();
+         int totalRows = (this.players.size() + COLUMNS - 1) / COLUMNS;
+         this.scrollOffset = Math.max(0, Math.min(this.scrollOffset, totalRows - this.layoutMaxRowsVisible));
+         this.rebuildPlayerButtons();
+      }
+   }
+
+   @Override
+   public void removed() {
+      this.fakePlayerSelection.close();
+      this.initialized = false;
+      super.removed();
    }
 
    private void buildPlayerButtons() {

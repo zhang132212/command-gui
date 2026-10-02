@@ -481,6 +481,61 @@ public final class BackendSuite implements ModInitializer {
       });
    }
    private void regressionTests(){
+      test("crud","category clearing respects locks and revision limits atomically and invalidates stale drafts",()->{
+         var first=stored();var second=stored();String category="category-clear-review-"+serial;first.category=second.category=category;
+         MachineConfig.save();Path file=FabricLoader.getInstance().getConfigDir().resolve("command-gui-server/machines.json");
+         var clear=action("clearCategory",null);clear.addProperty("categoryId",category);
+         try{
+            editLock(editor,second,true);String persisted=Files.readString(file);long firstRevision=first.revision,secondRevision=second.revision;
+            action(admin,clear);message(admin,"本次未清空分类");eq(first.category,category,"earlier unlocked machine is not partially cleared");eq(second.category,category,"locked machine stays in category");
+            eq(first.revision,firstRevision,"rejected clear preserves first revision");eq(second.revision,secondRevision,"rejected clear preserves locked revision");eq(Files.readString(file),persisted,"lock rejection leaves file unchanged");
+            check(MachineManager.editingLockedByOtherMachineId(second.id,"QAB_Admin")!=null,"rejection preserves editor lock");editLock(editor,second,false);
+            second.revision=Long.MAX_VALUE;MachineConfig.save();persisted=Files.readString(file);action(admin,clear);message(admin,"修订号已达上限");
+            eq(first.category,category,"revision exhaustion cannot partially clear earlier machine");eq(second.category,category,"exhausted machine category preserved");eq(first.revision,firstRevision,"revision exhaustion preserves earlier revision");eq(Files.readString(file),persisted,"revision exhaustion leaves file unchanged");
+            second.revision=secondRevision;MachineConfig.save();editLock(admin,first,true);var stale=copy(first);
+            action(admin,clear);eq(first.category,"","owner can clear category while holding own lock");eq(second.category,"","all matching machines clear together");
+            eq(first.revision,firstRevision+1,"clear advances first revision");eq(second.revision,secondRevision+1,"clear advances every matching revision");
+            persisted=Files.readString(file);saveAction(admin,"edit",stale,firstRevision);message(admin,"机器已被其他人修改");eq(first.category,"","old draft cannot resurrect cleared category");eq(Files.readString(file),persisted,"stale draft never rewrites cleared config");
+         }finally{editLock(editor,second,false);editLock(admin,first,false);if(second.revision==Long.MAX_VALUE){second.revision=1;MachineConfig.save();}}
+      });
+      test("fakeplayers","new subscription cannot consume the pending broadcast for existing viewers",()->{
+         MachineMod.unsubscribeFakeStates(admin);MachineMod.unsubscribeFakeStates(editor);command("player QAB_Bot stop");
+         try{
+            MachineMod.subscribeFakeStates(admin,server);call(MachineMod.class,"broadcastFakeStates",new Class<?>[]{MinecraftServer.class},server);Hooks.clear();
+            command("player QAB_Bot attack continuous");MachineMod.subscribeFakeStates(editor,server);
+            String newcomer=Hooks.packets(editor,MachinePayloads.FakePlayerStatesPayload.class).getLast().json();
+            call(MachineMod.class,"broadcastFakeStates",new Class<?>[]{MinecraftServer.class},server);
+            var existing=Hooks.packets(admin,MachinePayloads.FakePlayerStatesPayload.class);check(!existing.isEmpty(),"existing subscriber receives state changed before new subscription");
+            eq(existing.getLast().json(),newcomer,"existing and new viewers converge on same snapshot");check(json(newcomer).getAsJsonObject("players").getAsJsonObject("QAB_Bot").get("attack").getAsBoolean(),"fixture changed real Carpet attack state");
+            int delivered=existing.size();call(MachineMod.class,"broadcastFakeStates",new Class<?>[]{MinecraftServer.class},server);eq(Hooks.packets(admin,MachinePayloads.FakePlayerStatesPayload.class).size(),delivered,"unchanged state remains deduplicated");
+         }finally{command("player QAB_Bot stop");MachineMod.unsubscribeFakeStates(admin);MachineMod.unsubscribeFakeStates(editor);}
+      });
+      test("sync","aggregate budget rejects additions and edits before persistence and safely handles legacy overflow",()->{
+         var original=new ArrayList<>(MachineConfig.getMachines());Path file=FabricLoader.getInstance().getConfigDir().resolve("command-gui-server/machines.json");MachineData first=null;
+         try{
+            MachineConfig.getMachines().clear();MachineConfig.save();Class<?> budget=Class.forName("com.remrin.server.MachineSyncBudget");MachineData rejected=null;
+            for(int i=0;i<100;i++){
+               var candidate=new MachineData();candidate.id="sync-budget-review-"+i;candidate.name="Sync budget "+i;candidate.revision=1;candidate.bots.add("QAB_Bot");candidate.description="x".repeat(20000);candidate.onTimeline=timeline("player {bot} spawn at 0 80 0");
+               var combined=new ArrayList<>(MachineConfig.getMachines());combined.add(candidate);
+               if(!(Boolean)call(budget,"fits",new Class<?>[]{List.class},combined)){rejected=candidate;break;}
+               MachineConfig.getMachines().add(candidate);if(first==null)first=candidate;
+            }
+            check(rejected!=null&&first!=null,"fixture reaches aggregate limit using many individually small machines");
+            var filler=copy(first);filler.id="sync-budget-review-fill";filler.description="";var filled=new ArrayList<>(MachineConfig.getMachines());filled.add(filler);
+            check((Boolean)call(budget,"fits",new Class<?>[]{List.class},filled),"remaining capacity fits a small final machine");
+            int low=0,high=20000;while(low<high){int midpoint=(low+high+1)/2;filler.description="z".repeat(midpoint);if((Boolean)call(budget,"fits",new Class<?>[]{List.class},filled))low=midpoint;else high=midpoint-1;}
+            filler.description="z".repeat(low);MachineConfig.getMachines().add(filler);MachineConfig.save();String persisted=Files.readString(file),before=GSON.toJson(MachineConfig.getMachines());
+            var add=action("add",null);add.add("machine",GSON.toJsonTree(rejected));check(add.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8).length<32767,"rejected add fits actual C2S byte limit");roundtrip(MachinePayloads.ActionPayload.CODEC,new MachinePayloads.ActionPayload(add.toString()));
+            action(admin,add);message(admin,"同步上限");eq(GSON.toJson(MachineConfig.getMachines()),before,"over-budget add never enters live config");eq(Files.readString(file),persisted,"over-budget add never rewrites config");
+            var admitted=sync(admin);roundtrip(MachinePayloads.SyncPayload.CODEC,new MachinePayloads.SyncPayload(admitted.toString()));
+            editLock(admin,first,true);var oversizedEdit=copy(first);oversizedEdit.description+="y".repeat(9000);var edit=action("edit",null);edit.add("machine",GSON.toJsonTree(oversizedEdit));edit.addProperty("baseRevision",first.revision);
+            check(edit.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8).length<32767,"rejected edit also fits actual C2S byte limit");Hooks.clear();action(admin,edit);message(admin,"同步上限");
+            eq(GSON.toJson(MachineConfig.getMachines()),before,"over-budget edit preserves current machine and revision");eq(Files.readString(file),persisted,"over-budget edit never rewrites config");check(MachineManager.editingLockedByOtherMachineId(first.id,"QAB_Editor")!=null,"rejected edit preserves owner's lock");
+            MachineConfig.getMachines().add(rejected);String overflow=((JsonObject)call(MachineManager.class,"buildSyncData",new Class<?>[]{})).toString();check(overflow.getBytes(java.nio.charset.StandardCharsets.UTF_8).length>1048576,"legacy fixture exceeds real outgoing packet budget");Hooks.clear();
+            MachineManager.syncTo(admin);MachineManager.broadcastSync(server.getPlayerList());check(Hooks.packets(admin,MachinePayloads.SyncPayload.class).isEmpty(),"legacy overflow is never passed to network encoder");message(admin,"现有配置未同步");
+            check(!(Boolean)call(budget,"fits",new Class<?>[]{String.class},"中".repeat(350000)),"UTF-8 bytes are bounded even when character count is below codec limit");
+         }finally{MachineConfig.getMachines().clear();MachineConfig.getMachines().addAll(original);MachineConfig.save();MachineBlockCache.rebuild();if(first!=null)editLock(admin,first,false);}
+      });
       test("transport","malformed action roots and fields cannot mutate machines",()->{
          var m=stored();String before=GSON.toJson(MachineConfig.getMachines());
          for(String payload:List.of("null","[]","true","42","\"text\"","{\"type\":null}","{\"type\":[]}",

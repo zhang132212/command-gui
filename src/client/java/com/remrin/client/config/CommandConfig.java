@@ -15,7 +15,6 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -31,9 +30,8 @@ public class CommandConfig {
    }).getType();
    private static final String DEFAULT_CATEGORY = "default";
    private static CommandConfig.ConfigData configData = new CommandConfig.ConfigData();
-   private static final Map<String, CommandConfig.CommandEntry> pendingOverrides = new LinkedHashMap<>();
-   private static final Map<String, String> pendingNewCategories = new HashMap<>();
-   private static final Set<String> pendingRemovals = new LinkedHashSet<>();
+   private static final Map<CommandKey, CommandConfig.CommandEntry> pendingOverrides = new LinkedHashMap<>();
+   private static final Set<CommandKey> pendingRemovals = new LinkedHashSet<>();
 
    public static void load() {
       if (Files.exists(CONFIG_PATH)) {
@@ -49,6 +47,10 @@ public class CommandConfig {
    }
 
    public static void save() {
+      persist();
+   }
+
+   private static boolean persist() {
       try {
          Files.createDirectories(CONFIG_PATH.getParent());
          Path temp = CONFIG_PATH.resolveSibling(CONFIG_PATH.getFileName() + ".tmp");
@@ -62,8 +64,10 @@ public class CommandConfig {
          } catch (AtomicMoveNotSupportedException var5) {
             Files.move(temp, CONFIG_PATH, StandardCopyOption.REPLACE_EXISTING);
          }
+         return true;
       } catch (IOException var7) {
          CommandGUI.LOGGER.error("Failed to save command config", var7);
+         return false;
       }
    }
 
@@ -146,13 +150,22 @@ public class CommandConfig {
    }
 
    public static String findCommandCategory(String name) {
+      String result = null;
       for (CommandConfig.Category cat : configData.categories) {
          if (cat.commands.containsKey(name)) {
-            return cat.id;
+            // The legacy name-only API is safe only when that name is unique.
+            if (result != null) {
+               return null;
+            }
+            result = cat.id;
          }
       }
+      return result;
+   }
 
-      return null;
+   public static CommandEntry getCommand(String categoryId, String name) {
+      Category category = getCategory(categoryId);
+      return category == null ? null : category.commands.get(name);
    }
 
    public static String nextDefaultCommandName() {
@@ -171,13 +184,7 @@ public class CommandConfig {
    }
 
    public static void addCommand(String categoryId, String name, String command, String description) {
-      CommandConfig.Category cat = getCategory(categoryId);
-      if (cat == null) {
-         cat = getDefaultCategory();
-      }
-
-      cat.commands.put(name, new CommandConfig.CommandEntry(command, description));
-      save();
+      addCommandMulti(categoryId, name, List.of(command), description);
    }
 
    public static void addCommandMulti(String categoryId, String name, List<String> commands, String description) {
@@ -189,35 +196,73 @@ public class CommandConfig {
    }
 
    public static void addCommandMulti(String categoryId, String name, List<String> commands, String description, int commandDelay, String shortcut) {
-      CommandConfig.Category cat = getCategory(categoryId);
-      if (cat == null) {
-         cat = getDefaultCategory();
+      String target = getCategory(categoryId) != null ? categoryId : DEFAULT_CATEGORY;
+      saveCommand(null, null, target, name, commands, description, commandDelay, shortcut);
+   }
+
+   /** Returns a user-facing error, or null after an atomic successful save. */
+   public static String saveCommand(String sourceCategoryId, String oldName, String targetCategoryId, String name,
+      List<String> commands, String description, int commandDelay, String shortcut) {
+      Category source = oldName == null ? null : getCategory(sourceCategoryId);
+      Category target = getCategory(targetCategoryId);
+      if (oldName != null && (source == null || !source.commands.containsKey(oldName))) {
+         return "原指令已不存在，请返回列表刷新后重试";
+      }
+      if (target == null) {
+         return "目标分类已不存在，请重新选择分类";
+      }
+      if (name == null || name.isBlank() || commands == null || commands.isEmpty()) {
+         return "指令名称和内容不能为空";
+      }
+      if (target.commands.containsKey(name) && !(source == target && name.equals(oldName))) {
+         return "目标分类已有同名指令「" + name + "」，请修改名称或选择其他分类";
       }
 
-      CommandConfig.CommandEntry entry = new CommandConfig.CommandEntry(commands, description);
+      LinkedHashMap<String, CommandEntry> previousTarget = new LinkedHashMap<>(target.commands);
+      LinkedHashMap<String, CommandEntry> previousSource = source == null || source == target ? null : new LinkedHashMap<>(source.commands);
+      CommandEntry entry = new CommandEntry(new ArrayList<>(commands), description);
       entry.commandDelay = Math.max(1, commandDelay);
       entry.shortcut = shortcut != null ? shortcut : "";
-      cat.commands.put(name, entry);
-      save();
+      if (source != null && (source != target || !name.equals(oldName))) {
+         source.commands.remove(oldName);
+      }
+      target.commands.put(name, entry);
+      if (!persist()) {
+         target.commands.clear();
+         target.commands.putAll(previousTarget);
+         if (previousSource != null) {
+            source.commands.clear();
+            source.commands.putAll(previousSource);
+         }
+         return "保存配置失败，原指令已保留，请检查配置目录后重试";
+      }
+      return null;
    }
 
    public static void removeCommand(String name) {
-      for (CommandConfig.Category cat : configData.categories) {
-         if (cat.commands.remove(name) != null) {
-            save();
-            return;
-         }
+      String categoryId = findCommandCategory(name);
+      if (categoryId != null) {
+         removeCommand(categoryId, name);
       }
    }
 
-   public static void updateCommand(String name, String command, String description) {
-      for (CommandConfig.Category cat : configData.categories) {
-         if (cat.commands.containsKey(name)) {
-            cat.commands.put(name, new CommandConfig.CommandEntry(command, description));
-            save();
-            return;
-         }
+   public static String removeCommand(String categoryId, String name) {
+      Category category = getCategory(categoryId);
+      if (category == null || !category.commands.containsKey(name)) {
+         return "原指令已不存在，请返回列表刷新后重试";
       }
+      LinkedHashMap<String, CommandEntry> previous = new LinkedHashMap<>(category.commands);
+      category.commands.remove(name);
+      if (!persist()) {
+         category.commands.clear();
+         category.commands.putAll(previous);
+         return "保存配置失败，原指令已保留，请检查配置目录后重试";
+      }
+      return null;
+   }
+
+   public static void updateCommand(String name, String command, String description) {
+      updateCommandMulti(name, List.of(command), description, 1);
    }
 
    public static void updateCommandMulti(String name, List<String> commands, String description) {
@@ -228,34 +273,67 @@ public class CommandConfig {
       if (name != null && !name.isEmpty()) {
          CommandConfig.CommandEntry entry = new CommandConfig.CommandEntry(commands, description);
          entry.commandDelay = Math.max(1, commandDelay);
-         pendingOverrides.put(name, entry);
-         pendingNewCategories.put(name, categoryId != null ? categoryId : "default");
-         pendingRemovals.remove(name);
+         CommandKey key = new CommandKey(categoryId != null ? categoryId : DEFAULT_CATEGORY, name);
+         pendingOverrides.put(key, entry);
+         pendingRemovals.remove(key);
       }
    }
 
    public static void applyPendingRemoval(String name) {
-      if (name != null && !name.isEmpty()) {
-         pendingRemovals.add(name);
-         pendingOverrides.remove(name);
-         pendingNewCategories.remove(name);
+      String categoryId = findCommandCategory(name);
+      if (categoryId == null && !getCommands().containsKey(name)) {
+         CommandKey pending = uniquePendingKey(name);
+         categoryId = pending == null ? null : pending.categoryId();
+      }
+      if (categoryId != null) {
+         applyPendingRemoval(categoryId, name);
+      }
+   }
+
+   public static void applyPendingRemoval(String categoryId, String name) {
+      if (categoryId != null && name != null && !name.isEmpty()) {
+         CommandKey key = new CommandKey(categoryId, name);
+         if (getCommand(categoryId, name) != null) {
+            pendingRemovals.add(key);
+         } else {
+            pendingRemovals.remove(key);
+         }
+         pendingOverrides.remove(key);
       }
    }
 
    public static boolean isPending(String name) {
-      return pendingOverrides.containsKey(name) || pendingRemovals.contains(name);
+      return pendingOverrides.keySet().stream().anyMatch(key -> key.name().equals(name))
+         || pendingRemovals.stream().anyMatch(key -> key.name().equals(name));
+   }
+
+   public static boolean isPending(String categoryId, String name) {
+      CommandKey key = new CommandKey(categoryId, name);
+      return pendingOverrides.containsKey(key) || pendingRemovals.contains(key);
    }
 
    public static boolean isPendingRemoval(String name) {
-      return pendingRemovals.contains(name);
+      String categoryId = findCommandCategory(name);
+      return categoryId != null && isPendingRemoval(categoryId, name);
+   }
+
+   public static boolean isPendingRemoval(String categoryId, String name) {
+      return pendingRemovals.contains(new CommandKey(categoryId, name));
    }
 
    public static Set<String> getPendingNames() {
+      Set<String> names = new LinkedHashSet<>();
+      pendingOverrides.keySet().forEach(key -> names.add(key.name()));
+      return Collections.unmodifiableSet(names);
+   }
+
+   public static Set<CommandKey> getPendingKeys() {
       return Collections.unmodifiableSet(pendingOverrides.keySet());
    }
 
    public static String getPendingCategory(String name) {
-      return pendingNewCategories.getOrDefault(name, "default");
+      CommandKey key = uniquePendingKey(name);
+      return key != null ? key.categoryId() : DEFAULT_CATEGORY;
    }
 
    public static boolean hasPending() {
@@ -263,29 +341,43 @@ public class CommandConfig {
    }
 
    public static CommandConfig.CommandEntry getPendingEntry(String name) {
-      return pendingOverrides.get(name);
+      CommandKey key = uniquePendingKey(name);
+      return key == null ? null : pendingOverrides.get(key);
+   }
+
+   public static CommandConfig.CommandEntry getPendingEntry(String categoryId, String name) {
+      return pendingOverrides.get(new CommandKey(categoryId, name));
+   }
+
+   private static CommandKey uniquePendingKey(String name) {
+      CommandKey result = null;
+      for (CommandKey key : pendingOverrides.keySet()) {
+         if (key.name().equals(name)) {
+            if (result != null) return null;
+            result = key;
+         }
+      }
+      return result;
    }
 
    public static void commitPending() {
-      for (Entry<String, CommandConfig.CommandEntry> e : pendingOverrides.entrySet()) {
-         String name = e.getKey();
+      for (Entry<CommandKey, CommandConfig.CommandEntry> e : new ArrayList<>(pendingOverrides.entrySet())) {
+         CommandKey key = e.getKey();
+         String name = key.name();
          CommandConfig.CommandEntry entry = e.getValue();
-         String categoryId = pendingNewCategories.getOrDefault(name, "default");
-         String existing = findCommandCategory(name);
-         if (existing != null) {
-            updateCommandMulti(name, entry.getCommands(), entry.description, entry.commandDelay);
-         } else {
-            addCommandMulti(categoryId, name, entry.getCommands(), entry.description, entry.commandDelay);
+         String categoryId = key.categoryId();
+         boolean existing = getCommand(categoryId, name) != null;
+         if (saveCommand(existing ? categoryId : null, existing ? name : null, categoryId, name,
+            entry.getCommands(), entry.description, entry.commandDelay, entry.shortcut) == null) {
+            pendingOverrides.remove(key);
          }
       }
 
-      for (String name : pendingRemovals) {
-         removeCommand(name);
+      for (CommandKey key : new ArrayList<>(pendingRemovals)) {
+         if (removeCommand(key.categoryId(), key.name()) == null) {
+            pendingRemovals.remove(key);
+         }
       }
-
-      pendingOverrides.clear();
-      pendingNewCategories.clear();
-      pendingRemovals.clear();
    }
 
    public static void updateCommandMulti(String name, List<String> commands, String description, int commandDelay) {
@@ -293,36 +385,28 @@ public class CommandConfig {
    }
 
    public static void updateCommandMulti(String name, List<String> commands, String description, int commandDelay, String shortcut) {
-      for (CommandConfig.Category cat : configData.categories) {
-         if (cat.commands.containsKey(name)) {
-            CommandConfig.CommandEntry entry = new CommandConfig.CommandEntry(commands, description);
-            entry.commandDelay = Math.max(1, commandDelay);
-            entry.shortcut = shortcut != null ? shortcut : "";
-            cat.commands.put(name, entry);
-            save();
-            return;
-         }
+      String categoryId = findCommandCategory(name);
+      if (categoryId != null) {
+         saveCommand(categoryId, name, categoryId, name, commands, description, commandDelay, shortcut);
       }
    }
 
    public static void moveCommand(String name, String toCategoryId) {
-      CommandConfig.Category toCat = getCategory(toCategoryId);
-      if (toCat == null) {
-         return;
+      String categoryId = findCommandCategory(name);
+      if (categoryId != null) {
+         moveCommand(categoryId, name, toCategoryId);
       }
-      CommandConfig.CommandEntry entry = null;
+   }
 
-      for (CommandConfig.Category cat : configData.categories) {
-         entry = cat.commands.remove(name);
-         if (entry != null) {
-            break;
-         }
+   public static String moveCommand(String categoryId, String name, String toCategoryId) {
+      CommandEntry entry = getCommand(categoryId, name);
+      if (entry == null) {
+         return "原指令已不存在，请返回列表刷新后重试";
       }
+      return saveCommand(categoryId, name, toCategoryId, name, entry.getCommands(), entry.description, entry.commandDelay, entry.shortcut);
+   }
 
-      if (entry != null) {
-         toCat.commands.put(name, entry);
-         save();
-      }
+   public static record CommandKey(String categoryId, String name) {
    }
 
    public static class Category {

@@ -7,6 +7,8 @@ param(
     [ValidateRange(60,3600)][int]$TimeoutSeconds=600,
     [switch]$Offline,
     [int]$Seed=132212,
+    [ValidateRange(512,8192)][int]$DedicatedHeapMegabytes=1500,
+    [ValidateRange(0,64)][int]$DedicatedProcessors=0,
     [string]$OutputRoot,
     [ValidateSet('backend','integrated-carpet','integrated-vanilla','dedicated','layout','runner-selftest')]
     [string[]]$Phases=@('backend','integrated-carpet','integrated-vanilla','dedicated','layout','runner-selftest')
@@ -41,7 +43,7 @@ $sourceFiles | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $Ou
 $metadata=[ordered]@{
     schemaVersion=1;runId=$runId;started=[DateTimeOffset]::Now.ToString('o');phases=@()
     environment=[ordered]@{os=[Environment]::OSVersion.VersionString;powershell=$PSVersionTable.PSVersion.ToString();javaHome=$JavaHome;commit=$commit;workingTreeChanges=$dirty;sourceManifest='source-manifest.json';sourceManifestSha256=(Get-FileHash -LiteralPath (Join-Path $OutputRoot 'source-manifest.json') -Algorithm SHA256).Hash;sourceFiles=$sourceFiles.Count}
-    inputs=[ordered]@{modsDirectory=$ModsDirectory;eulaFile=$EulaFile;offline=[bool]$Offline;timeoutSeconds=$TimeoutSeconds;seed=$Seed;requestedPhases=$Phases;dependencies=@()}
+    inputs=[ordered]@{modsDirectory=$ModsDirectory;eulaFile=$EulaFile;offline=[bool]$Offline;timeoutSeconds=$TimeoutSeconds;seed=$Seed;dedicatedHeapMegabytes=$DedicatedHeapMegabytes;dedicatedProcessors=$DedicatedProcessors;requestedPhases=$Phases;dependencies=@()}
     coverage=@('Dedicated backend suite and cross-process persistence restart','Real client with integrated server, Carpet installed','Real client with integrated server, Carpet absent','Dedicated TCP server plus two real Minecraft clients','Three window/GUI sizes, bounds, draft retention and screenshots','Report validators, malformed evidence, process timeout/exit, Unicode and escaping')
     limitations=@('PASS means all declared automated phases completed; it is not a proof that every possible mod state is bug free.','Integrated and dedicated checks invoke real mod handlers/network flows, but do not exercise every operation using mouse/keyboard input.','No arbitrary packet loss, power failure, disk-full, every third-party mod, renderer or operating system is simulated.','Backend random sequences and dedicated scenarios are reproducible with recorded seeds; further seeds increase coverage.')
 }
@@ -70,7 +72,7 @@ foreach ($definition in $definitions) {
         if ($definition.id -in @('backend','integrated-carpet','dedicated')) { if ($ModsDirectory) { $arguments+=@('-ModsDirectory',$ModsDirectory) } }
         if ($definition.id -in @('backend','dedicated')) { if ($EulaFile) { $arguments+=@('-EulaFile',$EulaFile) } }
         if ($definition.id -eq 'integrated-vanilla') { $arguments+='-WithoutCarpet' }
-        if ($definition.id -eq 'dedicated') { $arguments+=@('-Seed',[string]$Seed) }
+        if ($definition.id -eq 'dedicated') { $arguments+=@('-Seed',[string]$Seed,'-HeapMegabytes',[string]$DedicatedHeapMegabytes,'-Processors',[string]$DedicatedProcessors) }
         $budget=if ($definition.kind -eq 'selftest') { 180 } else { $TimeoutSeconds*$definition.factor+60 }
         $process=Invoke-SystemProcess -FileName (Join-Path $PSHOME 'pwsh.exe') -Arguments $arguments -WorkingDirectory $repo -LogDirectory (Join-Path $phaseDir 'runner') -TimeoutSeconds $budget
         $phase=Read-SystemPhase -Id $definition.id -Kind $definition.kind -ReportPath $phaseReport -ExitCode $process.exitCode -TimedOut $process.timedOut -RuntimeError $process.error

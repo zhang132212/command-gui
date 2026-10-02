@@ -190,8 +190,8 @@ public class CustomCommandTab extends AbstractCommandTab {
          if (this.selectedCategoryId == null || this.selectedCategoryId.equals(category.id)) {
             for (Entry<String, CommandConfig.CommandEntry> entry : category.commands.entrySet()) {
                String name = entry.getKey();
-               if (!CommandConfig.isPendingRemoval(name)) {
-                  CommandConfig.CommandEntry effective = CommandConfig.getPendingEntry(name);
+               if (!CommandConfig.isPendingRemoval(category.id, name)) {
+                  CommandConfig.CommandEntry effective = CommandConfig.getPendingEntry(category.id, name);
                   if (effective == null) {
                      effective = entry.getValue();
                   }
@@ -204,10 +204,11 @@ public class CustomCommandTab extends AbstractCommandTab {
          }
       }
 
-      for (String name : CommandConfig.getPendingNames()) {
-         CommandConfig.CommandEntry effectivex = CommandConfig.getPendingEntry(name);
-         if (effectivex != null && CommandConfig.findCommandCategory(name) == null) {
-            String categoryId = CommandConfig.getPendingCategory(name);
+      for (CommandConfig.CommandKey key : CommandConfig.getPendingKeys()) {
+         String name = key.name();
+         String categoryId = key.categoryId();
+         CommandConfig.CommandEntry effectivex = CommandConfig.getPendingEntry(categoryId, name);
+         if (effectivex != null && CommandConfig.getCommand(categoryId, name) == null) {
             if ((this.selectedCategoryId == null || this.selectedCategoryId.equals(categoryId)) && (search.isEmpty() || name.toLowerCase().contains(search))) {
                this.filteredCommands.add(new CustomCommandTab.FilteredCommand(name, categoryId, effectivex));
             }
@@ -359,7 +360,7 @@ public class CustomCommandTab extends AbstractCommandTab {
       Font font = Minecraft.getInstance().font;
       int textMaxW = commandWidth - 12;
       String label = commands.size() > 1 ? cmdName + " (" + commands.size() + ")" : cmdName;
-      boolean pending = CommandConfig.isPending(cmdName) && !CommandConfig.isPendingRemoval(cmdName);
+      boolean pending = CommandConfig.isPending(cmd.categoryId(), cmdName) && !CommandConfig.isPendingRemoval(cmd.categoryId(), cmdName);
       if (pending) {
          label = label + "（未保存）";
       }
@@ -378,7 +379,7 @@ public class CustomCommandTab extends AbstractCommandTab {
       }
 
       CustomCommandTab.CommandRowButton cmdBtn = new CustomCommandTab.CommandRowButton(
-         left, y, commandWidth, h, labelComponent, b -> this.handleCommand(cmdEntry), () -> this.editCommand(cmdName, cmdEntry)
+         left, y, commandWidth, h, labelComponent, b -> this.handleCommand(cmdEntry), () -> this.editCommand(cmd.categoryId(), cmdName, cmdEntry)
       );
       cmdBtn.setTooltip(
          Tooltip.create(
@@ -486,10 +487,9 @@ public class CustomCommandTab extends AbstractCommandTab {
       }
    }
 
-   private void editCommand(String name, CommandConfig.CommandEntry entry) {
+   private void editCommand(String categoryId, String name, CommandConfig.CommandEntry entry) {
       Minecraft mc = Minecraft.getInstance();
       CommandGUIScreen parentScreen = (CommandGUIScreen)this.parent;
-      String categoryId = CommandConfig.findCommandCategory(name);
       mc.gui.setScreen(new AddCommandScreen(parentScreen, categoryId, name, entry));
    }
 
