@@ -19,6 +19,8 @@ import java.util.List;
 /** Isolated visual/behavior checks; no server and no user config or save writes. */
 public final class EditorLayoutQa implements ClientModInitializer {
     private int ticks, stage = -1, size;
+    private boolean waitingForWindow;
+    private int windowWaitTicks, stableWindowTicks;
     private CommandGUIScreen parent;
     private Button toggle;
     private static final String KEY = "quick_command_keep_open_default";
@@ -28,6 +30,7 @@ public final class EditorLayoutQa implements ClientModInitializer {
             try {
                 if (++ticks > 1600) throw new AssertionError("timeout " + stage);
                 if (mc.gui.overlay() != null) return;
+                if (waitingForWindow && !windowReady(mc)) return;
                 if (stage == -1) {
                     if (!(mc.gui.screen() instanceof TitleScreen) || ticks < 40) return;
                     for (String key : List.of("canEdit", "canConfig")) {
@@ -91,9 +94,39 @@ public final class EditorLayoutQa implements ClientModInitializer {
         invoke(tab, "rebuildPlayerButtons"); invoke(tab, "fireAfterRebuild");
     }
     private void configure(Minecraft mc) {
-        org.lwjgl.glfw.GLFW.glfwSetWindowSize(mc.getWindow().handle(), size == 2 ? 960 : 1440, size == 2 ? 720 : 900);
+        // Use Minecraft's window API so its remembered windowed dimensions agree
+        // with GLFW; a raw GLFW resize can be reverted by the next mode update.
+        org.lwjgl.glfw.GLFW.glfwRestoreWindow(mc.getWindow().handle());
+        mc.getWindow().setWindowed(size == 2 ? 960 : 1440, size == 2 ? 720 : 900);
         mc.options.guiScale().set(size == 0 ? 2 : 3); mc.resizeGui();
+        waitingForWindow = true; windowWaitTicks = 0; stableWindowTicks = 0;
         parent = new CommandGUIScreen();
+    }
+    private boolean windowReady(Minecraft mc) {
+        int expectedW = size == 2 ? 960 : 1440;
+        int expectedH = size == 2 ? 720 : 900;
+        int[] actualW = new int[1], actualH = new int[1];
+        org.lwjgl.glfw.GLFW.glfwGetFramebufferSize(mc.getWindow().handle(), actualW, actualH);
+        if (++windowWaitTicks > 200) {
+            throw new AssertionError("window resize did not settle: size=" + size + " expected=" + expectedW + "x" + expectedH
+                + " framebuffer=" + actualW[0] + "x" + actualH[0] + " cached=" + mc.getWindow().getWidth() + "x" + mc.getWindow().getHeight());
+        }
+        if (actualW[0] != expectedW || actualH[0] != expectedH
+            || mc.getWindow().getWidth() != expectedW || mc.getWindow().getHeight() != expectedH) {
+            stableWindowTicks = 0;
+            return false;
+        }
+        int scale = size == 0 ? 2 : 3;
+        if (mc.getWindow().getGuiScaledWidth() != expectedW / scale || mc.getWindow().getGuiScaledHeight() != expectedH / scale) {
+            mc.resizeGui();
+            stableWindowTicks = 0;
+            return false;
+        }
+        if (++stableWindowTicks < 2) return false;
+        waitingForWindow = false;
+        System.out.println("EDITOR_LAYOUT_SIZE_READY index=" + size + " physical=" + expectedW + "x" + expectedH
+            + " logical=" + mc.getWindow().getGuiScaledWidth() + "x" + mc.getWindow().getGuiScaledHeight());
+        return true;
     }
     private void openCommand(Minecraft mc, boolean fake) {
         List<String> commands = new ArrayList<>();
@@ -118,6 +151,11 @@ public final class EditorLayoutQa implements ClientModInitializer {
     }
     private void checkBounds(Minecraft mc) {
         var screen = mc.gui.screen();
+        int expectedWidth = size == 0 ? 720 : size == 1 ? 480 : 320;
+        int expectedHeight = size == 0 ? 450 : size == 1 ? 300 : 240;
+        if (screen.width != expectedWidth || screen.height != expectedHeight)
+            throw new AssertionError("unexpected layout size: index=" + size + " expected=" + expectedWidth + "x" + expectedHeight
+                + " actual=" + screen.width + "x" + screen.height);
         var widgets = screen.children().stream().filter(w -> w instanceof AbstractWidget).map(w -> (AbstractWidget)w).filter(w -> w.visible).toList();
         for (int i = 0; i < widgets.size(); i++) {
             var a = widgets.get(i);

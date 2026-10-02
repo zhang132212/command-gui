@@ -38,6 +38,7 @@ public final class MachineManager {
    private static final Gson GSON = new GsonBuilder().create();
    private static final Map<String, MachineManager.EditLock> editLocks = new HashMap<>();
    private static String lastStateSignature = "";
+   private static final String SYNC_BUDGET_ERROR = "机器配置总量超过同步上限，请缩减说明、指令或机器数量后重试";
 
    private MachineManager() {
    }
@@ -187,19 +188,30 @@ public final class MachineManager {
       if (!isFullEditor(player)) {
          sendMessage(player, "你没有权限删除机器分类");
       } else if (categoryId != null && !categoryId.isEmpty()) {
-         int cleared = 0;
-
+         cleanupExpiredLocks();
+         List<MachineConfig.MachineData> targets = new ArrayList<>();
          for (MachineConfig.MachineData machine : MachineConfig.getMachines()) {
             if (machine.category != null && machine.category.equals(categoryId)) {
-               machine.category = "";
-               cleared++;
+               String locked = editingLockedByOtherMessage(machine, player.getGameProfile().name());
+               if (locked != null) {
+                  sendMessage(player, locked + "，本次未清空分类");
+                  return;
+               }
+               if (machine.revision == Long.MAX_VALUE) {
+                  sendMessage(player, "机器「" + machine.name + "」修订号已达上限，本次未清空分类");
+                  return;
+               }
+               targets.add(machine);
             }
          }
-
-         if (cleared > 0) {
+         for (MachineConfig.MachineData machine : targets) {
+            machine.category = "";
+            machine.revision++;
+         }
+         if (!targets.isEmpty()) {
             MachineConfig.save();
             MachineBlockCache.rebuild();
-            sendMessage(player, "已清空分类「" + categoryId + "」下的 " + cleared + " 台机器");
+            sendMessage(player, "已清空分类「" + categoryId + "」下的 " + targets.size() + " 台机器");
          } else {
             sendMessage(player, "分类「" + categoryId + "」下没有机器");
          }
@@ -592,6 +604,11 @@ public final class MachineManager {
                sendMessage(player, "机器配置无效: " + error);
             } else {
                machine.id = uniqueMachineId(machine.id);
+               machine.revision = 1;
+               if (!fitsCandidateSync(machine, false)) {
+                  sendMessage(player, SYNC_BUDGET_ERROR);
+                  return;
+               }
                if (!MachineConfig.addMachine(machine)) {
                   sendMessage(player, "机器 id 已存在: " + machine.id);
                } else {
@@ -629,6 +646,11 @@ public final class MachineManager {
                   MachineMod.LOGGER.info("Machine edit rejected by {}: {}", player.getGameProfile().name(), error);
                   sendMessage(player, "机器配置无效: " + error);
                } else {
+                  machine.revision = existing.revision + 1;
+                  if (!fitsCandidateSync(machine, true)) {
+                     sendMessage(player, SYNC_BUDGET_ERROR);
+                     return;
+                  }
                   MachineConfig.updateMachine(machine);
                   MachineScheduler.invalidate(machine.id);
                   MachineModeChain.invalidate(machine.id);
@@ -686,9 +708,24 @@ public final class MachineManager {
       }
    }
 
+   private static boolean fitsCandidateSync(MachineConfig.MachineData candidate, boolean replacing) {
+      List<MachineConfig.MachineData> machines = new ArrayList<>();
+      for (MachineConfig.MachineData machine : MachineConfig.getMachines()) {
+         if (!replacing || !machine.id.equals(candidate.id)) {
+            machines.add(machine);
+         }
+      }
+      machines.add(candidate);
+      return MachineSyncBudget.fits(machines);
+   }
+
    public static void syncTo(ServerPlayer player) {
       if (ServerPlayNetworking.canSend(player, MachinePayloads.SyncPayload.TYPE)) {
          String json = buildSyncJson(player);
+         if (!MachineSyncBudget.fits(json)) {
+            sendMessage(player, SYNC_BUDGET_ERROR + "；现有配置未同步，请联系管理员");
+            return;
+         }
          MachineMod.LOGGER.debug("Sync machine list to {} ({} bytes)", player.getGameProfile().name(), json.length());
          ServerPlayNetworking.send(player, new MachinePayloads.SyncPayload(json));
       }
@@ -702,7 +739,12 @@ public final class MachineManager {
                if (snapshot == null) {
                   snapshot = buildSyncData();
                }
-               ServerPlayNetworking.send(player, new MachinePayloads.SyncPayload(buildSyncJson(snapshot, player)));
+               String json = buildSyncJson(snapshot, player);
+               if (!MachineSyncBudget.fits(json)) {
+                  sendMessage(player, SYNC_BUDGET_ERROR + "；现有配置未同步，请联系管理员");
+                  continue;
+               }
+               ServerPlayNetworking.send(player, new MachinePayloads.SyncPayload(json));
             }
          }
       }

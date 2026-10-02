@@ -54,6 +54,8 @@ pwsh -NoProfile -File testing/run-system-tests.ps1 -Phases runner-selftest
 
 `testing/run-dedicated-e2e.ps1` 先构建一次产品 JAR 与测试专用 JAR，再根据 Gradle 导出的启动参数启动三个独立 JVM。服务端和 ActorA、ActorB 客户端分别在 `server/`、`client-ActorA/`、`client-ActorB/` 中运行，配置、模组目录、日志与截图分开。服务端使用本轮新建的平坦世界，仅监听 `127.0.0.1` 并由操作系统分配空闲端口；两个客户端通过真实 TCP 连接，权限不同，测试编辑冲突、同步、断线重连等双人流程。
 
+每个测试 JVM 默认最大堆为 1500 MiB，使用主机可用处理器。内存紧张时，独立运行器可指定 `-HeapMegabytes 1024 -Processors 2`；完整运行器对应参数为 `-DedicatedHeapMegabytes 1024 -DedicatedProcessors 2`。`Processors 0` 保留 JVM 的默认处理器检测。实际 JVM 参数和资源预算会保存在本轮证据中，测试内容与通过条件不变。
+
 每个角色保留 `command.json`、`stdout.log`、`stderr.log`、`report.json`、`events.jsonl`、Minecraft 自带日志及客户端截图。`command.json` 记录展开后的 JVM 参数与进程号。Windows Java 的 `@java.args` 文件采用 `GetACP` 返回的真实系统代码页，代码页也写入报告；JVM 标准输出/错误显式使用 UTF-8，并以原始字节保存。某角色退出并给出失败或不完整报告时，运行器会停止剩余实例，仍收集各角色已完成与失败的用例。清理、进程退出与日志排空都有时间上限，清理异常也保留在最终失败报告中。
 
 `events.jsonl` 记录的是**全部 command-gui 自定义 payload 与测试事件**，不是所有原版 Minecraft 网络包的抓包文件。每行包含 UTC、进程内单调时间、连续序号、角色、线程、事件类型及内容。数据包记录包含方向、payload 类型、对端、是否为内存连接及完整 payload；其他事件包括实际 GUI 点击、输入、断言、状态快照、服务器命令执行和阶段开始/完成/失败。

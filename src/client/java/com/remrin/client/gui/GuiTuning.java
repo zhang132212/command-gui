@@ -68,7 +68,18 @@ public final class GuiTuning {
    }
 
    public static int getColor(String key, int fallback) {
-      return getInt(key, fallback);
+      ensureLoaded();
+      Object value = values.get(key);
+      if (!(value instanceof Number number)) {
+         return fallback;
+      }
+      double color = number.doubleValue();
+      if (!Double.isFinite(color) || color != Math.rint(color) || color < Integer.MIN_VALUE || color > 0xFFFFFFFFL) {
+         return fallback;
+      }
+      // Gson reads Object-valued JSON numbers as Double. Preserve unsigned ARGB bits
+      // through long before narrowing, instead of Double.intValue() saturation.
+      return (int)number.longValue();
    }
 
    public static float getFloat(String key, float fallback) {

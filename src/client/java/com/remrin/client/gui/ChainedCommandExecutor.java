@@ -107,7 +107,7 @@ public class ChainedCommandExecutor {
             @Override
             protected void onExecutionComplete() {
                if (hasNext) {
-                  int nextDelay = CommandHelper.isFakePlayerSpawnCommand(command) ? 20 : delay;
+                  int nextDelay = sequenceDelay(command, delay);
                   delayedQueue.add(new DelayedBatch(() -> executeSequence(parent, commands, index + 1, delay), nextDelay));
                }
             }
@@ -119,10 +119,14 @@ public class ChainedCommandExecutor {
       if (mc != null && mc.player != null) {
          CommandHelper.sendCommand(command);
          if (hasNext) {
-            int nextDelay = CommandHelper.isFakePlayerSpawnCommand(command) ? 20 : delay;
+            int nextDelay = sequenceDelay(command, delay);
             delayedQueue.add(new DelayedBatch(() -> executeSequence(parent, commands, index + 1, delay), nextDelay));
          }
       }
+   }
+
+   private static int sequenceDelay(String command, int delay) {
+      return CommandHelper.isFakePlayerSpawnCommand(command) ? Math.max(SPAWN_DELAY_TICKS, delay) : delay;
    }
 
    public static void tickDelayed() {

@@ -39,7 +39,6 @@ public class MachineMod implements ModInitializer {
    public static void subscribeFakeStates(ServerPlayer player, MinecraftServer server) {
       fakeStateSubscribers.add(player.getUUID());
       String snapshot = FakePlayerStateTracker.buildJson(server);
-      lastFakeStatesJson = snapshot;
       ServerPlayNetworking.send(player, new MachinePayloads.FakePlayerStatesPayload(snapshot));
    }
 
@@ -58,6 +57,21 @@ public class MachineMod implements ModInitializer {
 
    public static boolean hasMachineStateSubscribers() {
       return !machineStateSubscribers.isEmpty();
+   }
+
+   private static void broadcastFakeStates(MinecraftServer server) {
+      if (!fakeStateSubscribers.isEmpty()) {
+         String fakeStates = FakePlayerStateTracker.buildJson(server);
+         if (!fakeStates.equals(lastFakeStatesJson)) {
+            lastFakeStatesJson = fakeStates;
+            MachinePayloads.FakePlayerStatesPayload payload = new MachinePayloads.FakePlayerStatesPayload(fakeStates);
+            for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+               if (fakeStateSubscribers.contains(player.getUUID())) {
+                  ServerPlayNetworking.send(player, payload);
+               }
+            }
+         }
+      }
    }
 
    private static void registerPayload(Runnable registration) {
@@ -103,19 +117,7 @@ public class MachineMod implements ModInitializer {
          MachineScheduler.tick(server);
          MachineModeChain.tick(server);
          MachineManager.tickStates(server);
-         if (!fakeStateSubscribers.isEmpty()) {
-            String fakeStates = FakePlayerStateTracker.buildJson(server);
-            if (!fakeStates.equals(lastFakeStatesJson)) {
-               lastFakeStatesJson = fakeStates;
-               MachinePayloads.FakePlayerStatesPayload payload = new MachinePayloads.FakePlayerStatesPayload(fakeStates);
-
-               for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-                  if (fakeStateSubscribers.contains(player.getUUID())) {
-                     ServerPlayNetworking.send(player, payload);
-                  }
-               }
-            }
-         }
+         broadcastFakeStates(server);
       });
       ServerLifecycleEvents.SERVER_STARTED.register((ServerStarted)server -> {
          resetServerState();

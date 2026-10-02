@@ -122,6 +122,10 @@ public final class CommandShortcut {
     }
 
     public static String findConflict(String shortcut, String selfName, String selfOldName, int selfCustomIndex) {
+        return findConflict(shortcut, selfName, CommandConfig.findCommandCategory(selfOldName), selfOldName, selfCustomIndex);
+    }
+
+    public static String findConflict(String shortcut, String selfName, String selfCategoryId, String selfOldName, int selfCustomIndex) {
         String normalized = CommandShortcut.normalize(shortcut);
         List<Integer> keys = CommandShortcut.parse(normalized);
         if (normalized.isEmpty() || keys.isEmpty()) {
@@ -129,7 +133,7 @@ public final class CommandShortcut {
         }
         for (CommandConfig.Category category : CommandConfig.getCategories()) {
             for (Map.Entry<String, CommandConfig.CommandEntry> entry : category.commands.entrySet()) {
-                if (selfOldName != null && entry.getKey().equals(selfOldName)) continue;
+                if (selfCategoryId != null && selfCategoryId.equals(category.id) && selfOldName != null && entry.getKey().equals(selfOldName)) continue;
                 if (!CommandShortcut.shortcutsConflict(shortcut, entry.getValue().shortcut)) continue;
                 return "\u6307\u4ee4\u300c" + entry.getKey() + "\u300d";
             }

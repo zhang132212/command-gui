@@ -7,6 +7,8 @@ param(
     [ValidateRange(60,3600)][int]$TimeoutSeconds=600,
     [switch]$Offline,
     [int]$Seed=132212,
+    [ValidateRange(512,8192)][int]$HeapMegabytes=1500,
+    [ValidateRange(0,64)][int]$Processors=0,
     [string]$OutputRoot
 )
 $ErrorActionPreference='Stop'
@@ -28,6 +30,7 @@ $OutputRoot=[IO.Path]::GetFullPath($OutputRoot)
 if ((Test-Path -LiteralPath $OutputRoot) -and @(Get-ChildItem -LiteralPath $OutputRoot -Force).Count -gt 0) { throw 'OutputRoot must be new or empty' }
 New-Item -ItemType Directory -Path $OutputRoot -Force | Out-Null
 $metadata=[ordered]@{schemaVersion=1;passed=$false;complete=$false;assertions=0;cases=@();seed=$Seed;started=[DateTimeOffset]::Now.ToString('o');java="$javac";processes=@();actors=@{};dependencies=@();cleanupErrors=@();evidenceErrors=@();timedOut=$false}
+$metadata['jvmResources']=@{heapMegabytes=$HeapMegabytes;processors=$Processors}
 foreach ($dependency in $dependencies) { $metadata.dependencies+=@{file=(Split-Path $dependency -Leaf);sha256=(Get-FileHash -LiteralPath $dependency).Hash} }
 $running=[Collections.Generic.List[object]]::new()
 $timer=[Diagnostics.Stopwatch]::StartNew(); $lastProgress=0
@@ -57,9 +60,10 @@ function Check-Time {
 function Quote-JavaArg([string]$Value) { return '"'+$Value.Replace('\','\\').Replace('"','\"')+'"' }
 function Start-Role([string]$Role, $Spec, [int]$Port=0) {
     $dir=Join-Path $OutputRoot $Role
-    $vm=@($Spec.jvmArgs | Where-Object { $_ -notmatch '^-Xm[sx]' -and $_ -notmatch '^-D(file.encoding|system\.)' })
+    $vm=@($Spec.jvmArgs | Where-Object { $_ -notmatch '^-Xm[sx]' -and $_ -notmatch '^-D(file.encoding|system\.)' -and ($Processors -eq 0 -or $_ -notmatch '^-XX:ActiveProcessorCount=') })
     $identity=if ($Role -eq 'server') {'server'} else {$Role.Substring('client-'.Length)}
-    $vm+=@('-Xms256M','-Xmx1500M','-Dfile.encoding=UTF-8','-Dstdout.encoding=UTF-8','-Dstderr.encoding=UTF-8','-Ddevauth.enabled=false',"-Dsystem.outputRoot=$dir","-Dsystem.role=$identity","-Dsystem.seed=$Seed",'-Dsystem.host=127.0.0.1',"-Dsystem.port=$Port")
+    $vm+=@('-Xms256M',"-Xmx${HeapMegabytes}M",'-Dfile.encoding=UTF-8','-Dstdout.encoding=UTF-8','-Dstderr.encoding=UTF-8','-Ddevauth.enabled=false',"-Dsystem.outputRoot=$dir","-Dsystem.role=$identity","-Dsystem.seed=$Seed",'-Dsystem.host=127.0.0.1',"-Dsystem.port=$Port")
+    if ($Processors -gt 0) { $vm+="-XX:ActiveProcessorCount=$Processors" }
     $argv=@($vm)+@('-classpath',$Spec.classpath,$Spec.mainClass)+@($Spec.args)
     if ($Role -ne 'server') { $argv+=@('--username',$identity) } else { $argv+='nogui' }
     $argFile=Join-Path $dir 'java.args'

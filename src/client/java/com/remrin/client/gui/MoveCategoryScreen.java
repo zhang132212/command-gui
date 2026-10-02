@@ -15,14 +15,21 @@ public class MoveCategoryScreen extends BaseParentedScreen<Screen> {
    private static final int BTN_HEIGHT = 20;
    private static final int BTN_GAP = 4;
    private final String commandName;
+   private final String sourceCategoryId;
    private final Consumer<String> onMoved;
+   private String errorMessage = "";
 
    public MoveCategoryScreen(CommandGUIScreen parent, String commandName) {
       this(parent, commandName, category -> parent.refresh());
    }
 
    public MoveCategoryScreen(Screen parent, String commandName, Consumer<String> onMoved) {
+      this(parent, CommandConfig.findCommandCategory(commandName), commandName, onMoved);
+   }
+
+   public MoveCategoryScreen(Screen parent, String sourceCategoryId, String commandName, Consumer<String> onMoved) {
       super(Component.translatable("screen.command-gui.move_category_title"), parent);
+      this.sourceCategoryId = sourceCategoryId;
       this.commandName = commandName;
       this.onMoved = onMoved;
    }
@@ -30,7 +37,7 @@ public class MoveCategoryScreen extends BaseParentedScreen<Screen> {
    protected void init() {
       super.init();
       List<CommandConfig.Category> categories = CommandConfig.getCategories();
-      String currentCategoryId = CommandConfig.findCommandCategory(this.commandName);
+      String currentCategoryId = this.sourceCategoryId;
       int availableWidth = this.width - 20;
       int cols = Math.max(1, (availableWidth + 4) / 104);
       int totalRowWidth = cols * 100 + (cols - 1) * 4;
@@ -46,7 +53,11 @@ public class MoveCategoryScreen extends BaseParentedScreen<Screen> {
          String targetCategoryId = cat.id;
          boolean isCurrent = cat.id.equals(currentCategoryId);
          Button catBtn = GuiButton.themed(btnText, btn -> {
-            CommandConfig.moveCommand(this.commandName, targetCategoryId);
+            String error = CommandConfig.moveCommand(this.sourceCategoryId, this.commandName, targetCategoryId);
+            if (error != null) {
+               this.errorMessage = error;
+               return;
+            }
             if (this.onMoved != null) {
                this.onMoved.accept(targetCategoryId);
             }
@@ -72,6 +83,10 @@ public class MoveCategoryScreen extends BaseParentedScreen<Screen> {
    public void extractRenderState(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY, float partialTick) {
       super.extractRenderState(guiGraphics, mouseX, mouseY, partialTick);
       guiGraphics.centeredText(this.font, this.title, this.width / 2, 12, -1);
+      if (!this.errorMessage.isEmpty()) {
+         guiGraphics.centeredText(this.font, this.font.plainSubstrByWidth(this.errorMessage, this.width - 20),
+            this.width / 2, this.height - 12, GuiTheme.danger());
+      }
    }
 
    public boolean keyPressed(KeyEvent keyEvent) {

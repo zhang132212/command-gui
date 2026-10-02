@@ -1,5 +1,6 @@
 package com.remrin.client.gui;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -11,26 +12,41 @@ import net.minecraft.network.chat.Component;
 public class BotSelectScreen extends BaseParentedScreen<Screen> {
    private static final int FIELD_WIDTH = 200;
    private static final int ROW_HEIGHT = 20;
-   private final List<String> botNames;
+   private final List<String> initialBotNames;
+   private List<String> botNames;
+   private final FakePlayerSelection fakePlayerSelection = new FakePlayerSelection();
+   private final boolean liveSnapshot;
    private final StepCommandHost host;
    private final Consumer<String> onBotSelected;
 
    public BotSelectScreen(StepCommandHost host, List<String> botNames) {
+      this(host, botNames, false);
+   }
+
+   public BotSelectScreen(StepCommandHost host, List<String> botNames, boolean liveSnapshot) {
       super(Component.translatable("screen.command-gui.machine.bot_select_title"), (Screen)host);
       this.host = host;
       this.onBotSelected = null;
-      this.botNames = botNames;
+      this.liveSnapshot = liveSnapshot;
+      this.initialBotNames = new ArrayList<>(botNames);
+      this.botNames = new ArrayList<>(botNames);
    }
 
    public BotSelectScreen(Screen parent, List<String> botNames, Consumer<String> onBotSelected) {
       super(Component.translatable("screen.command-gui.machine.bot_select_title"), parent);
       this.host = null;
       this.onBotSelected = onBotSelected;
-      this.botNames = botNames;
+      this.liveSnapshot = true;
+      this.initialBotNames = new ArrayList<>(botNames);
+      this.botNames = new ArrayList<>(botNames);
    }
 
    protected void init() {
       super.init();
+      if (this.liveSnapshot) {
+         this.fakePlayerSelection.poll();
+         this.botNames = FakePlayerSelection.botNames(this.initialBotNames);
+      }
       int fieldX = (this.width - 200) / 2;
       int y = 30;
       int maxY = this.height - 30;
@@ -55,6 +71,20 @@ public class BotSelectScreen extends BaseParentedScreen<Screen> {
             .bounds(fieldX, barY, 80, 18)
             .build()
       );
+   }
+
+   @Override
+   public void tick() {
+      super.tick();
+      if (this.liveSnapshot && this.fakePlayerSelection.poll()) {
+         this.rebuildWidgets();
+      }
+   }
+
+   @Override
+   public void removed() {
+      this.fakePlayerSelection.close();
+      super.removed();
    }
 
    public boolean keyPressed(KeyEvent keyEvent) {
